@@ -690,6 +690,7 @@ ARE_SPECTACLE_URL = os.environ.get("ARE_SPECTACLE_URL", "http://127.0.0.1:8010")
 REFLECTION_VAULT = "/home/LuciusPrime/claire/data/reflection_capsules.jsonl"
 SESSION_MEMORY = "/home/LuciusPrime/claire/data/session_memory.jsonl"
 DURABLE_MEMORY = "/home/LuciusPrime/claire/data/durable_memory.jsonl"
+TMF_SNAPSHOTS = "/home/LuciusPrime/claire/data/conversation_tmf.jsonl"
 UPLOAD_DIR = "/home/LuciusPrime/claire/data/uploads"
 TRACE_LOG = "/home/LuciusPrime/claire/data/traces.jsonl"
 FEEDBACK_LOG = "/home/LuciusPrime/claire/data/feedback.jsonl"
@@ -9239,6 +9240,62 @@ def conversationalize_self_reference(text: str) -> str:
     return clean
 
 
+def _tmf_entropy_score(query: str, reply: str) -> float:
+    text = _clean_for_match(str(query or "") + " " + str(reply or ""))
+    if not text:
+        return 0.0
+    words = text.split()
+    unique_ratio = len(set(words)) / max(1, len(words))
+    length_pressure = min(1.0, len(words) / 220)
+    repetition_pressure = 1.0 - unique_ratio
+    return round(min(1.0, (length_pressure * 0.6) + (repetition_pressure * 0.4)), 3)
+
+
+def _tmf_detect_preferences(query: str) -> list[str]:
+    cleaned = _clean_for_match(query)
+    preferences = []
+    rules = [
+        ("voice_visualizer_locked", ["do not change the voice visualizer", "dont change the voice visualizer", "no changing my voice visualizer", "leave the voice visualizer"]),
+        ("natural_first_person_voice", ["talk more like", "speak naturally", "conversational skills", "dont say claire thinks", "do not say claire thinks"]),
+        ("incremental_changes", ["increments", "incremental", "one step at a time", "small steps"]),
+        ("business_console_goal", ["own business", "business console", "help me find these people", "sales guy", "technical partner"]),
+    ]
+    for label, markers in rules:
+        if any(marker in cleaned for marker in markers):
+            preferences.append(label)
+    return preferences
+
+
+def conversation_backloop(q: str, source: str, reply: str, trace_id: str) -> None:
+    try:
+        if source in {"DEMO", "DEMONSTRATION", "DEV"}:
+            return
+        preferences = _tmf_detect_preferences(q)
+        for preference in preferences:
+            remember_durable_memory("preference", f"conversation_tmf:{preference}", "TMF")
+        cleaned_reply = _clean_for_match(reply)
+        checks = {
+            "answered": bool(str(reply or "").strip()),
+            "third_person_self_reference": any(marker in cleaned_reply for marker in ["claire thinks", "claire says", "claire s read"]),
+            "over_self_focus": cleaned_reply.count("claire") > 3,
+        }
+        snapshot = {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "trace_id": trace_id,
+            "source": source,
+            "query": str(q or "")[:500],
+            "reply_preview": str(reply or "")[:500],
+            "entropy": _tmf_entropy_score(q, reply),
+            "preferences_detected": preferences,
+            "checks": checks,
+        }
+        os.makedirs(os.path.dirname(TMF_SNAPSHOTS), exist_ok=True)
+        with open(TMF_SNAPSHOTS, "a", encoding="utf-8") as f:
+            f.write(json.dumps(snapshot, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print("conversation TMF backloop error:", e)
+
+
 VISIBLE_SCAFFOLD_PATTERNS = [
     r"(?im)^\s*SOURCE:\s*.*(?:\n+)?",
     r"(?im)^\s*Direct answer:\s*",
@@ -9280,6 +9337,7 @@ def finalize_reply(q: str, source: str, reply: str):
     trace_id = persist_conversation_trace(q, source, reply)
     remember_turn(q, source, reply)
     maybe_promote_memory(q, source, reply)
+    conversation_backloop(q, source, reply, trace_id)
     return source, reply, trace_id
 
 
