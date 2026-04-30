@@ -2295,7 +2295,7 @@ Trace ID: NONE</div>
 </div>
 
 <script>
-const CLIENT_BUILD = "claire-gui-cache-guard-20260426-001";
+const CLIENT_BUILD = "claire-gui-cache-guard-20260430-mic-001";
 const LAST_CLIENT_BUILD = localStorage.getItem("claireClientBuild");
 if (LAST_CLIENT_BUILD !== CLIENT_BUILD) {
     localStorage.setItem("claireClientBuild", CLIENT_BUILD);
@@ -2599,7 +2599,7 @@ function ensureRecognition() {
         recognition = null;
         updateMicButton();
         setVoiceState("IDLE");
-        setVoiceMessage("MIC ERROR: " + (event.error || "blocked"));
+        setVoiceMessage("MIC ERROR: " + (event.error || "blocked") + ". Check browser mic permission.");
         setMicWorkflowDebug("mic_error", "voice_input", "NONE");
         idleWave();
     };
@@ -2637,8 +2637,9 @@ async function requestDefaultMicPermission() {
 }
 
 async function toggleMic() {
+    setVoiceMessage("MIC OPENING...");
     if (!micSecureContext()) {
-        setVoiceMessage("MIC NEEDS HTTPS: open https://clairesystems.ai");
+        setVoiceMessage("MIC NEEDS HTTPS: open Claire from the HTTPS site, not the raw IP address");
         setMicWorkflowDebug("mic_needs_https", "voice_input", "NONE");
         return;
     }
@@ -2657,8 +2658,6 @@ async function toggleMic() {
                 currentAudio.pause();
                 currentAudio = null;
             }
-            const allowed = await requestDefaultMicPermission();
-            if (!allowed) return;
             setMicWorkflowDebug("mic_starting", "voice_input", "PENDING");
             micFinalHandled = false;
             rec.start();
@@ -2668,7 +2667,7 @@ async function toggleMic() {
         micListening = false;
         updateMicButton();
         setVoiceState("IDLE");
-        setVoiceMessage("MIC WAITING: try again");
+        setVoiceMessage("MIC WAITING: try again. " + (err && err.message ? err.message : ""));
         setMicWorkflowDebug("mic_waiting", "voice_input", "NONE");
     }
 }
