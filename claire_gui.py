@@ -694,6 +694,7 @@ TMF_SNAPSHOTS = "/home/LuciusPrime/claire/data/conversation_tmf.jsonl"
 UPLOAD_DIR = "/home/LuciusPrime/claire/data/uploads"
 TRACE_LOG = "/home/LuciusPrime/claire/data/traces.jsonl"
 FEEDBACK_LOG = "/home/LuciusPrime/claire/data/feedback.jsonl"
+OFFICE_TASK_LOG = "/home/LuciusPrime/claire/data/office_tasks.jsonl"
 DEMO_REPORT_DIR = "/home/LuciusPrime/claire/data/demo_reports"
 CRYPTO_TRACE_LOG = "/home/LuciusPrime/claire/data/crypto_paper_trades.jsonl"
 KRAKEN_HISTORY_DIR = "/home/LuciusPrime/claire/data/kraken_history"
@@ -9296,6 +9297,146 @@ def conversation_backloop(q: str, source: str, reply: str, trace_id: str) -> Non
         print("conversation TMF backloop error:", e)
 
 
+def _office_now() -> str:
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def _office_task_id() -> str:
+    return f"office_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+
+
+def _office_read_tasks(limit: int = 80) -> list[dict]:
+    try:
+        if not os.path.exists(OFFICE_TASK_LOG):
+            return []
+        with open(OFFICE_TASK_LOG, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()[-limit:]
+        tasks = []
+        for line in lines:
+            try:
+                tasks.append(json.loads(line))
+            except Exception:
+                continue
+        return tasks
+    except Exception as e:
+        print("office task read error:", e)
+        return []
+
+
+def _office_append_task(task: dict) -> None:
+    os.makedirs(os.path.dirname(OFFICE_TASK_LOG), exist_ok=True)
+    with open(OFFICE_TASK_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(task, ensure_ascii=False) + "\n")
+
+
+def _office_find_task(task_id: str) -> dict | None:
+    for task in reversed(_office_read_tasks(500)):
+        if str(task.get("id") or "") == str(task_id):
+            return task
+    return None
+
+
+def _office_clean_payload(data: dict) -> dict:
+    if not isinstance(data, dict):
+        return {}
+    allowed = {
+        "platform",
+        "audience",
+        "goal",
+        "tone",
+        "proof_points",
+        "cta",
+        "constraints",
+        "offer",
+    }
+    clean = {}
+    for key in allowed:
+        value = str(data.get(key) or "").strip()
+        if value:
+            clean[key] = value[:1200]
+    return clean
+
+
+def _office_ad_defaults(payload: dict) -> dict:
+    return {
+        "platform": payload.get("platform") or "LinkedIn",
+        "audience": payload.get("audience") or "technical partner, commission sales partner, or fintech pilot buyer",
+        "goal": payload.get("goal") or "find partners who can help turn Claire into paid pilots",
+        "tone": payload.get("tone") or "serious, founder-led, direct, no hype",
+        "proof_points": payload.get("proof_points") or "live Azure prototype, governed memory, trace/replay, sub-millisecond recall lane, draft-only business operations",
+        "cta": payload.get("cta") or "DM or email Steve@clairesystems.ai",
+        "constraints": payload.get("constraints") or "do not overclaim revenue, do not imply autonomous posting, keep human approval required",
+        "offer": payload.get("offer") or "governed AI memory infrastructure for controlled recall, policy validation, traceable reasoning, and replayable decision support",
+    }
+
+
+def build_office_ad_draft(payload: dict) -> dict:
+    p = _office_ad_defaults(_office_clean_payload(payload))
+    audience = p["audience"]
+    audience_phrase = audience if audience.lower().startswith(("a ", "an ", "the ")) else f"a {audience}"
+    proof_points = p["proof_points"]
+    cta = p["cta"]
+    platform = p["platform"]
+
+    headline = f"{audience.title()} Needed for Claire Systems"
+    short_post = (
+        f"Claire Systems has a live Azure prototype for {p['offer']}.\n\n"
+        f"I am looking for {audience_phrase} to help move this from working prototype to paid pilots.\n\n"
+        f"Proof points: {proof_points}.\n\n"
+        f"This is founder-led and practical: help harden, package, sell, or pilot the system. {cta}."
+    )
+    long_post = (
+        f"I am building Claire Systems: governed AI memory infrastructure for teams that need more than a chatbot.\n\n"
+        f"The working prototype separates recall, policy validation, trace/replay, and answer generation. The goal is simple: make AI decisions easier to inspect, govern, and trust.\n\n"
+        f"Current proof points:\n"
+        f"- {proof_points.replace(', ', chr(10) + '- ')}\n\n"
+        f"I am looking for {audience_phrase}. The immediate goal is to {p['goal']}.\n\n"
+        f"Tone of the work: {p['tone']}. This is not a hype post or a vague idea. It is a live prototype that needs the right technical and business hands around it.\n\n"
+        f"{cta}."
+    )
+    risk_notes = [
+        "Keep revenue claims framed as modeled value, not guaranteed revenue.",
+        "Do not say Claire posts or sends messages without human approval.",
+        "Keep defense-adjacent examples in controlled evaluation and decision-support framing.",
+        "Avoid claiming hallucinations are impossible; claim traceability and governance controls.",
+    ]
+    return {
+        "platform": platform,
+        "headline": headline,
+        "short_post": short_post,
+        "long_post": long_post,
+        "risk_notes": risk_notes,
+        "approval_status": "needs_approval",
+        "human_approval_required": True,
+    }
+
+
+def create_office_ad_task(payload: dict) -> dict:
+    task_id = _office_task_id()
+    trace_id = new_trace_id(None)
+    now = _office_now()
+    task = {
+        "id": task_id,
+        "trace_id": trace_id,
+        "created_ts": now,
+        "updated_ts": now,
+        "type": "ad_draft",
+        "source_system": "office_claire",
+        "status": "drafted",
+        "requires_human_approval": True,
+        "approved_by": None,
+        "payload": _office_ad_defaults(_office_clean_payload(payload)),
+        "result": build_office_ad_draft(payload),
+        "policy_validation": {
+            "status": "allowed_with_approval",
+            "summary": "Drafting ad copy is allowed. Publishing, sending, or paid placement requires human approval.",
+            "rules_triggered": ["human_approval_required", "no_autonomous_posting"],
+        },
+    }
+    _office_append_task(task)
+    return task
+
+
 VISIBLE_SCAFFOLD_PATTERNS = [
     r"(?im)^\s*SOURCE:\s*.*(?:\n+)?",
     r"(?im)^\s*Direct answer:\s*",
@@ -10548,6 +10689,37 @@ async def upload_folder(files: list[UploadFile] | None = File(None)):
         "total_chunks": total_chunks,
         "files": [item["filename"] for item in results[:20]],
     })
+
+
+@app.post("/office/ad-draft")
+async def office_ad_draft(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    task = create_office_ad_task(data if isinstance(data, dict) else {})
+    return JSONResponse(task)
+
+
+@app.get("/office/tasks")
+def office_tasks(limit: int = Query(40, ge=1, le=200)):
+    tasks = list(reversed(_office_read_tasks(limit)))
+    return JSONResponse({
+        "office": "Office Claire",
+        "status": "draft_only",
+        "human_approval_required": True,
+        "tasks": tasks,
+    })
+
+
+@app.get("/office/task/{task_id}")
+def office_task(task_id: str):
+    task = _office_find_task(task_id)
+    if not task:
+        return JSONResponse({"status": "not_found", "task_id": task_id}, status_code=404)
+    return JSONResponse(task)
+
+
 @app.get("/ask", response_class=HTMLResponse)
 def ask(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None)):
     if demo_bool(demo) and not is_demo_key_query(q):
