@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    :root { --bg: #05070a; --panel: #0d1117; --red: #ef5350; --cyan: #00bcd4; --border: #30363d; }
+    body { background: var(--bg); color: #e6edf3; font-family: monospace; margin: 0; height: 100vh; display: flex; flex-direction: column; }
+    header { height: 50px; border-bottom: 2px solid var(--red); display: flex; align-items: center; justify-content: center; font-weight: bold; background: var(--panel); letter-spacing: 2px; }
+    .main { flex: 1; display: flex; flex-direction: column; padding: 15px; gap: 12px; overflow: hidden; }
+    .viz { height: 80px; border: 2px solid var(--red); background: #000; border-radius: 4px; box-shadow: 0 0 15px rgba(239, 83, 80, 0.2); }
+    .res { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 15px; overflow-y: auto; border-left: 4px solid var(--red); font-size: 15px; }
+    .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .btn { padding: 18px; border-radius: 4px; border: 1px solid var(--border); font-weight: bold; cursor: pointer; background: #161b22; text-transform: uppercase; }
+    .input-area { 
+      padding: 20px; 
+      background: var(--panel); 
+      border-top: 1px solid var(--border); 
+      display: flex; 
+      gap: 10px;
+      padding-bottom: 45px; /* The Quarter-Inch Lift */
+    }
+    input { flex: 1; background: #000; border: 1px solid var(--border); color: #fff; padding: 15px; border-radius: 4px; font-size: 16px; box-shadow: inset 0 0 5px rgba(0,0,0,0.5); }
+  </style>
+</head>
+<body>
+  <header>CLAIRE <span style="color:var(--red); margin-left:10px;">SOVEREIGN</span></header>
+  <div class="main">
+    <div class="viz">
+      <svg viewBox="0 0 400 80" preserveAspectRatio="none" style="width:100%; height:100%;"><path id="wave" d="" fill="none" stroke="var(--red)" stroke-width="3" /></svg>
+    </div>
+    <div class="res" id="display">READY FOR COMMAND.</div>
+    <div class="btns">
+      <button class="btn" style="color:var(--cyan); border-color:var(--cyan)" onclick="cmd('INTEL')">INTEL</button>
+      <button class="btn" style="color:var(--cyan); border-color:var(--cyan)" onclick="cmd('ATTEST')">ATTEST</button>
+      <button class="btn" style="color:var(--red); border-color:var(--red)" onclick="cmd('STRIKE')">STRIKE</button>
+      <button class="btn" style="color:var(--red); border-color:var(--red)" onclick="cmd('PURGE')">PURGE</button>
+    </div>
+  </div>
+  <div class="input-area">
+    <input type="text" id="inp" placeholder="Send Command...">
+    <button onclick="cmd('INTEL')" style="background:var(--cyan); border:none; padding: 0 20px; border-radius:4px; font-weight:bold; color:#000;">SEND</button>
+  </div>
+  <script>
+    const v = document.getElementById('wave');
+    function a() {
+      let d = "M 0 40 ";
+      for(let i=0; i<=400; i+=10) d += `L ${i} ${40 + Math.random()*30*Math.sin(i*0.05 + Date.now()*0.01)} `;
+      v.setAttribute('d', d);
+      requestAnimationFrame(a);
+    }
+    a();
+    async function cmd(t) {
+      const q = document.getElementById('inp').value;
+      document.getElementById('display').innerHTML = `<span style="color:var(--cyan)">[RUNNING ${t}]</span>`;
+      const fd = new FormData();
+      fd.append('action_type', t); fd.append('query', q);
+      try {
+        const r = await fetch('/action', { method: 'POST', body: fd });
+        const d = await r.json();
+        document.getElementById('display').innerHTML = `<b style="color:var(--red)">> ${t}:</b><br>${d.reply}`;
+      } catch(e) { document.getElementById('display').innerHTML = "ERROR: LINK LOST"; }
+    }
+  </script>
+</body>
+</html>

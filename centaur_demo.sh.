@@ -1,0 +1,21 @@
+#!/bin/bash
+# EQUUS CENTAUR: LEAN DEMO BOOTSTRAP
+export DATA_DIR="/home/LuciusPrime/claire/data"
+export LOG_DIR="/home/LuciusPrime/claire/logs"
+
+mkdir -p $DATA_DIR
+mkdir -p $LOG_DIR
+
+echo "--- EQUUS CENTAUR: LEAN BOOTSTRAP ---"
+echo "[1/2] Launching Rider B (Sentinel) on Port 8001..."
+# This process handles the sub-8ms truth-verification
+nohup python3 ~/claire/apex/apex_server.py --role sentinel --port 8001 > $LOG_DIR/sentinel.log 2>&1 &
+
+echo "[2/2] Launching Rider A (Pilot) on Port 8000..."
+# This process provides the UI and handles the mission
+nohup python3 ~/claire/apex/apex_server.py --role pilot --port 8000 > $LOG_DIR/pilot.log 2>&1 &
+
+echo "--------------------------------------"
+echo "DEMO MODE: ACTIVE (256GB LOCAL CACHE)"
+echo "--------------------------------------"
+echo "Rider A Command Center: http://$(curl -s ifconfig.me):8000"

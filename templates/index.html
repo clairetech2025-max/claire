@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CLAIRE | Sovereign Interface</title>
+    <style>
+        body { background: #0a0a0a; color: #d4af37; font-family: 'Courier New', monospace; display: flex; flex-direction: column; height: 100vh; margin: 0; overflow: hidden; }
+        #terminal { flex: 1; padding: 20px; overflow-y: auto; border-bottom: 1px solid #333; background: rgba(0,0,0,0.9); }
+        #input-area { padding: 20px; background: #111; display: flex; }
+        input { background: transparent; border: none; color: #d4af37; font-family: inherit; font-size: 1.2rem; flex: 1; outline: none; }
+        .line { margin-bottom: 10px; line-height: 1.4; }
+        .system { color: #555; }
+        .gold-glow { text-shadow: 0 0 10px #d4af37; color: #fff; }
+        .pulse { animation: pulse-gold 2s infinite; }
+        @keyframes pulse-gold { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div id="terminal">
+        <div class="line system"> [SYSTEM_READY] ... Listening on Port 5000</div>
+        <div class="line system"> [VAULT_STATUS] ... ARMED</div>
+        <div class="line">Awaiting Sovereign Input_</div>
+    </div>
+    <div id="input-area">
+        <span style="margin-right:10px;">></span>
+        <input type="text" id="user-input" autofocus autocomplete="off">
+    </div>
+
+    <script>
+        const input = document.getElementById('user-input');
+        const terminal = document.getElementById('terminal');
+
+        input.addEventListener('keypress', async (e) => {
+            if (e.key === 'Enter') {
+                const msg = input.value;
+                input.value = '';
+                appendLine(`> ${msg}`);
+
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: msg})
+                });
+                const data = await response.json();
+                
+                if (data.response.includes("Lucius_Prime")) {
+                    appendLine(data.response, "gold-glow pulse");
+                    document.body.style.boxShadow = "inset 0 0 100px #d4af37";
+                } else {
+                    appendLine(data.response);
+                }
+            }
+        });
+
+        function appendLine(text, className = "") {
+            const div = document.createElement('div');
+            div.className = `line ${className}`;
+            div.textContent = text;
+            terminal.appendChild(div);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    </script>
+</body>
+</html>

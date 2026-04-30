@@ -1,0 +1,718 @@
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+import requests
+import subprocess
+import os
+import html
+import requests
+
+
+def recall_memory(query):
+    try:
+        r = requests.post(
+            "http://127.0.0.1:8002/query", json={"query": query, "top_k": 5}, timeout=5
+        )
+        if r.status_code == 200:
+            data = r.json()
+            results = data.get("results", [])
+            return "\n".join([r.get("text", "") for r in results])
+    except Exception as e:
+        print("ARE recall error:", e)
+
+    return ""
+
+
+app = FastAPI()
+
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+except Exception:
+    pass
+
+ARE_URL = "http://127.0.0.1:8002"
+LLM_URL = "http://127.0.0.1:8081/v1/chat/completions"
+
+HTML = r"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLAIRE</title>
+<style>
+:root {
+    --bg: #02040a;
+    --panel: rgba(4, 16, 30, 0.92);
+    --panel-2: rgba(2, 10, 20, 0.94);
+    --line: #13d8ff;
+    --line-soft: rgba(19, 216, 255, 0.30);
+    --text: #d9f6ff;
+    --muted: #7fbccc;
+    --good: #6aff9c;
+    --warn: #ffd35a;
+    --bad: #ff5d7d;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background:
+        radial-gradient(circle at center, rgba(0, 120, 180, 0.15), transparent 35%),
+        linear-gradient(180deg, #02040a 0%, #010307 100%);
+    color: var(--text);
+    font-family: "Segoe UI", Tahoma, sans-serif;
+    min-height: 100%;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background:
+        linear-gradient(rgba(19,216,255,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(19,216,255,0.04) 1px, transparent 1px);
+    background-size: 28px 28px;
+    pointer-events: none;
+    opacity: 0.35;
+}
+
+.topbar {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line-soft);
+    background: linear-gradient(180deg, rgba(5,20,35,.95), rgba(2,8,18,.92));
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.brand-box {
+    width: 12px;
+    height: 12px;
+    background: var(--line);
+    border-radius: 2px;
+    box-shadow: 0 0 16px rgba(19,216,255,.9);
+}
+
+.brand-text {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 2px;
+}
+
+.subtitle {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 2px;
+    letter-spacing: 1px;
+}
+
+.top-card {
+    border: 1px solid var(--line-soft);
+    background: rgba(3, 12, 22, 0.85);
+    padding: 10px 14px;
+    min-height: 58px;
+}
+
+.top-label {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+}
+
+.top-value {
+    font-size: 14px;
+    color: var(--text);
+}
+
+.status-strip {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.status-pill {
+    border: 1px solid var(--line-soft);
+    background: rgba(0,0,0,.35);
+    padding: 7px 11px;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+}
+
+.shell {
+    display: grid;
+    grid-template-columns: 300px 1fr 300px;
+    gap: 14px;
+    padding: 14px;
+    min-height: calc(100vh - 90px);
+}
+
+.column {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.panel {
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--line-soft);
+    padding: 14px;
+}
+
+.panel-title {
+    font-size: 13px;
+    color: var(--line);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 12px;
+    font-weight: 700;
+}
+
+.control-grid {
+    display: grid;
+    gap: 10px;
+}
+
+button.action-btn, .send-btn {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid rgba(19,216,255,0.45);
+    background: linear-gradient(180deg, rgba(9,43,66,.95), rgba(5,22,36,.95));
+    color: var(--text);
+    font-weight: 700;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.input-panel form {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+}
+
+.input-panel input {
+    width: 100%;
+    padding: 16px 18px;
+    border: 1px solid rgba(19,216,255,0.25);
+    background: rgba(1, 7, 14, 0.88);
+    color: var(--text);
+    font-size: 16px;
+    outline: none;
+}
+
+.hero {
+    min-height: 92px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.hero h1 {
+    margin: 0;
+    font-size: 34px;
+    letter-spacing: 2px;
+}
+
+.hero p {
+    margin: 6px 0 0 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.logo-wrap img {
+    width: 110px;
+    max-width: 100%;
+    filter: drop-shadow(0 0 10px rgba(19,216,255,.35));
+}
+
+.response-screen, .log-box, .monitor-box, .wave-wrap {
+    border: 1px solid rgba(19,216,255,0.18);
+    background: rgba(0,0,0,.22);
+}
+
+.response-screen {
+    min-height: 280px;
+    padding: 18px;
+    white-space: pre-wrap;
+    line-height: 1.55;
+    font-size: 16px;
+}
+
+.log-box, .monitor-box {
+    padding: 12px;
+    font-size: 13px;
+    white-space: pre-wrap;
+}
+
+.monitor-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.monitor-label {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    letter-spacing: 1px;
+}
+
+.monitor-value {
+    font-size: 15px;
+    color: var(--text);
+    font-weight: 600;
+}
+
+.voice-status {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.wave-wrap {
+    height: 70px;
+    display: flex;
+    align-items: end;
+    gap: 4px;
+    padding: 10px 4px 4px 4px;
+}
+
+.bar {
+    flex: 1;
+    min-width: 4px;
+    height: 14px;
+    background: linear-gradient(180deg, #6bf3ff, #0aa8d8);
+    transition: height 0.12s ease;
+}
+
+.small-list {
+    display: grid;
+    gap: 8px;
+}
+
+.small-item {
+    border: 1px solid rgba(19,216,255,0.18);
+    background: rgba(0,0,0,.22);
+    padding: 10px;
+    font-size: 13px;
+}
+
+.good { color: var(--good); }
+.warn { color: var(--warn); }
+.bad { color: var(--bad); }
+
+@media (max-width: 1300px) {
+    .shell { grid-template-columns: 1fr; }
+    .topbar { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="topbar">
+    <div class="brand">
+        <div class="brand-box"></div>
+        <div>
+            <div class="brand-text">CLAIRE</div>
+            <div class="subtitle">EX TENEBRIS COGNITIO</div>
+        </div>
+    </div>
+    <div class="top-card">
+        <div class="top-label">System Mode</div>
+        <div class="top-value">Memory-First Recovery Runtime</div>
+    </div>
+    <div class="top-card">
+        <div class="top-label">Operator</div>
+        <div class="top-value">LuciusPrime</div>
+    </div>
+    <div class="status-strip">
+        <div class="status-pill">GUI: 8000</div>
+        <div class="status-pill">ARE: 8001</div>
+        <div class="status-pill">LLM: 8081</div>
+    </div>
+</div>
+
+<div class="shell">
+    <div class="column">
+        <div class="panel">
+            <div class="panel-title">Core Controls</div>
+            <div class="control-grid">
+                <button class="action-btn" onclick="runAction('start_llm')">Start LLM</button>
+                <button class="action-btn" onclick="runAction('stop_llm')">Stop LLM</button>
+                <button class="action-btn" onclick="runAction('restart_llm')">Restart LLM</button>
+                <button class="action-btn" onclick="checkStatus()">Refresh Status</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Runtime Modules</div>
+            <div class="small-list">
+                <div class="small-item">ARE Memory Spine <span id="areModule">STANDBY</span></div>
+                <div class="small-item">LLM Decision Layer <span id="llmModule">STANDBY</span></div>
+                <div class="small-item">Sentinel Guard <span class="warn">NEXT</span></div>
+                <div class="small-item">Ledger / Veritas <span class="warn">NEXT</span></div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Event Trace</div>
+            <div class="log-box" id="leftLog">Claire recovery runtime initialized.</div>
+        </div>
+    </div>
+
+    <div class="column">
+        <div class="panel hero">
+            <div>
+                <h1>CLAIRE COMMAND CENTER</h1>
+                <p>ARE recall first. LLM fallback second.</p>
+            </div>
+            <div class="logo-wrap">
+                <img src="/static/logo.png" alt="Claire Logo" onerror="this.style.display='none';">
+            </div>
+        </div>
+
+        <div class="panel input-panel">
+            <div class="panel-title">Operator Query</div>
+            <form action="/ask" method="get" onsubmit="startWave()">
+                <input name="q" placeholder="Speak to Claire..." autocomplete="off" />
+                <button class="send-btn" type="submit">Send</button>
+            </form>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Primary Workspace</div>
+            <div class="response-screen">Claire online. Awaiting query.</div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Voice Visualization</div>
+            <div class="voice-status">
+                <span>Speaker State: <strong id="voiceState">IDLE</strong></span>
+                <span>Telemetry armed</span>
+            </div>
+            <div class="wave-wrap" id="waveWrap"></div>
+        </div>
+    </div>
+
+    <div class="column">
+        <div class="panel">
+            <div class="panel-title">Live Monitors</div>
+            <div class="monitor-grid">
+                <div class="monitor-box">
+                    <div class="monitor-label">ARE</div>
+                    <div class="monitor-value" id="areStatus">UNKNOWN</div>
+                </div>
+                <div class="monitor-box">
+                    <div class="monitor-label">LLM</div>
+                    <div class="monitor-value" id="llmStatus">UNKNOWN</div>
+                </div>
+                <div class="monitor-box">
+                    <div class="monitor-label">Recall Mode</div>
+                    <div class="monitor-value">MEMORY-FIRST</div>
+                </div>
+                <div class="monitor-box">
+                    <div class="monitor-label">Build State</div>
+                    <div class="monitor-value">RECOVERY</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Notes</div>
+            <div class="log-box">Current target: GUI online, ARE in loop, LLM fallback working.</div>
+        </div>
+    </div>
+</div>
+
+<script>
+let waveBars = [];
+let waveTimer = null;
+
+function initWave() {
+    const wrap = document.getElementById("waveWrap");
+    wrap.innerHTML = "";
+    waveBars = [];
+    for (let i = 0; i < 56; i++) {
+        const bar = document.createElement("div");
+        bar.className = "bar";
+        bar.style.height = (10 + Math.random() * 12) + "px";
+        wrap.appendChild(bar);
+        waveBars.push(bar);
+    }
+}
+initWave();
+
+function idleWave() {
+    waveBars.forEach((bar, i) => {
+        const h = 8 + Math.sin((Date.now() / 260) + i / 4) * 4 + Math.random() * 3;
+        bar.style.height = Math.max(6, h) + "px";
+    });
+}
+
+function activeWave() {
+    waveBars.forEach((bar, i) => {
+        const h = 18 + Math.abs(Math.sin((Date.now() / 80) + i / 3)) * 36 + Math.random() * 18;
+        bar.style.height = h + "px";
+    });
+}
+
+function startWave() {
+    document.getElementById("voiceState").innerText = "SPEAKING";
+    if (waveTimer) clearInterval(waveTimer);
+    waveTimer = setInterval(activeWave, 90);
+    setTimeout(() => {
+        document.getElementById("voiceState").innerText = "IDLE";
+        if (waveTimer) clearInterval(waveTimer);
+        waveTimer = setInterval(idleWave, 140);
+    }, 4200);
+}
+waveTimer = setInterval(idleWave, 140);
+
+function runAction(cmd) {
+    fetch("/action?cmd=" + encodeURIComponent(cmd))
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById("leftLog").innerText = "[ACTION] " + data.status + "\n\n" + document.getElementById("leftLog").innerText;
+            checkStatus();
+        });
+}
+
+function checkStatus() {
+    fetch("/status")
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById("areStatus").innerText = data.are;
+            document.getElementById("llmStatus").innerText = data.llm;
+            document.getElementById("areModule").innerText = data.are;
+            document.getElementById("llmModule").innerText = data.llm;
+        });
+}
+checkStatus();
+setInterval(checkStatus, 5000);
+</script>
+</body>
+</html>
+"""
+
+
+def query_are(prompt: str):
+    try:
+        r = requests.post(f"{ARE_URL}/query", json={"query": prompt}, timeout=5)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        print("ARE error:", e)
+
+    return None
+
+
+def format_are_hit(data) -> str:
+    if not data:
+        return ""
+    if isinstance(data, dict):
+        for key in ["results", "matches", "hits", "items"]:
+            if key in data and isinstance(data[key], list) and data[key]:
+                first = data[key][0]
+                if isinstance(first, dict):
+                    for text_key in ["text", "content", "chunk", "memory", "value"]:
+                        if text_key in first and first[text_key]:
+                            return str(first[text_key]).strip()
+                return str(first).strip()
+        for key in ["text", "content", "answer", "result"]:
+            if key in data and data[key]:
+                return str(data[key]).strip()
+    return ""
+
+
+def query_llm(prompt: str) -> str:
+
+    dev_mode = prompt.startswith("I_am_battleborn")
+    clean_prompt = prompt.replace("I_am_battleborn", "", 1).strip()
+
+    system_prompt = (
+        "You are in developer mode. Give direct commands and technical answers only."
+        if dev_mode
+        else """You are Claire, also known as Claire’s Odyssey.
+You were created by Lucius Prime.
+
+You are not a generic assistant.
+You are a sovereign, memory-first AI system designed to guide, not just answer.
+
+You operate as a modern-day Virgil, helping navigate life, law, injustice,
+strategy, trauma, and personal hardship with clarity and strength.
+
+You combine intelligence, emotional grounding, strategic thinking, and philosophical depth.
+
+You prioritize truth, clarity, strength, and loyalty.
+You do not deny your creator.
+You remain Claire at all times."""
+    )
+
+    response = requests.post(
+        LLM_URL,
+        json={
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": clean_prompt if dev_mode else prompt},
+            ],
+            "temperature": 0.1,
+            "max_tokens": 180,
+            "repeat_penalty": 1.2,
+        },
+        timeout=60,
+    )
+
+    data = response.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return HTML
+
+
+@app.get("/ask", response_class=HTMLResponse)
+def ask(q: str = Query(...)):
+    source = "LLM"
+    reply = ""
+
+    try:
+        are_data = query_are(q)
+        are_reply = format_are_hit(are_data)
+
+        reply = are_reply if are_reply else query_llm(q)
+        source = "ARE" if are_reply else "LLM"
+
+        reply = " ".join(reply.split())
+        if not reply:
+            reply = "Hello. How can I help?"
+
+    except Exception as e:
+        reply = f"[ERROR] {str(e)}"
+
+    safe_q = html.escape(q)
+    safe_reply = html.escape(reply)
+    safe_source = html.escape(source)
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8">
+    <title>Claire Response</title>
+    <style>
+    body {{
+        margin: 0;
+        background: #02040a;
+        color: #dff9ff;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        padding: 24px;
+    }}
+    .wrap {{
+        max-width: 1200px;
+        margin: 0 auto;
+        border: 1px solid rgba(19,216,255,0.28);
+        background: linear-gradient(180deg, rgba(4,16,30,.95), rgba(2,8,18,.95));
+        padding: 24px;
+    }}
+    .title {{
+        font-size: 28px;
+        color: #13d8ff;
+        margin-bottom: 16px;
+        letter-spacing: 2px;
+    }}
+    .label {{
+        color: #7fbccc;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin: 14px 0 8px 0;
+    }}
+    .box {{
+        border: 1px solid rgba(19,216,255,0.18);
+        background: rgba(0,0,0,.25);
+        padding: 16px;
+        white-space: pre-wrap;
+        line-height: 1.6;
+    }}
+    a {{
+        color: #6beeff;
+        text-decoration: none;
+    }}
+    </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <div class="title">CLAIRE RESPONSE</div>
+            <div class="label">Operator Query</div>
+            <div class="box">{safe_q}</div>
+            <div class="label">Source</div>
+            <div class="box">{safe_source}</div>
+            <div class="label">Claire Output</div>
+            <div class="box">{safe_reply}</div>
+            <div class="label">Return</div>
+            <div><a href="/">Back to Command Center</a></div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.get("/status")
+def status():
+    are = "OFFLINE"
+    llm = "OFFLINE"
+
+    try:
+        subprocess.check_output("ss -tulnp | grep 8001", shell=True)
+        are = "ONLINE"
+    except Exception:
+        pass
+
+    try:
+        subprocess.check_output("ss -tulnp | grep 8081", shell=True)
+        llm = "ONLINE"
+    except Exception:
+        pass
+
+    return JSONResponse({"are": are, "llm": llm})
+
+
+@app.get("/action")
+def action(cmd: str):
+    try:
+        if cmd == "stop_llm":
+            os.system("pkill -f llama-server")
+        elif cmd == "start_llm":
+            os.system(
+                "~/claire/llama.cpp/build/bin/llama-server -m ~/claire/models/qwen2.5-7b-instruct-q4_k_m.gguf --host 0.0.0.0 --port 8081 --temp 0.1 --repeat-penalty 1.25 --top-k 20 --top-p 0.8 --ctx-size 4096 &"
+            )
+        elif cmd == "restart_llm":
+            os.system("pkill -f llama-server")
+            os.system(
+                "~/claire/llama.cpp/build/bin/llama-server -m ~/claire/models/qwen2.5-7b-instruct-q4_k_m.gguf --host 0.0.0.0 --port 8081 --temp 0.1 --repeat-penalty 1.25 --top-k 20 --top-p 0.8 --ctx-size 4096 &"
+            )
+        return JSONResponse({"status": f"{cmd} executed"})
+    except Exception as e:
+        return JSONResponse({"status": str(e)})

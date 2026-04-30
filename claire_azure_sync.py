@@ -1,0 +1,1 @@
+AZURE_CONNECTION_STRING = "DefaultEndpointsProtocol=https;AccountName=YOUR_ACCOUNT_NAME;AccountKey=obhpJljLs3NV9uI0Ea4cl13UVv8OXr0TxoBh/N8xF8nOEDW/h7YClNM8EeJJYCEichoBIb21pCdV+AStuQUq+w==;EndpointSuffix=core.windows.net"

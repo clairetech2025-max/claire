@@ -1,0 +1,71 @@
+# Secrets and local environment
+.env
+*.env
+claire_keys.env
+
+# Python/Go build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+*.test
+
+# Virtual environments
+venv/
+venv_clean/
+creator_venv/
+.venv/
+
+# Logs and runtime state
+*.log
+logs/
+server.log
+are.log
+claire.log
+nohup.out
+
+# Local data, uploads, generated reports, and model assets
+data/
+silo_data/
+palantir_data/
+knowledge/
+exports/
+models/
+certs/
+void/
+
+# Large vendored or nested repositories
+llama.cpp/
+
+# Generated local backups and archives
+*.bak
+*.bak_*
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.deb
+*.csv
+*_backup*
+*_snapshot*
+
+# Local compiled binaries and scratch files
+are_brain
+sovereign_proxy
+Scraper
+and
+nano
+paste
+power_check.txt
+test_memory.txt
+clairenode.go
+claire_node.go
+*Claire
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
