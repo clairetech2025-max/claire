@@ -35,6 +35,7 @@ exports/
 models/
 certs/
 void/
+private_repo_payloads/
 
 # Large vendored or nested repositories
 llama.cpp/
