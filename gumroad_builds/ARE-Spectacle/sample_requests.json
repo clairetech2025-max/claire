@@ -1,0 +1,31 @@
+{
+  "health": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8010/health"
+  },
+  "ingest": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8010/ingest",
+    "body": {
+      "text": "ARE Spectacle stores governed recall outside the model with provenance and trace replay.",
+      "source_ref": "buyer-demo",
+      "session_id": "demo"
+    }
+  },
+  "query": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8010/query",
+    "body": {
+      "query": "What role does provenance play in governed memory?",
+      "session_id": "demo"
+    }
+  },
+  "prompt_prefix": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8010/prompt-prefix",
+    "body": {
+      "query": "Build a prompt prefix for governed recall.",
+      "session_id": "demo"
+    }
+  }
+}
