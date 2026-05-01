@@ -54,6 +54,28 @@ Release artifact:
 Sovereign-Execution-Gateway-Gumroad.zip
 ```
 
+## Product 3: BitBrain SBC Standalone Engine
+
+Status: private-repo payload prepared.
+
+Repo target:
+
+```text
+Claire-Systems/bitbrain-sbc-private
+```
+
+Product type:
+
+```text
+Sparse Binary Coincidence local memory engine
+```
+
+Release artifact:
+
+```text
+BitBrain-SBC-Gumroad.zip
+```
+
 Each product should get:
 
 - private source repo

@@ -7,6 +7,7 @@ Create these as **private** repos in the `Claire-Systems` organization:
 ```text
 Claire-Systems/are-spectacle-private
 Claire-Systems/sovereign-execution-gateway-private
+Claire-Systems/bitbrain-sbc-private
 Claire-Systems/veritas-parser-private
 Claire-Systems/apex-scout-private
 Claire-Systems/crown-jewel-parser-private
@@ -66,4 +67,12 @@ After creating `Claire-Systems/sovereign-execution-gateway-private`, run:
 
 ```bash
 /home/LuciusPrime/claire/gumroad_builds/Sovereign-Execution-Gateway/push_after_private_repo_created.sh
+```
+
+## BitBrain SBC Push
+
+After creating `Claire-Systems/bitbrain-sbc-private`, run:
+
+```bash
+/home/LuciusPrime/claire/gumroad_builds/BitBrain-SBC/push_after_private_repo_created.sh
 ```
