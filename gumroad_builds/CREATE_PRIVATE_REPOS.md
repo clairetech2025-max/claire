@@ -6,6 +6,7 @@ Create these as **private** repos in the `Claire-Systems` organization:
 
 ```text
 Claire-Systems/are-spectacle-private
+Claire-Systems/sovereign-execution-gateway-private
 Claire-Systems/veritas-parser-private
 Claire-Systems/apex-scout-private
 Claire-Systems/crown-jewel-parser-private
@@ -16,6 +17,12 @@ Start with:
 
 ```text
 Claire-Systems/are-spectacle-private
+```
+
+Then create:
+
+```text
+Claire-Systems/sovereign-execution-gateway-private
 ```
 
 Settings:
@@ -52,3 +59,11 @@ ARE-Spectacle-Gumroad.zip
 ```
 
 Upload that ZIP to Gumroad.
+
+## Sovereign Execution Gateway Push
+
+After creating `Claire-Systems/sovereign-execution-gateway-private`, run:
+
+```bash
+/home/LuciusPrime/claire/gumroad_builds/Sovereign-Execution-Gateway/push_after_private_repo_created.sh
+```

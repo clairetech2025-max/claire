@@ -32,6 +32,28 @@ ARE-Spectacle-Gumroad.zip
 - OfficeAI-style orchestrator
 - ClairePay / fintech demo
 
+## Product 2: Sovereign Execution Gateway
+
+Status: private-repo payload prepared.
+
+Repo target:
+
+```text
+Claire-Systems/sovereign-execution-gateway-private
+```
+
+Product type:
+
+```text
+Local truth-capsule execution API runtime
+```
+
+Release artifact:
+
+```text
+Sovereign-Execution-Gateway-Gumroad.zip
+```
+
 Each product should get:
 
 - private source repo
