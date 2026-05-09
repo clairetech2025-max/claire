@@ -1649,6 +1649,44 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     margin-bottom: 5px;
 }
 
+.q-explainer {
+    border: 1px solid rgba(106,255,156,0.24);
+    background: linear-gradient(180deg, rgba(7,34,28,.42), rgba(0,0,0,.18));
+    padding: 10px;
+    margin: 8px 0 10px 0;
+}
+
+.q-explainer-title {
+    color: var(--good);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+
+.q-explainer-body {
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.q-mini-points {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    margin-top: 9px;
+}
+
+.q-mini-point {
+    border-left: 2px solid rgba(19,216,255,0.38);
+    background: rgba(0,0,0,.18);
+    padding: 6px 8px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
 .q-ring::before {
     content: "";
     position: absolute;
@@ -2907,7 +2945,8 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .q-plane-grid,
-    .q-compare {
+    .q-compare,
+    .q-mini-points {
         grid-template-columns: 1fr;
     }
 
@@ -3065,6 +3104,17 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                 </div>
                 <div>
                     <div class="q-copy"><strong>Claire orients before she generates.</strong></div>
+                    <div class="q-explainer">
+                        <div class="q-explainer-title">What Q Insight Is</div>
+                        <div class="q-explainer-body">
+                            Q Insight is Claire’s pre-generation orientation field. Before I answer, it checks what kind of question this is, which memory lanes are allowed, what authority applies, what risks are active, and what output mode should be used.
+                        </div>
+                        <div class="q-mini-points">
+                            <div class="q-mini-point">It is not RAG or vector search.</div>
+                            <div class="q-mini-point">It decides the bearing before recall or generation.</div>
+                            <div class="q-mini-point">It blocks lanes that should not steer the answer.</div>
+                        </div>
+                    </div>
                     <div class="q-copy">
                         Conventional RAG retrieves approximate context after a query. Claire evaluates orientation first: intent, authority, risk, memory access, provenance, and output mode. Only then does she recall, govern, trace, and respond.
                     </div>
