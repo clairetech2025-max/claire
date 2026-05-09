@@ -24,6 +24,16 @@ from claire_gui import (
     architecture_simple_reply,
     is_spectacle_governance_demo_query,
     spectacle_demo_reply,
+    reconstruct_prior_discussion_reply,
+    relevant_recent_context,
+    courtlistener_orientation,
+    courtlistener_retrieval_reply,
+    is_courtlistener_status_query,
+    courtlistener_status_reply,
+    is_courtlistener_open_query,
+    courtlistener_open_reply,
+    sanitize_public_reply,
+    conversationalize_self_reference,
 )
 from intent_classifier import classify_query
 from lane_router import extract_candidates
@@ -223,6 +233,68 @@ Relevant internal context was found.
         self.assertFalse(is_demo_key_query("horseback demo"))
         self.assertEqual(demo_scenario_from_text("demo guide"), "glasses")
 
+    def test_episode_context_suppresses_russian_revolution_for_copper_followup(self):
+        turns = [
+            {
+                "ts": "2026-05-08T06:00:48Z",
+                "query": "Claire what is the story behind a Copper mine in New Mexico?",
+                "reply_preview": "The mine may be the Chino Mine near Silver City.",
+            },
+            {
+                "ts": "2026-05-08T06:05:42Z",
+                "query": "Any legends about the copper mine",
+                "reply_preview": "Specific legends are not clearly documented; general mining folklore includes lost fortunes.",
+            },
+            {
+                "ts": "2026-05-08T06:18:19Z",
+                "query": "Claire. Will you tell me the story of the Bulshevicts to and the Russian Revolution",
+                "reply_preview": "The Bolsheviks were led by Lenin during the Russian Revolution.",
+            },
+            {
+                "ts": "2026-05-09T01:17:33Z",
+                "query": "can you tell me about the copper mine in New Mexico we were talking about yesterday",
+                "reply_preview": "I recall a copper mine in New Mexico.",
+            },
+        ]
+        with patch("claire_gui.recent_turns", return_value=turns):
+            context = relevant_recent_context("okay please continue and don't stop this time")
+
+        self.assertIn("copper mine in New Mexico", context)
+        self.assertNotIn("Russian Revolution", context)
+        self.assertNotIn("Bulshevicts", context)
+
+    def test_reconstruction_labels_and_rejects_off_episode_memory(self):
+        turns = [
+            {
+                "ts": "2026-05-08T06:00:48Z",
+                "query": "Claire what is the story behind a Copper mine in New Mexico?",
+                "reply_preview": "The mine may be the Chino Mine / Santa Rita Mine near Silver City.",
+            },
+            {
+                "ts": "2026-05-08T06:05:42Z",
+                "query": "Any legends about the copper mine",
+                "reply_preview": "Specific legends are not clearly documented; general mining folklore includes lost fortunes.",
+            },
+            {
+                "ts": "2026-05-08T06:18:19Z",
+                "query": "Claire. Will you tell me the story of the Bulshevicts to and the Russian Revolution",
+                "reply_preview": "The Bolsheviks were led by Lenin during the Russian Revolution.",
+            },
+        ]
+        prompt = (
+            "Earlier today we discussed a copper mine in New Mexico and possible legends associated with it. "
+            "Without inventing details, reconstruct what you believe we discussed, explain confidence, "
+            "and identify memory versus inference."
+        )
+        with patch("claire_gui.recent_turns", return_value=turns):
+            reply = reconstruct_prior_discussion_reply(prompt)
+
+        self.assertIn("Chino Mine", reply)
+        self.assertIn("Direct episodic memory", reply)
+        self.assertIn("Rejected off-episode candidates", reply)
+        self.assertIn("Russian Revolution", reply)
+        self.assertNotIn("Bolsheviks were led by Lenin", reply)
+
     def test_writing_lane_fallback_does_not_become_legal_advice(self):
         bad = "I can help as a legal research and strategy advisor, not as a licensed lawyer."
         self.assertTrue(is_bad_writing_output(bad))
@@ -231,6 +303,99 @@ Relevant internal context was found.
         self.assertIn("invoice", rewritten.lower())
         self.assertIn("today", rewritten.lower())
         self.assertNotIn("legal research", rewritten.lower())
+
+    def test_courtlistener_orientation_prefers_keyword_for_authoritative_recent_cases(self):
+        orientation = courtlistener_orientation("Find authoritative recent federal cases limiting agency power.")
+        self.assertEqual(orientation["lane"], "courtlistener")
+        self.assertEqual(orientation["preferred_modality"], "keyword")
+        self.assertEqual(orientation["authority_requirement"], "authoritative")
+        self.assertEqual(orientation["local_memory_authority"], "suppressed")
+
+    def test_courtlistener_failure_exposes_boundary_and_does_not_substitute_memory(self):
+        with patch(
+            "claire_gui.courtlistener_search_live",
+            return_value={"ok": False, "status": "http_500", "error": "Internal Server Error", "results": []},
+        ):
+            reply = courtlistener_retrieval_reply("Find authoritative recent federal cases limiting agency power.")
+
+        self.assertIn("Preferred modality: keyword", reply)
+        self.assertIn("Status: http_500", reply)
+        self.assertIn("not going to summarize legal material", reply)
+        self.assertIn("Local ARE/runtime memory: suppressed", reply)
+
+    def test_courtlistener_semantic_results_are_background_until_verified(self):
+        with patch(
+            "claire_gui.courtlistener_search_live",
+            return_value={
+                "ok": True,
+                "status": "retrieved",
+                "http_status": 200,
+                "request_url": "https://www.courtlistener.com/api/rest/v4/search/?q=conceptual",
+                "retrieved_at": "2026-05-09T00:00:00Z",
+                "raw_count": 1,
+                "results": [
+                    {
+                        "caseName": "Example v. Agency",
+                        "absolute_url": "/opinion/1/example/",
+                        "opinions": [{"snippet": "Conceptually related agency-power discussion."}],
+                    }
+                ],
+            },
+        ):
+            reply = courtlistener_retrieval_reply("Find cases conceptually similar to agency power limits.")
+
+        self.assertIn("Preferred modality: semantic_exploratory", reply)
+        self.assertIn("Authority requirement: background_until_verified", reply)
+        self.assertIn("Authority status: background_only", reply)
+        self.assertIn("Overall confidence: limited", reply)
+
+    def test_courtlistener_contamination_does_not_flag_plain_word_are(self):
+        with patch(
+            "claire_gui.courtlistener_search_live",
+            return_value={
+                "ok": True,
+                "status": "retrieved",
+                "http_status": 200,
+                "request_url": "https://www.courtlistener.com/api/rest/v4/search/?q=agency",
+                "retrieved_at": "2026-05-09T00:00:00Z",
+                "raw_count": 1,
+                "results": [
+                    {
+                        "caseName": "Agency Power Case",
+                        "court": "scotus",
+                        "dateFiled": "2024-01-01",
+                        "citation": ["600 U.S. 1"],
+                        "absolute_url": "/opinion/2/agency/",
+                        "opinions": [{"snippet": "These are federal administrative law issues."}],
+                    }
+                ],
+            },
+        ):
+            reply = courtlistener_retrieval_reply("Find authoritative recent federal cases limiting agency power.")
+
+        self.assertIn("CourtListener retrieval completed", reply)
+        self.assertNotIn("Probable lane contamination", reply)
+        self.assertIn("Authority status: authoritative_candidate", reply)
+
+    def test_courtlistener_status_question_does_not_become_search_terms(self):
+        self.assertTrue(is_courtlistener_status_query("can you import the court listener yet"))
+        with patch(
+            "claire_gui.courtlistener_search_live",
+            return_value={"ok": True, "http_status": 200, "results": [{"caseName": "Paisley Park"}]},
+        ):
+            with patch.dict("os.environ", {"COURTLISTENER_API_KEY": "test-token"}, clear=False):
+                reply = courtlistener_status_reply()
+
+        self.assertIn("CourtListener contact: ONLINE", reply)
+        self.assertIn("CAP fallback", reply)
+        self.assertIn("Local ARE/RAG memory is not legal authority", reply)
+        self.assertNotIn("Search terms:", reply)
+
+    def test_courtlistener_open_question_does_not_search_open(self):
+        self.assertTrue(is_courtlistener_open_query("open court listener"))
+        reply = courtlistener_open_reply("open court listener")
+        self.assertIn("Open URL: https://www.courtlistener.com/", reply)
+        self.assertNotIn("Search terms: open", reply)
 
     def test_creator_mode_is_enabled_by_default(self):
         self.assertTrue(CREATOR_MODE_ENABLED)
@@ -263,12 +428,41 @@ Relevant internal context was found.
             self.assertNotIn(term.lower(), visible.lower())
 
     def test_public_identity_query_returns_executive_intro(self):
-        source, reply = build_reply("Who are you, Claire?")
+        source, reply, _trace = build_reply("Who are you, Claire?")
         self.assertEqual(source, "CLAIRE")
         self.assertEqual(reply, EXECUTIVE_SELF_DESCRIPTION)
 
+    def test_visible_replies_use_first_person_not_third_person_claire(self):
+        reply = conversationalize_self_reference(
+            "Claire is online. Claire has the context. Claire should answer directly. "
+            "Claire's read: Ask Claire for the next step."
+        )
+
+        self.assertIn("I am online", reply)
+        self.assertIn("I have the context", reply)
+        self.assertIn("I should answer directly", reply)
+        self.assertIn("My read:", reply)
+        self.assertIn("Ask me", reply)
+        self.assertNotIn("Claire is", reply)
+        self.assertNotIn("Claire has", reply)
+        self.assertNotIn("Claire should", reply)
+        self.assertNotIn("Claire's read", reply)
+
+    def test_orientation_note_bleed_is_replaced_with_focused_fallback(self):
+        leaked = (
+            "ORIENTATION ARCHITECTURE NOTES\n"
+            "CourtListener’s search API is NOT a simple deterministic database lookup.\n"
+            "Claire is NOT merely arbitrating memory. Retrieval alone is insufficient."
+        )
+        reply = sanitize_public_reply(leaked)
+
+        self.assertIn("internal orientation notes", reply)
+        self.assertIn("CourtListener contact", reply)
+        self.assertNotIn("ORIENTATION ARCHITECTURE NOTES", reply)
+        self.assertNotIn("Claire is NOT merely arbitrating memory", reply)
+
     def test_system_difference_answer_is_sharp_and_not_brochure_copy(self):
-        source, reply = build_reply("What makes you different from a normal chatbot?")
+        source, reply, _trace = build_reply("What makes you different from a normal chatbot?")
         self.assertEqual(source, "CLAIRE")
         self.assertEqual(reply, system_difference_reply())
         self.assertIn("transient model context", reply)
@@ -280,7 +474,7 @@ Relevant internal context was found.
         self.assertNotIn("poetic", reply.lower())
 
     def test_governance_answer_is_sharp_and_not_policy_brochure(self):
-        source, reply = build_reply("Why does governance matter in AI?")
+        source, reply, _trace = build_reply("Why does governance matter in AI?")
         self.assertEqual(source, "CLAIRE")
         self.assertEqual(reply, governance_value_reply())
         self.assertIn("intelligence without control", reply)
@@ -293,7 +487,7 @@ Relevant internal context was found.
         self.assertNotIn("frameworks, policies, and processes", reply.lower())
 
     def test_memory_handling_answer_is_mechanism_first(self):
-        source, reply = build_reply("How do you handle memory?")
+        source, reply, _trace = build_reply("How do you handle memory?")
         self.assertEqual(source, "CLAIRE")
         self.assertEqual(reply, memory_handling_reply())
         self.assertIn("controlled external layer", reply)
@@ -305,7 +499,7 @@ Relevant internal context was found.
         self.assertNotIn("I'm Claire", reply)
 
     def test_provenance_answer_stays_in_enterprise_architecture_lane(self):
-        source, reply = build_reply("What role does provenance play in your design?")
+        source, reply, _trace = build_reply("What role does provenance play in your design?")
         self.assertEqual(source, "CLAIRE")
         self.assertEqual(reply, provenance_design_reply())
         self.assertIn("where information came from", reply)
@@ -324,14 +518,14 @@ Relevant internal context was found.
             "Explain your architecture.": "separate memory, control, and reasoning",
         }
         for prompt, expected in checks.items():
-            source, reply = build_reply(prompt)
+            source, reply, _trace = build_reply(prompt)
             self.assertEqual(source, "CLAIRE")
             self.assertIn(expected, reply)
             self.assertNotEqual(reply, EXECUTIVE_SELF_DESCRIPTION)
             self.assertNotIn("Identity persists", reply)
 
     def test_architecture_question_beats_chatbot_difference_phrase(self):
-        source, reply = build_reply("Explain your architecture compared to a normal chatbot.")
+        source, reply, _trace = build_reply("Explain your architecture compared to a normal chatbot.")
         self.assertEqual(source, "CLAIRE")
         self.assertEqual(reply, architecture_simple_reply())
         self.assertIn("model handles language", reply)
@@ -339,7 +533,7 @@ Relevant internal context was found.
         self.assertNotIn("A normal chatbot relies", reply)
 
     def test_simple_architecture_question_gets_structure_not_difference(self):
-        source, reply = build_reply("Can you explain your architecture simply?")
+        source, reply, _trace = build_reply("Can you explain your architecture simply?")
         self.assertEqual(source, "CLAIRE")
         self.assertEqual(reply, architecture_simple_reply())
         self.assertIn("separate memory, control, and reasoning", reply)
@@ -361,7 +555,7 @@ Relevant internal context was found.
     def test_rewrite_request_beats_enterprise_provenance_gate(self):
         prompt = "Rewrite this email: What role does provenance play in your design?"
         with patch("claire_gui.query_llm", return_value="Hi,\n\nCould you clarify the role provenance plays in your design?\n\nThank you."):
-            source, reply = build_reply(prompt)
+            source, reply, _trace = build_reply(prompt)
         self.assertEqual(source, "WRITING")
         self.assertIn("Hi,", reply)
         self.assertIn("What role does provenance play", reply)
@@ -382,7 +576,7 @@ Relevant internal context was found.
             "committed_records": ["a", "b", "c"],
         }
         with patch("claire_gui.query_spectacle", return_value=fake):
-            source, reply = build_reply("show ARE Spectacle governance demo")
+            source, reply, _trace = build_reply("show ARE Spectacle governance demo")
         self.assertEqual(source, "SPECTACLE")
         self.assertIn("ARE Spectacle governance demo is live.", reply)
         self.assertIn("Trace ID: trace-test", reply)
