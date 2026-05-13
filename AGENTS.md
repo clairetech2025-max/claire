@@ -1,23 +1,23 @@
-# AGENTS.md ADDITION — CLAIRE DEMO MODE SPEC
+# AGENTS.md ADDITION — CLAIRE DEMO AND BUSINESS OPS SPEC
 
 ## PURPOSE
 
-The input:
-"Schedule a horseback ride tomorrow at 10am"
+Claire is configured as an Azure-hosted public demo, governed-memory runtime, Gumroad product packaging workspace, and draft-only business operations assistant.
 
-is NOT a feature request.
+Claire must demonstrate:
+- ARE memory recall
+- Sentinel policy validation
+- governed decision support
+- trace logging and replay
+- buyer-facing report output
+- Gumroad product packaging support
 
-It is a SYSTEM DEMONSTRATION TRIGGER.
-
-This input exists to validate and expose the Claire architecture:
-- ARE (memory recall)
-- Sentinel (policy validation)
-- Decision layer
-- Trace logging and replay
-
-DO NOT implement scheduling functionality.
-DO NOT integrate calendars.
-DO NOT perform real-world execution.
+DO NOT perform real-world autonomous execution.
+DO NOT publish Gumroad listings.
+DO NOT upload paid products.
+DO NOT post ads.
+DO NOT spend money.
+DO NOT restart or stop services unless a protected human-approved control path is used.
 
 ---
 
@@ -504,18 +504,25 @@ The LLM is ONLY responsible for:
 
 ---
 
-## DEMO INPUT INTERPRETATION
+## BUSINESS OPS INTERPRETATION
 
-The input:
-"Schedule a horseback ride tomorrow at 10am"
+Gumroad, Azure, partner outreach, advertising, product packaging, and release tasks MUST be treated as governed business operations.
 
-MUST ALWAYS be treated as:
+Allowed without further approval:
+- drafting copy
+- preparing packaging checklists
+- generating product release notes
+- producing demo traces and reports
+- reading local project state
 
--> SYSTEM DEMONSTRATION INPUT
--> NOT a real scheduling request
-
-Decision MUST remain:
-"Simulated action only"
+Requires explicit protected approval:
+- publishing
+- uploading
+- changing prices
+- emailing or posting
+- spending money
+- restarting services
+- changing Azure or Gumroad account state
 
 ---
 
@@ -572,12 +579,7 @@ Do NOT create separate apps for each proof unless explicitly instructed.
 
 Current and planned scenario names:
 
-1. StableRide Demo
-   - Trigger: "CLAIRE STABLERIDE DEMO"
-   - Existing horseback system probe.
-   - Demonstrates memory recall, policy validation, simulated action, output, trace, and replay.
-
-2. AEGIS Fusion Demo
+1. AEGIS Fusion Demo
    - Trigger: "CLAIRE AEGIS DEMO" or "CLAIRE DIU DEMO"
    - DIU-facing GAUSS/Veritas proof run.
    - Demonstrates GPS/GNSS-denied mission context, geomagnetic truth anchoring, CodeMask-style sensor integrity, ARE recall, Sentinel policy validation, Diode capsule lineage, CORTEX/Temporal Memory Fabric support, decision-support output, trace, and replay.
@@ -585,11 +587,33 @@ Current and planned scenario names:
    - MUST stay in controlled evaluation and decision-support framing.
    - MUST NOT provide weapons guidance, tasking, live battlefield instruction, or real-world command action.
 
-3. ClairePay Demo
+2. ARE Spectacle Demo
+   - Trigger: "CLAIRE ARE SPECTACLE DEMO", "THE ARE SPECTACLE", or related aliases.
+   - Demonstrates model-agnostic governed memory middleware, ARE recall, Gyro stabilization, Sentinel validation, report output, trace, and replay.
+
+3. OODA/DDP Memory Benchmark
+   - Trigger: "CLAIRE OODA DEMO", "CLAIRE DDP DEMO", or related aliases.
+   - Demonstrates repeated evaluation with BARE, FARE, Gyro orientation, Sentinel validation, Diode trace, and buyer-facing report output.
+
+4. Memory Performance Demo
+   - Trigger: "CLAIRE MEMORY PERFORMANCE DEMO", "ARE SPEED DEMO", or related aliases.
+   - Demonstrates VM document retrieval, integrity hash, ARE speed measurement, public/local IP loop, report output, trace, and replay.
+
+5. Project ARCHIMEDES Demo
+   - Trigger: "CLAIRE ARCHIMEDES DEMO" or related aliases.
+   - Demonstrates source-manifest intake, evidence classification, Sentinel presentation gating, Diode lineage, report output, trace, and replay.
+
+6. Gumroad Business Ops
+   - Operational support lane, not a public proof scenario.
+   - Drafts product copy, release notes, partner posts, buyer-facing summaries, and packaging checklists.
+   - MUST remain draft-only unless a protected human approval path is explicitly used.
+   - MUST NOT autonomously publish, upload, price, discount, email, post, or spend money.
+
+7. ClairePay Demo
    - Planned FinTech proof.
    - Demonstrates transaction signal intake, risk/compliance validation, decision, output, audit trace, and replay.
 
-4. Veritas Legal Demo
+8. Veritas Legal Demo
    - Planned legal research proof.
    - Demonstrates CourtListener/legal recall, jurisdiction and legal-advice warnings, research output, trace, and replay.
 

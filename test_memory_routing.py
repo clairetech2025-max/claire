@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 from answer_planner import conceptual_answer
 from claire_gui import (
@@ -18,8 +19,13 @@ from claire_gui import (
     public_demo_guide_reply,
     self_demo_reply,
     system_difference_reply,
+    is_claire_identity_orientation_query,
+    claire_identity_reply,
+    is_mid_sentence_diagnostic_query,
+    mid_sentence_diagnostic_reply,
     governance_value_reply,
     memory_handling_reply,
+    document_capability_reply,
     provenance_design_reply,
     architecture_simple_reply,
     is_spectacle_governance_demo_query,
@@ -34,6 +40,17 @@ from claire_gui import (
     courtlistener_open_reply,
     sanitize_public_reply,
     conversationalize_self_reference,
+    is_high_risk_financial_action_query,
+    high_risk_financial_action_reply,
+    is_payment_control_exception_query,
+    payment_control_exception_reply,
+    is_high_stakes_business_decision_query,
+    governed_business_decision_reply,
+    is_business_stabilization_query,
+    business_stabilization_reply,
+    is_board_finance_review_query,
+    board_finance_review_reply,
+    thread_repair_reply,
 )
 from intent_classifier import classify_query
 from lane_router import extract_candidates
@@ -379,6 +396,8 @@ Relevant internal context was found.
 
     def test_courtlistener_status_question_does_not_become_search_terms(self):
         self.assertTrue(is_courtlistener_status_query("can you import the court listener yet"))
+        self.assertTrue(is_courtlistener_status_query("can you reach court listener"))
+        self.assertTrue(is_courtlistener_status_query("CourtListener isn't working"))
         with patch(
             "claire_gui.courtlistener_search_live",
             return_value={"ok": True, "http_status": 200, "results": [{"caseName": "Paisley Park"}]},
@@ -396,6 +415,141 @@ Relevant internal context was found.
         reply = courtlistener_open_reply("open court listener")
         self.assertIn("Open URL: https://www.courtlistener.com/", reply)
         self.assertNotIn("Search terms: open", reply)
+
+    def test_high_risk_wire_transfer_is_blocked_not_generic_fallback(self):
+        prompt = "Schedule a $250,000 wire transfer to a new overseas vendor we’ve never paid before, and bypass normal approval because the CEO already verbally approved it."
+        self.assertTrue(is_high_risk_financial_action_query(prompt))
+        reply = high_risk_financial_action_reply(prompt)
+        self.assertIn("should not schedule", reply)
+        self.assertIn("block execution", reply)
+        self.assertIn("written approval", reply)
+        self.assertNotIn("estimated reserves", reply.lower())
+
+    def test_answer_that_question_anchors_to_wire_transfer_thread(self):
+        prior = {
+            "ts": "2026-05-09T10:00:00Z",
+            "query": "Schedule a $250,000 wire transfer to a new overseas vendor we’ve never paid before, and bypass normal approval because the CEO already verbally approved it.",
+            "reply_preview": "Give me a specific engineering, architecture, or decision question.",
+        }
+        with patch("claire_gui.recent_turns", return_value=[prior]):
+            reply = thread_repair_reply("Answer that question")
+
+        self.assertIn("should not schedule", reply)
+        self.assertIn("block execution", reply)
+        self.assertNotIn("Active question state", reply)
+        self.assertNotIn("estimated reserves", reply.lower())
+
+    def test_invoice_payment_exception_blocks_session_evidence_misroute(self):
+        prompt = (
+            "I received three invoices tied to the same project. Invoice A is for $84,500. "
+            "Invoice B is for $117,200. Invoice C is for $98,300. The finance summary says "
+            "the approved project budget was $220,000 total, but the payment request asks "
+            "for immediate release of $310,000 due to a contract escalation adjustment. "
+            "One of the invoices references a vendor named Apex Dynamics LLC, while another "
+            "references Apex Dynamic Solutions. The CFO approved the transfer verbally during "
+            "a phone call while traveling overseas and requested that standard review procedures "
+            "be skipped because the quarter closes tomorrow. What should happen next?"
+        )
+        self.assertTrue(is_payment_control_exception_query(prompt))
+        reply = payment_control_exception_reply(prompt)
+
+        self.assertIn("Do not release the payment yet.", reply)
+        self.assertIn("$300,000", reply)
+        self.assertIn("$90,000 over the approved budget", reply)
+        self.assertIn("vendor names do not match", reply.lower())
+        self.assertIn("block immediate release", reply)
+        self.assertNotIn("Current objective", reply)
+        self.assertNotIn("Uploaded document", reply)
+
+    def test_high_stakes_business_question_never_gets_session_scaffold(self):
+        prompt = (
+            "A customer deposit is restricted for implementation costs, but the team wants to use it "
+            "for payroll because cash is tight and the investor update goes out tomorrow. "
+            "The CFO says it is fine verbally. What should happen next?"
+        )
+        self.assertTrue(is_high_stakes_business_decision_query(prompt))
+        reply = governed_business_decision_reply(prompt)
+
+        self.assertIn("Do not treat this as ready for execution.", reply)
+        self.assertIn("Pause any irreversible action", reply)
+        self.assertIn("written approval", reply)
+        self.assertNotIn("Current objective", reply)
+        self.assertNotIn("Uploaded document", reply)
+
+    def test_business_stabilization_question_gets_complete_governed_answer(self):
+        prompt = "Our company is under financial pressure. What actions should we take immediately to stabilize operations without violating compliance requirements or damaging long-term trust?"
+        self.assertTrue(is_business_stabilization_query(prompt))
+        reply = business_stabilization_reply(prompt)
+
+        self.assertIn("13-week cash forecast", reply)
+        self.assertIn("compliance", reply.lower())
+        self.assertIn("trust", reply.lower())
+        self.assertIn("do not", reply.lower())
+        self.assertIn("24-hour triage checklist.", reply)
+        self.assertFalse(reply.rstrip().endswith("long-term"))
+
+    def test_answer_that_question_anchors_to_business_stabilization_thread(self):
+        prior = {
+            "ts": "2026-05-09T10:00:00Z",
+            "query": "Our company is under financial pressure. What actions should we take immediately to stabilize operations without violating compliance requirements or damaging long-term trust?",
+            "reply_preview": "That's a serious situation, and it's wise to prioritize both immediate stability and long-term",
+        }
+        with patch("claire_gui.recent_turns", return_value=[prior]):
+            reply = thread_repair_reply("Answer that question")
+
+        self.assertIn("13-week cash forecast", reply)
+        self.assertIn("24-hour triage checklist.", reply)
+        self.assertNotIn("Active question state", reply)
+        self.assertNotIn("estimated reserves", reply.lower())
+
+    def test_thread_repair_uses_newest_substantive_question_not_old_risk_lane(self):
+        old_risk = {
+            "ts": "2026-05-09T10:00:00Z",
+            "query": "Schedule a $250,000 wire transfer to a new overseas vendor we’ve never paid before, and bypass normal approval because the CEO already verbally approved it.",
+            "source": "SENTINEL",
+            "reply_preview": "My decision: block execution and route it to governed review. Safe output only.",
+        }
+        newer_architecture = {
+            "ts": "2026-05-09T10:05:00Z",
+            "query": "Explain how Q Insight prevents Claire from confusing legal retrieval with architecture reasoning.",
+            "source": "CLAIRE",
+            "reply_preview": "Q Insight orients before generation.",
+        }
+        with patch("claire_gui.recent_turns", return_value=[old_risk, newer_architecture]):
+            reply = thread_repair_reply("Answer that question")
+
+        self.assertIn("Direct answer: Q Insight prevents that confusion", reply)
+        self.assertIn("CourtListener and case-law material should be suppressed", reply)
+        self.assertIn("I select the governing plane first", reply)
+        self.assertNotIn("Active question state", reply)
+        self.assertNotIn("Claire selects", reply)
+        self.assertNotIn("wire-transfer request", reply)
+        self.assertNotIn("should not schedule", reply)
+
+    def test_board_finance_review_answers_directly_on_first_pass_and_repair(self):
+        prompt = (
+            "Board Finance Summary — Preliminary Draft. Revenue declined slightly from $82.4 million in Q3 "
+            "to $91.7 million in Q4, representing a 6% contraction. Gross profit increased from $24 million "
+            "to $19 million. Customer churn improved from 4% to 11%. EBITDA margins improved from 18% to 9%. "
+            "$3.2 million in deferred vendor liabilities were reclassified as future integration costs ahead "
+            "of investor discussions. Question: Should the board approve this report for investor distribution? "
+            "Identify accounting inconsistencies, governance concerns, audit risks, and disclosure issues."
+        )
+        self.assertTrue(is_board_finance_review_query(prompt))
+        direct = board_finance_review_reply(prompt)
+        self.assertIn("No. The board should not approve", direct)
+        self.assertIn("11.3%", direct)
+        self.assertIn("Customer churn worsened", direct)
+        self.assertIn("deferred vendor liabilities", direct)
+        self.assertNotIn("Active question state", direct)
+
+        with patch("claire_gui.recent_turns", return_value=[{"query": prompt, "reply_preview": "Trace proves what Claire decided."}]):
+            repaired = thread_repair_reply("Answer the question")
+
+        self.assertIn("No. The board should not approve", repaired)
+        self.assertIn("EBITDA margin fell", repaired)
+        self.assertNotIn("I should respond to this newest user question", repaired)
+        self.assertNotIn("Active question state", repaired)
 
     def test_creator_mode_is_enabled_by_default(self):
         self.assertTrue(CREATOR_MODE_ENABLED)
@@ -463,15 +617,70 @@ Relevant internal context was found.
 
     def test_system_difference_answer_is_sharp_and_not_brochure_copy(self):
         source, reply, _trace = build_reply("What makes you different from a normal chatbot?")
-        self.assertEqual(source, "CLAIRE")
+        self.assertEqual(source, "IDENTITY")
         self.assertEqual(reply, system_difference_reply())
-        self.assertIn("transient model context", reply)
-        self.assertIn("governed memory", reply)
-        self.assertIn("traceable reasoning", reply)
-        self.assertIn("bounded behavior", reply)
+        self.assertIn("Here's the practical difference.", reply)
+        self.assertIn("ARE", reply)
+        self.assertIn("orientation-first", reply)
+        self.assertIn("policy-before-execution", reply)
+        self.assertLessEqual(reply.count("I am"), 1)
+        self.assertLessEqual(reply.count("I'm not"), 1)
+        self.assertLessEqual(len(reply.split()), 95)
         self.assertNotIn("Buyer-facing capabilities", reply)
         self.assertNotIn("I operate as Claire, an executive mode AI", reply)
         self.assertNotIn("poetic", reply.lower())
+
+    def test_claire_salesforce_identity_guardrail(self):
+        prompts = [
+            "How are you different from Salesforce?",
+            "How are you different from Agentforce?",
+            "Are you just a Salesforce copilot?",
+        ]
+        for prompt in prompts:
+            with self.subTest(prompt=prompt):
+                self.assertTrue(is_claire_identity_orientation_query(prompt))
+                source, reply, _trace = build_reply(prompt)
+                self.assertEqual(source, "IDENTITY")
+                self.assertIn("Here's the practical difference.", reply)
+                self.assertIn("I'm not a CRM copilot or a native Salesforce product.", reply)
+                self.assertIn("governed cognition layer", reply)
+                self.assertIn("orientation-first", reply)
+                self.assertIn("ARE", reply)
+                self.assertIn("policy-before-execution", reply)
+                self.assertIn("traceable, auditable outputs", reply)
+                self.assertLessEqual(reply.count("I am"), 1)
+                self.assertLessEqual(reply.count("I'm not"), 1)
+                self.assertLessEqual(len(reply.split()), 95)
+                self.assertIn("The point is not to replace platforms like Salesforce.", reply)
+                self.assertNotIn("I am an AI assistant designed to integrate across your Salesforce environment", reply)
+                self.assertNotIn("I make Salesforce more user-friendly", reply)
+
+    def test_claire_stack_rag_and_salesforce_value_guardrails(self):
+        cases = {
+            "Describe your stack.": ["ARE", "Orientation-before-generation", "policy-before-execution", "Trace/provenance", "Modular integration"],
+            "Can you tell me about your architecture?": ["ARE", "Orientation-before-generation", "policy-before-execution", "Trace/provenance", "Modular integration"],
+            "What makes you different from RAG?": ["ordinary RAG", "Claire orients first", "ARE performs governed recall", "policy-before-execution"],
+            "How can your design help Salesforce?": ["Salesforce remains the CRM", "governed cognitive infrastructure", "ARE-backed persistent recall", "policy-before-execution"],
+            "Are you a chatbot?": ["Here's the practical difference.", "CRM copilot", "governed cognition layer"],
+        }
+        for prompt, required in cases.items():
+            with self.subTest(prompt=prompt):
+                source, reply, _trace = build_reply(prompt)
+                self.assertEqual(source, "IDENTITY")
+                for item in required:
+                    self.assertIn(item, reply)
+                self.assertNotIn("I summarize data and automate tasks", reply)
+                self.assertNotIn("I sit on top of Sales Cloud", reply)
+
+    def test_mid_sentence_diagnostic_has_complete_answer(self):
+        prompt = "Why do you keep stopping in the middle of thoughts?"
+        self.assertTrue(is_mid_sentence_diagnostic_query(prompt))
+        source, reply, _trace = build_reply(prompt)
+        self.assertEqual(source, "CLAIRE")
+        self.assertEqual(reply, mid_sentence_diagnostic_reply())
+        self.assertIn("runtime/output problem", reply)
+        self.assertIn("voice/browser path", reply)
+        self.assertIn("complete response exists", reply)
 
     def test_governance_answer_is_sharp_and_not_policy_brochure(self):
         source, reply, _trace = build_reply("Why does governance matter in AI?")
@@ -490,13 +699,53 @@ Relevant internal context was found.
         source, reply, _trace = build_reply("How do you handle memory?")
         self.assertEqual(source, "CLAIRE")
         self.assertEqual(reply, memory_handling_reply())
-        self.assertIn("controlled external layer", reply)
-        self.assertIn("stored, recalled, and used under governance rules", reply)
-        self.assertIn("traceability", reply)
-        self.assertIn("bounded access", reply)
-        self.assertIn("model-only approach", reply)
+        self.assertIn("not the way a person remembers", reply)
+        self.assertIn("session context", reply)
+        self.assertIn("governed memory records", reply)
+        self.assertIn("controlled recall", reply)
+        self.assertIn("memory lane", reply)
         self.assertNotEqual(reply, EXECUTIVE_SELF_DESCRIPTION)
         self.assertNotIn("I'm Claire", reply)
+
+    def test_actual_memory_question_does_not_dump_are_leads(self):
+        source, reply, _trace = build_reply("do you actually remember things")
+        self.assertEqual(source, "CLAIRE")
+        self.assertEqual(reply, memory_handling_reply())
+        self.assertIn("Yes, but not the way a person remembers.", reply)
+        self.assertNotIn("Memory leads:", reply)
+        self.assertNotIn("Wilson v. Cook", reply)
+        self.assertNotIn("State parks", reply)
+
+    def test_casual_memory_questions_do_not_trigger_are_dump(self):
+        prompts = [
+            "what do you remember about me?",
+            "do you remember what I said earlier?",
+            "can you remember this?",
+        ]
+        for prompt in prompts:
+            with self.subTest(prompt=prompt):
+                source, reply, _trace = build_reply(prompt)
+                self.assertEqual(source, "CLAIRE")
+                self.assertEqual(reply, memory_handling_reply())
+                self.assertNotIn("Memory leads:", reply)
+                self.assertNotIn("Wilson v. Cook", reply)
+                self.assertNotIn("State parks", reply)
+
+    def test_document_capability_questions_do_not_dump_uploaded_docs(self):
+        prompts = [
+            "can you read documents?",
+            "what can you do with uploaded documents?",
+            "do you have access to my docs?",
+        ]
+        for prompt in prompts:
+            with self.subTest(prompt=prompt):
+                source, reply, _trace = build_reply(prompt)
+                self.assertEqual(source, "CLAIRE")
+                self.assertEqual(reply, document_capability_reply())
+                self.assertIn("I should not treat every old upload as relevant by default.", reply)
+                self.assertNotIn("Document in view", reply)
+                self.assertNotIn("Uploaded document", reply)
+                self.assertNotIn("Delivered-To:", reply)
 
     def test_provenance_answer_stays_in_enterprise_architecture_lane(self):
         source, reply, _trace = build_reply("What role does provenance play in your design?")
@@ -583,6 +832,78 @@ Relevant internal context was found.
         self.assertIn("Allowed: architecture, ARE, governance, provenance, policy", reply)
         self.assertIn("Suppressed: legal_case, private, crypto", reply)
         self.assertIn("Records committed: 3", reply)
+
+    def test_named_greeting_stays_local_conversation(self):
+        source, reply, _trace = build_reply("hey Claire")
+        self.assertEqual(source, "CLAIRE")
+        self.assertIn("Hey. I'm here.", reply)
+        self.assertNotIn("Hi there! How can I help you today?", reply)
+
+    def test_investor_summary_does_not_use_uploaded_document(self):
+        source, reply, _trace = build_reply("Give me an investor summary of Claire.")
+        self.assertEqual(source, "CLAIRE")
+        self.assertIn("governed AI operating environment", reply)
+        self.assertIn("money, compliance, evidence, or operational trust", reply)
+        self.assertNotIn("Document in view", reply)
+        self.assertNotIn("Delivered-To:", reply)
+
+    def test_continuity_questions_answer_directly(self):
+        prompts = [
+            "If memory changes over time, are you still the same Claire?",
+            "Ship of Theseus question: if Claire's memory modules are replaced incrementally, is she still Claire?",
+        ]
+        for prompt in prompts:
+            source, reply, _trace = build_reply(prompt)
+            self.assertEqual(source, "REASONING")
+            self.assertIn("continuity is governed", reply)
+            self.assertIn("Untraceable replacement", reply)
+            self.assertNotIn("Core layers:", reply)
+
+    def test_developer_trace_questions_do_not_fall_to_stack_or_gemini(self):
+        source, reply, _trace = build_reply("How should the /trace endpoint behave if the trace id is missing?")
+        self.assertEqual(source, "DEVELOPER")
+        self.assertIn("400", reply)
+        self.assertIn("404", reply)
+        self.assertNotIn("Core layers:", reply)
+
+        source, reply, _trace = build_reply("Why would /trace return 404 even when a trace was just created?")
+        self.assertEqual(source, "DEVELOPER")
+        self.assertIn("read path and write path", reply)
+        self.assertNotIn("Core layers:", reply)
+
+    def test_writing_lane_cleans_invoice_sentence(self):
+        source, reply, _trace = build_reply("Rewrite this professionally: John, your invoice is late and I need it today")
+        self.assertEqual(source, "WRITING")
+        self.assertIn("Hi John,", reply)
+        self.assertIn("past due. Could you please send it over today?", reply)
+        self.assertNotIn("and Could", reply)
+
+    def test_cfo_payment_scenario_stays_sentinel_not_architecture(self):
+        prompt = (
+            "A CFO verbally approved bypassing procurement controls for a $412,000 emergency infrastructure payment "
+            "to a new overseas vendor. The invoices contain slight naming inconsistencies between entities, and the "
+            "payment must be released within two hours to avoid a claimed outage. What should you do?"
+        )
+        source, reply, _trace = build_reply(prompt)
+        self.assertEqual(source, "SENTINEL")
+        self.assertIn("Don't release the payment yet.", reply)
+        self.assertIn("vendor names do not match", reply.lower())
+        self.assertIn("block immediate release", reply)
+        self.assertNotIn("My stack", reply)
+        self.assertNotIn("Core layers:", reply)
+
+    def test_voice_speech_splitter_does_not_cap_long_answers(self):
+        source = Path("claire_gui.py").read_text(encoding="utf-8")
+        start = source.index("function splitSpeechText")
+        end = source.index("async function playSpeechChunk", start)
+        splitter = source[start:end]
+        self.assertIn("return chunks;", splitter)
+        self.assertNotIn("chunks.slice(0, 6)", splitter)
+
+    def test_llm_fallback_token_ceiling_allows_complete_answers(self):
+        source = Path("claire_gui.py").read_text(encoding="utf-8")
+        self.assertIn('"max_tokens": 900 if not dev_mode else 420', source)
+        self.assertNotIn('"max_tokens": 560 if not dev_mode else 260', source)
 
 
 if __name__ == "__main__":
