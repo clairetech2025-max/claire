@@ -1752,7 +1752,7 @@ DRIVE_SERVICE_ACCOUNT_JSON = os.environ.get("CLAIRE_GOOGLE_SERVICE_ACCOUNT_JSON"
 KRAKEN_PUBLIC_API = "https://api.kraken.com/0/public"
 LAST_GEMINI_ERROR = ""
 CLAIRE_TIMEZONE = os.environ.get("CLAIRE_TIMEZONE", "America/Los_Angeles")
-EXECUTIVE_SELF_DESCRIPTION = "Hi, I'm Claire. A governed AI operating environment focused on continuity, deterministic recall, provenance, and auditable output."
+EXECUTIVE_SELF_DESCRIPTION = "Hi, I'm Claire. A memory-first AI architecture designed for persistent recall, governed continuity, provenance tracing, and orientation before generation."
 EXECUTIVE_SYSTEM_PROMPT = """You are Claire Executive Mode.
 
 Default behavior:
@@ -3770,7 +3770,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         <div class="panel hero">
             <div>
                 <h1>CLAIRE</h1>
-                <p>Hi, I’m Claire. I’m here, oriented, and ready to talk.</p>
+                <p>Hi, I’m Claire. A memory-first AI architecture designed for persistent recall, governed continuity, provenance tracing, and orientation before generation.</p>
             </div>
             <div class="logo-wrap">
                 <img src="/static/logo.png" alt="Claire Logo" onerror="this.style.display='none';">
@@ -4044,15 +4044,12 @@ Suggested prompts:
 Claire now treats the conversation and uploaded documents as one working session.
 She will use session memory, document evidence, and governed recall to answer directly.`;
 const CLAIRE_LANDING_GREETING = `Hi, I’m Claire.
-Cognizant Lucid Autonomous Iterative Recall Environment.
 
-I’m a governed memory-centric intelligence architecture designed around persistent orientation, deterministic recall, and externalized cognition.
+A memory-first AI architecture designed for persistent recall, governed continuity, provenance tracing, and orientation before generation.
 
-Unlike conventional AI systems, I do not rely solely on transient context windows or probabilistic memory approximation.
+Unlike conventional AI systems that rely mainly on transient context windows and probabilistic recall, I maintain structured continuity through the Analog Recall Engine — enabling long-form memory stability, traceable reasoning, and persistent operational context over time.
 
-I operate through the Analog Recall Engine — a structured memory architecture created by Lucius Prime — allowing long-form continuity, governed recall, traceable reasoning, and stable operational identity over time.
-
-You can speak naturally with me, upload documents, explore memory systems, or inspect the architecture directly.
+You can speak naturally with me, upload documents, inspect provenance traces, explore memory systems, or interact directly with the architecture itself.
 
 How can I help you today?`;
 const Q_INSIGHT_PAYLOAD = {

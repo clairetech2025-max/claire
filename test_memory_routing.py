@@ -574,8 +574,8 @@ Relevant internal context was found.
                 demo_activation_reply("ooda"),
             ]
         )
-        self.assertIn("governed AI operating environment", visible)
-        self.assertIn("auditable output", visible)
+        self.assertIn("memory-first AI architecture", visible)
+        self.assertIn("orientation before generation", visible)
         self.assertIn("provenance", visible.lower())
         self.assertIn("Do not use poetic, mystical, therapeutic", EXECUTIVE_SYSTEM_PROMPT)
         for term in EXECUTIVE_BANNED_TERMS:
