@@ -673,6 +673,26 @@ def last_identity_or_decision_reply() -> str:
     return ""
 
 
+def last_continuable_reply() -> str:
+    for turn in reversed(recent_turns(80)):
+        source = str(turn.get("source") or "").strip().upper()
+        query = str(turn.get("query") or "").strip()
+        reply = str(turn.get("reply_preview") or "").strip()
+        cleaned_reply = _clean_for_match(reply)
+        if not reply or len(reply) < 20:
+            continue
+        if is_thread_repair_query(query) or is_repeat_last_answer_query(query) or is_continue_last_thought_query(query):
+            continue
+        if cleaned_reply.startswith("current objective"):
+            continue
+        if is_low_quality_repeat_candidate(reply):
+            continue
+        if source in {"ERROR", "RESTRICTED", "SECURE"}:
+            continue
+        return reply
+    return ""
+
+
 def last_valid_answer_reply() -> str:
     for turn in reversed(recent_turns(40)):
         source = str(turn.get("source") or "").strip().upper()
@@ -13141,7 +13161,7 @@ def build_reply(q: str):
             return finalize_reply(q, source, reply)
 
         if is_continue_last_thought_query(q):
-            reply = last_identity_or_decision_reply()
+            reply = last_continuable_reply()
             source = "SESSION"
             if reply:
                 return finalize_reply(q, source, reply)

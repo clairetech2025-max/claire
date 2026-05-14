@@ -51,6 +51,7 @@ from claire_gui import (
     is_board_finance_review_query,
     board_finance_review_reply,
     thread_repair_reply,
+    last_continuable_reply,
 )
 from intent_classifier import classify_query
 from lane_router import extract_candidates
@@ -501,6 +502,25 @@ Relevant internal context was found.
         self.assertIn("24-hour triage checklist.", reply)
         self.assertNotIn("Active question state", reply)
         self.assertNotIn("estimated reserves", reply.lower())
+
+    def test_continue_uses_latest_general_answer_not_old_identity_answer(self):
+        old_identity = {
+            "ts": "2026-05-09T10:00:00Z",
+            "query": "How are you different from Salesforce?",
+            "source": "IDENTITY",
+            "reply_preview": "Here's the practical difference. I'm not a CRM copilot or a native Salesforce product.",
+        }
+        incomplete_general = {
+            "ts": "2026-05-09T10:05:00Z",
+            "query": "How do we stake a claim on BLM land in California?",
+            "source": "GENERAL",
+            "reply_preview": "Determine if the land is open to mineral entry. Not all BLM land is open for staking claims. You'll need to research the specific",
+        }
+        with patch("claire_gui.recent_turns", return_value=[old_identity, incomplete_general]):
+            reply = last_continuable_reply()
+
+        self.assertIn("open to mineral entry", reply)
+        self.assertNotIn("CRM copilot", reply)
 
     def test_thread_repair_uses_newest_substantive_question_not_old_risk_lane(self):
         old_risk = {
