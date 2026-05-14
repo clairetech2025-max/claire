@@ -14817,29 +14817,68 @@ async def tts(request: Request):
 
     api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
     voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
-    if not api_key or not voice_id:
-        return Response("ElevenLabs key or voice ID missing", status_code=503)
+    elevenlabs_error = ""
+    if api_key and voice_id:
+        try:
+            r = requests.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                headers={
+                    "xi-api-key": api_key,
+                    "Accept": "audio/mpeg",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "text": text[:1800],
+                    "model_id": "eleven_multilingual_v2",
+                    "voice_settings": {"stability": 0.55, "similarity_boost": 0.75},
+                },
+                timeout=60,
+            )
+            if r.status_code < 400:
+                return Response(content=r.content, media_type="audio/mpeg")
+            elevenlabs_error = f"ElevenLabs returned HTTP {r.status_code}: {r.text[:160]}"
+        except Exception as e:
+            elevenlabs_error = f"ElevenLabs error: {e}"
+    else:
+        elevenlabs_error = "ElevenLabs key or voice ID missing."
 
+    piper_audio, piper_error = synthesize_piper_tts(text)
+    if piper_audio:
+        return Response(content=piper_audio, media_type="audio/wav", headers={"X-Claire-TTS": "piper-cori"})
+
+    return Response(f"{elevenlabs_error}\nPiper fallback failed: {piper_error}", status_code=503)
+
+
+def synthesize_piper_tts(text: str) -> tuple[bytes | None, str]:
+    root = Path(__file__).resolve().parent
+    piper_bin = Path(os.getenv("CLAIRE_PIPER_BIN", str(root / "venv" / "bin" / "piper")))
+    model = Path(os.getenv("CLAIRE_PIPER_MODEL", str(root / "models" / "piper" / "en_GB-cori-high" / "en_GB-cori-high.onnx")))
+    config = Path(os.getenv("CLAIRE_PIPER_CONFIG", str(root / "models" / "piper" / "en_GB-cori-high" / "en_GB-cori-high.onnx.json")))
+    if not piper_bin.exists():
+        return None, f"Piper binary not found at {piper_bin}"
+    if not model.exists() or not config.exists():
+        return None, "Piper voice model/config not found."
     try:
-        r = requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            headers={
-                "xi-api-key": api_key,
-                "Accept": "audio/mpeg",
-                "Content-Type": "application/json",
-            },
-            json={
-                "text": text[:1800],
-                "model_id": "eleven_multilingual_v2",
-                "voice_settings": {"stability": 0.55, "similarity_boost": 0.75},
-            },
-            timeout=60,
-        )
-        if r.status_code >= 400:
-            return Response(r.text[:500], status_code=r.status_code)
-        return Response(content=r.content, media_type="audio/mpeg")
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            output_path = tmp.name
+        try:
+            subprocess.run(
+                [str(piper_bin), "--model", str(model), "--config", str(config), "--output_file", output_path],
+                input=clean_visible_reply(text)[:1800],
+                text=True,
+                capture_output=True,
+                timeout=45,
+                check=True,
+            )
+            audio = Path(output_path).read_bytes()
+            return audio, ""
+        finally:
+            try:
+                Path(output_path).unlink(missing_ok=True)
+            except Exception:
+                pass
     except Exception as e:
-        return Response(str(e), status_code=500)
+        return None, str(e)
 
 
 def service_state(name: str) -> str:

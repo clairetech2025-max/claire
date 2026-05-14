@@ -907,6 +907,13 @@ Relevant internal context was found.
         self.assertIn("SpeechSynthesisUtterance", source)
         self.assertNotIn('throw new Error("tts failed");', source)
 
+    def test_tts_backend_prefers_elevenlabs_with_piper_fallback(self):
+        source = Path("claire_gui.py").read_text(encoding="utf-8")
+        self.assertIn("elevenlabs_error", source)
+        self.assertIn("synthesize_piper_tts(text)", source)
+        self.assertIn('"X-Claire-TTS": "piper-cori"', source)
+        self.assertIn("CLAIRE_PIPER_MODEL", source)
+
     def test_llm_fallback_token_ceiling_allows_complete_answers(self):
         source = Path("claire_gui.py").read_text(encoding="utf-8")
         self.assertIn('"max_tokens": 900 if not dev_mode else 420', source)
