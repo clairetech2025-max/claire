@@ -900,6 +900,13 @@ Relevant internal context was found.
         self.assertIn("return chunks;", splitter)
         self.assertNotIn("chunks.slice(0, 6)", splitter)
 
+    def test_voice_uses_browser_fallback_when_tts_is_offline(self):
+        source = Path("claire_gui.py").read_text(encoding="utf-8")
+        self.assertIn("async function playBrowserSpeechChunk", source)
+        self.assertIn("return playBrowserSpeechChunk(text, index, total, runId);", source)
+        self.assertIn("SpeechSynthesisUtterance", source)
+        self.assertNotIn('throw new Error("tts failed");', source)
+
     def test_llm_fallback_token_ceiling_allows_complete_answers(self):
         source = Path("claire_gui.py").read_text(encoding="utf-8")
         self.assertIn('"max_tokens": 900 if not dev_mode else 420', source)

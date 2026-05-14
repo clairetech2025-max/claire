@@ -4522,7 +4522,7 @@ async function speakText(text) {
             stopVoiceMeter();
         }
     } catch (err) {
-        setVoiceMessage("VOICE INTERRUPTED: press ON once");
+        setVoiceMessage("VOICE READY");
         setVoiceState("IDLE");
         idleWave();
     }
@@ -4556,10 +4556,7 @@ async function playSpeechChunk(text, index, total, runId) {
         body: JSON.stringify({text})
     });
     if (!res.ok) {
-        setVoiceMessage("VOICE OFFLINE");
-        setVoiceState("IDLE");
-        idleWave();
-        throw new Error("tts failed");
+        return playBrowserSpeechChunk(text, index, total, runId);
     }
     const blob = await res.blob();
     if (runId !== voiceRunId) return;
@@ -4581,7 +4578,7 @@ async function playSpeechChunk(text, index, total, runId) {
         audio.onerror = () => {
             URL.revokeObjectURL(url);
             stopVoiceMeter();
-            reject(new Error("audio playback failed"));
+            playBrowserSpeechChunk(text, index, total, runId).then(resolve).catch(reject);
         };
         audio.onpause = () => {
             if (!audio.ended && runId === voiceRunId) {
@@ -4590,6 +4587,64 @@ async function playSpeechChunk(text, index, total, runId) {
         };
         audio.play().catch(reject);
     });
+}
+
+function splitBrowserSpeechText(text) {
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (!clean) return [];
+    const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [clean];
+    const chunks = [];
+    let buf = "";
+    const maxChunk = 220;
+    sentences.forEach(sentence => {
+        sentence = sentence.trim();
+        if (!sentence) return;
+        if ((buf + " " + sentence).trim().length > maxChunk && buf) {
+            chunks.push(buf.trim());
+            buf = sentence;
+        } else {
+            buf = (buf + " " + sentence).trim();
+        }
+    });
+    if (buf) chunks.push(buf.trim());
+    return chunks;
+}
+
+async function playBrowserSpeechChunk(text, index, total, runId) {
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        setVoiceMessage("VOICE OFFLINE");
+        setVoiceState("IDLE");
+        idleWave();
+        return;
+    }
+    const chunks = splitBrowserSpeechText(text);
+    for (let i = 0; i < chunks.length; i++) {
+        if (runId !== voiceRunId || !voiceEnabled) return;
+        await new Promise((resolve, reject) => {
+            const utterance = new SpeechSynthesisUtterance(chunks[i]);
+            utterance.rate = 0.96;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            utterance.onstart = () => {
+                if (runId !== voiceRunId) return;
+                setVoiceState("SPEAKING");
+                setVoiceMessage(total > 1 ? `BROWSER VOICE ${index}/${total}` : "BROWSER VOICE");
+                activeWave();
+            };
+            utterance.onend = () => {
+                if (runId === voiceRunId) idleWave();
+                resolve();
+            };
+            utterance.onerror = event => {
+                if (event && event.error === "interrupted") {
+                    resolve();
+                } else {
+                    reject(new Error("browser speech failed"));
+                }
+            };
+            window.speechSynthesis.speak(utterance);
+        });
+    }
 }
 
 function runAction(cmd) {
