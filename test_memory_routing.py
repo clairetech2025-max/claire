@@ -911,7 +911,9 @@ Relevant internal context was found.
         source = Path("claire_gui.py").read_text(encoding="utf-8")
         self.assertIn("elevenlabs_error", source)
         self.assertIn("synthesize_piper_tts(text)", source)
-        self.assertIn('"X-Claire-TTS": "piper-amy"', source)
+        self.assertIn('CLAIRE_PIPER_DEFAULT_VOICE = "en_US-amy-medium"', source)
+        self.assertIn("CLAIRE_PIPER_VOICE", source)
+        self.assertIn('headers={"X-Claire-TTS": f"piper-{CLAIRE_PIPER_VOICE}"}', source)
         self.assertIn("CLAIRE_PIPER_MODEL", source)
 
     def test_llm_fallback_token_ceiling_allows_complete_answers(self):

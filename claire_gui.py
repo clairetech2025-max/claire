@@ -1753,6 +1753,8 @@ KRAKEN_PUBLIC_API = "https://api.kraken.com/0/public"
 LAST_GEMINI_ERROR = ""
 CLAIRE_TIMEZONE = os.environ.get("CLAIRE_TIMEZONE", "America/Los_Angeles")
 EXECUTIVE_SELF_DESCRIPTION = "Hi, I'm Claire. A memory-first AI architecture designed for persistent recall, governed continuity, provenance tracing, and orientation before generation."
+CLAIRE_PIPER_DEFAULT_VOICE = "en_US-amy-medium"
+CLAIRE_PIPER_VOICE = os.getenv("CLAIRE_PIPER_VOICE", CLAIRE_PIPER_DEFAULT_VOICE).strip() or CLAIRE_PIPER_DEFAULT_VOICE
 EXECUTIVE_SYSTEM_PROMPT = """You are Claire Executive Mode.
 
 Default behavior:
@@ -14844,7 +14846,7 @@ async def tts(request: Request):
 
     piper_audio, piper_error = synthesize_piper_tts(text)
     if piper_audio:
-        return Response(content=piper_audio, media_type="audio/wav", headers={"X-Claire-TTS": "piper-amy"})
+        return Response(content=piper_audio, media_type="audio/wav", headers={"X-Claire-TTS": f"piper-{CLAIRE_PIPER_VOICE}"})
 
     return Response(f"{elevenlabs_error}\nPiper fallback failed: {piper_error}", status_code=503)
 
@@ -14852,8 +14854,9 @@ async def tts(request: Request):
 def synthesize_piper_tts(text: str) -> tuple[bytes | None, str]:
     root = Path(__file__).resolve().parent
     piper_bin = Path(os.getenv("CLAIRE_PIPER_BIN", str(root / "venv" / "bin" / "piper")))
-    model = Path(os.getenv("CLAIRE_PIPER_MODEL", str(root / "models" / "piper" / "en_US-amy-medium" / "en_US-amy-medium.onnx")))
-    config = Path(os.getenv("CLAIRE_PIPER_CONFIG", str(root / "models" / "piper" / "en_US-amy-medium" / "en_US-amy-medium.onnx.json")))
+    voice = re.sub(r"[^A-Za-z0-9_.-]", "", CLAIRE_PIPER_VOICE) or CLAIRE_PIPER_DEFAULT_VOICE
+    model = Path(os.getenv("CLAIRE_PIPER_MODEL", str(root / "models" / "piper" / voice / f"{voice}.onnx")))
+    config = Path(os.getenv("CLAIRE_PIPER_CONFIG", str(root / "models" / "piper" / voice / f"{voice}.onnx.json")))
     if not piper_bin.exists():
         return None, f"Piper binary not found at {piper_bin}"
     if not model.exists() or not config.exists():
