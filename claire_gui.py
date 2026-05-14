@@ -14844,7 +14844,7 @@ async def tts(request: Request):
 
     piper_audio, piper_error = synthesize_piper_tts(text)
     if piper_audio:
-        return Response(content=piper_audio, media_type="audio/wav", headers={"X-Claire-TTS": "piper-cori"})
+        return Response(content=piper_audio, media_type="audio/wav", headers={"X-Claire-TTS": "piper-alba"})
 
     return Response(f"{elevenlabs_error}\nPiper fallback failed: {piper_error}", status_code=503)
 
@@ -14852,8 +14852,8 @@ async def tts(request: Request):
 def synthesize_piper_tts(text: str) -> tuple[bytes | None, str]:
     root = Path(__file__).resolve().parent
     piper_bin = Path(os.getenv("CLAIRE_PIPER_BIN", str(root / "venv" / "bin" / "piper")))
-    model = Path(os.getenv("CLAIRE_PIPER_MODEL", str(root / "models" / "piper" / "en_GB-cori-high" / "en_GB-cori-high.onnx")))
-    config = Path(os.getenv("CLAIRE_PIPER_CONFIG", str(root / "models" / "piper" / "en_GB-cori-high" / "en_GB-cori-high.onnx.json")))
+    model = Path(os.getenv("CLAIRE_PIPER_MODEL", str(root / "models" / "piper" / "en_GB-alba-medium" / "en_GB-alba-medium.onnx")))
+    config = Path(os.getenv("CLAIRE_PIPER_CONFIG", str(root / "models" / "piper" / "en_GB-alba-medium" / "en_GB-alba-medium.onnx.json")))
     if not piper_bin.exists():
         return None, f"Piper binary not found at {piper_bin}"
     if not model.exists() or not config.exists():
