@@ -83,7 +83,9 @@ def vsc_replacement_answer(accepted_support: list[dict] | None = None) -> str:
 def generic_reasoning_first_answer(prompt: str, intent: dict, accepted_support: list[dict]) -> str:
     support = _support_summary(accepted_support)
     answer = (
-        "Give me a specific engineering, architecture, or decision question and I will answer it directly. I work best when I can separate memory, control, reasoning, and trace instead of speaking in abstractions."
+        "I do not have a verified specific record that answers this directly.\n\n"
+        "I should not substitute a generic Claire explanation for a factual recall question. "
+        "If this depends on prior session state, I need a matching trace, capsule, document, or memory record before naming a root cause, rejected fix, or approved next step."
     )
     return answer + (f"\n\n{support}" if support else "")
 

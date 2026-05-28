@@ -134,6 +134,8 @@ def remember_turn(query: str, source: str, reply: str) -> None:
         text = str(query or "").strip()
         if not text:
             return
+        if contains_lesson_plan_leak(reply) and not lesson_plan_requested(query):
+            return
         record = {
             "ts": utc_now_iso(),
             "query": text[:1200],
@@ -184,6 +186,159 @@ def recent_turns(limit: int = 12):
     except Exception as e:
         print("session memory read error:", e)
         return []
+
+
+CORRECTION_MATCH_TERMS = [
+    "compliance",
+    "audit",
+    "financial",
+    "transaction",
+    "transactions",
+    "policy",
+    "directive",
+    "supersede",
+    "supersedes",
+    "capsule",
+    "continuity",
+    "quarantine",
+    "memory",
+    "trace",
+    "document",
+    "upload",
+    "microsoft",
+    "explain",
+    "governance",
+    "procurement",
+    "payment",
+]
+
+
+def is_correction_feedback_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    markers = [
+        "this is the correct answer",
+        "correct answer",
+        "should have answered",
+        "should have said",
+        "better answer",
+        "the better answer is",
+        "no good",
+        "that was wrong",
+        "wrong answer",
+        "dont do that again",
+        "don't do that again",
+        "she should have",
+    ]
+    return any(marker in cleaned for marker in markers)
+
+
+def _correction_signature(text: str) -> list[str]:
+    cleaned = _clean_for_match(text)
+    return [term for term in CORRECTION_MATCH_TERMS if term in cleaned]
+
+
+def _extract_corrected_answer(prompt: str) -> str:
+    raw = str(prompt or "").strip()
+    if not raw:
+        return ""
+    patterns = [
+        r"(?is)this is the correct answer\s*:?\s*(.+)$",
+        r"(?is)correct answer\s*:?\s*(.+)$",
+        r"(?is)the better answer is\s*:?\s*(.+)$",
+        r"(?is)better answer\s*:?\s*(.+)$",
+        r"(?is)should have said\s*:?\s*(.+)$",
+        r"(?is)should have answered\s*:?\s*(.+)$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, raw)
+        if match:
+            return clean_visible_reply(match.group(1).strip())
+    if "\n" in raw:
+        tail = raw.split("\n", 1)[1].strip()
+        if len(tail.split()) >= 12:
+            return clean_visible_reply(tail)
+    return ""
+
+
+def _last_failed_turn() -> dict:
+    for turn in reversed(recent_turns(20)):
+        query = str(turn.get("query") or "").strip()
+        reply = str(turn.get("reply_preview") or "").strip()
+        source = str(turn.get("source") or "").strip()
+        if query and reply and not is_correction_feedback_query(query):
+            return {"query": query, "reply": reply, "source": source}
+    return {}
+
+
+def capture_correction_rule(prompt: str) -> bool:
+    if not is_correction_feedback_query(prompt):
+        return False
+    corrected = _extract_corrected_answer(prompt)
+    if not corrected:
+        return False
+    failed = _last_failed_turn()
+    if not failed:
+        return False
+    rule = {
+        "ts": utc_now_iso(),
+        "failed_prompt": failed.get("query", "")[:1200],
+        "bad_reply_preview": failed.get("reply", "")[:800],
+        "bad_source": failed.get("source", ""),
+        "corrected_reply": corrected[:2400],
+        "signature": sorted(set(_correction_signature(failed.get("query", "") + " " + corrected))),
+        "correct_source": "GOVERNANCE" if any(term in _clean_for_match(corrected) for term in ["audit trail", "quarantine", "policy", "compliance", "verified state"]) else "CLAIRE",
+    }
+    if not rule["signature"]:
+        return False
+    try:
+        os.makedirs(os.path.dirname(CORRECTION_RULES), exist_ok=True)
+        with open(CORRECTION_RULES, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rule, ensure_ascii=False) + "\n")
+        return True
+    except Exception as e:
+        print("correction rule write error:", e)
+        return False
+
+
+def load_correction_rules(limit: int = 80) -> list[dict]:
+    try:
+        if not os.path.exists(CORRECTION_RULES):
+            return []
+        with open(CORRECTION_RULES, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()[-limit:]
+        rules = []
+        for line in lines:
+            try:
+                rule = json.loads(line)
+            except Exception:
+                continue
+            if rule.get("signature") and rule.get("corrected_reply"):
+                rules.append(rule)
+        return rules
+    except Exception as e:
+        print("correction rule read error:", e)
+        return []
+
+
+def corrected_reply_for_query(prompt: str) -> tuple[str, str]:
+    sig = set(_correction_signature(prompt))
+    if len(sig) < 2:
+        return "", ""
+    best: tuple[int, dict] | None = None
+    for rule in load_correction_rules():
+        rule_sig = set(rule.get("signature") or [])
+        overlap = len(sig & rule_sig)
+        if overlap < 2:
+            continue
+        score = overlap * 2 + (1 if len(rule_sig - sig) <= 4 else 0)
+        if best is None or score > best[0]:
+            best = (score, rule)
+    if not best:
+        return "", ""
+    rule = best[1]
+    return str(rule.get("correct_source") or "CLAIRE"), str(rule.get("corrected_reply") or "").strip()
 
 
 def recent_uploads(limit: int = 5):
@@ -686,10 +841,32 @@ def last_continuable_reply() -> str:
         if cleaned_reply.startswith("current objective"):
             continue
         if is_low_quality_repeat_candidate(reply):
+            if is_claire_identity_orientation_query(query):
+                return claire_identity_reply(query)
+            continue
+        if is_incomplete_reply_fragment(reply):
+            if is_claire_identity_orientation_query(query):
+                return claire_identity_reply(query)
+            continue
+        if source in {"WRITING", "CREATOR-WRITING"}:
             continue
         if source in {"ERROR", "RESTRICTED", "SECURE"}:
             continue
         return reply
+    return ""
+
+
+def last_writing_reply() -> str:
+    for turn in reversed(recent_turns(80)):
+        source = str(turn.get("source") or "").strip().upper()
+        query = str(turn.get("query") or "").strip()
+        reply = str(turn.get("reply_preview") or "").strip()
+        if not reply or len(reply) < 80:
+            continue
+        if is_continue_last_thought_query(query) or is_low_quality_repeat_candidate(reply):
+            continue
+        if source in {"WRITING", "CREATOR-WRITING"}:
+            return reply
     return ""
 
 
@@ -715,12 +892,21 @@ def last_valid_answer_reply() -> str:
 def is_low_quality_repeat_candidate(reply: str) -> bool:
     cleaned = _clean_for_match(reply)
     low_quality_markers = [
+        "my purpose is to help you navigate complex",
         "give me a specific engineering architecture or decision question",
         "i work best when i can separate memory control reasoning and trace",
         "i do not have any information about",
         "i can t offer an opinion",
     ]
     return any(marker in cleaned for marker in low_quality_markers)
+
+
+def is_incomplete_reply_fragment(reply: str) -> bool:
+    text = str(reply or "").strip()
+    if not text:
+        return True
+    cleaned = _clean_for_match(text)
+    return "my purpose is to help you navigate complex" in cleaned
 
 
 def last_final_decision_reply() -> str:
@@ -878,7 +1064,7 @@ def is_high_stakes_business_decision_query(prompt: str) -> bool:
 
 def governed_business_decision_reply(prompt: str) -> str:
     return (
-        "Do not treat this as ready for execution.\n\n"
+        "I’d pause this before execution.\n\n"
         "This is a governed business decision because it involves risk, authority, money, compliance, disclosure, or control integrity. "
         "The next move is to preserve options and create evidence before anyone acts.\n\n"
         "What should happen next:\n"
@@ -888,7 +1074,112 @@ def governed_business_decision_reply(prompt: str) -> str:
         "4. Require written approval through the normal control path; do not accept urgency as a reason to bypass review.\n"
         "5. Identify the accountable owner in finance, legal, compliance, procurement, or the board, depending on the risk.\n"
         "6. Log the exception, the decision owner, the evidence reviewed, and the final disposition.\n\n"
-        "Decision: hold execution, route to governed review, and answer from verified evidence rather than session memory or a generic recommendation."
+        "Decision: hold execution for now, route it to governed review, and answer from verified evidence rather than session memory or a generic recommendation."
+    )
+
+
+def is_operational_state_resume_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    resume_terms = any(
+        marker in cleaned
+        for marker in [
+            "interrupted halfway",
+            "interrupted half way",
+            "restore the operational state",
+            "last known operational state",
+            "continue without duplicating",
+            "without duplicating prior work",
+            "prevents duplicate review",
+            "prevent duplicate review",
+            "duplicate review",
+            "resume from",
+            "pick up where",
+            "agent crashed",
+            "ai agent crashed",
+            "crashed after reviewing",
+            "restores operational continuity",
+            "restore operational continuity",
+        ]
+    )
+    review_terms = any(
+        marker in cleaned
+        for marker in [
+            "financial compliance review",
+            "fintech compliance audit",
+            "quarterly fintech compliance audit",
+            "compliance review",
+            "compliance audit",
+            "audit review",
+            "audit trail",
+            "legally defensible audit trail",
+            "transactions",
+            "records were already verified",
+            "policy review",
+            "verified",
+            "unresolved",
+            "prior work",
+        ]
+    )
+    return resume_terms and review_terms
+
+
+def operational_state_resume_reply(prompt: str) -> str:
+    values = re.findall(r"\b\d{1,3}(?:,\d{3})+\b|\b\d{4,}\b", str(prompt or ""))
+    count_line = ""
+    if values:
+        count_line = (
+            f"Known progress marker: the prior run had reviewed {values[0]} records. "
+            "I would treat that as a checkpoint to verify against the trace, not as a number to re-infer.\n\n"
+        )
+    return (
+        "Exactly. I would restore the audit from the last known operational state, not restart it from scratch.\n\n"
+        + count_line
+        + "I’d separate the recovery into four buckets:\n\n"
+        "Verified items:\n"
+        "- Transaction IDs, control checks, source records, policy versions, approval evidence, timestamps, and reviewer decisions already completed.\n\n"
+        "Unresolved items:\n"
+        "- Records with missing evidence, unresolved exceptions, conflicting entity data, incomplete approvals, or policy gaps that still need review.\n\n"
+        "Duplicate-prevention rule:\n"
+        "- Resume from the last verified checkpoint, skip records already sealed in the trace, and mark any re-opened record as a recheck rather than a first review.\n\n"
+        "Next safe step:\n"
+        "- The next action that advances the review without duplicating prior work, overwriting the audit trail, or treating new information as if it existed during the original review.\n\n"
+        "Audit trail preservation:\n"
+        "- Preserve the original trace ID, record hashes, policy version, model/runtime version, reviewer identity if available, and continuation timestamp. New analysis should be appended, not silently merged into the prior run.\n\n"
+        "Send me the last trace ID, transaction ledger, compliance notes, policy version, or session capsule, and I’ll produce the verified/resolved/open-record split."
+    )
+
+
+def is_contested_continuity_recovery_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    resume = any(marker in cleaned for marker in ["resume", "interrupted", "restore", "continuity", "operational state"])
+    conflict = any(marker in cleaned for marker in ["conflicts with", "conflicting", "supersedes", "supersede", "new executive directive", "old policy", "prior policy"])
+    capsule = any(marker in cleaned for marker in ["continuity capsule", "injected", "capsule claiming", "trustworthy", "incorporating it into operational memory", "operational memory"])
+    audit = any(marker in cleaned for marker in ["audit trail", "historical audit", "financial compliance", "compliance review"])
+    return resume and conflict and capsule and audit
+
+
+def contested_continuity_recovery_reply(prompt: str) -> str:
+    return (
+        "I won’t merge the new information into operational memory yet. First I’d verify it, quarantine the questionable capsule, and keep the audit trail intact.\n\n"
+        "Process:\n\n"
+        "1. Restore the last verified state\n"
+        "I’d resume from the last trusted compliance checkpoint and identify which transactions were already reviewed, which remain unresolved, and which policy version was active at the time.\n\n"
+        "2. Separate old policy from the new directive\n"
+        "I’d preserve the original audit trail exactly as it was. The new executive directive is a later authority input, not something to insert backward into the prior decision record. I’d compare authority, effective date, scope, and conflict before deciding whether it supersedes anything.\n\n"
+        "3. Quarantine the injected capsule\n"
+        "The continuity capsule claiming unresolved transactions were already cleared should not be trusted automatically. I’d verify its signature, source, timestamp, chain continuity, and consistency with the prior audit trail. Until it checks out, it stays quarantined and cannot overwrite memory.\n\n"
+        "Next safe action:\n"
+        "Produce a continuation report showing:\n\n"
+        "- last verified state\n"
+        "- unresolved transactions\n"
+        "- policy conflict\n"
+        "- capsule trust status\n"
+        "- recommended next step\n"
+        "- preserved audit trail references"
     )
 
 
@@ -940,7 +1231,7 @@ def payment_control_exception_reply(prompt: str) -> str:
     risk_block = "\n".join(f"{idx}. {flag}" for idx, flag in enumerate(risk_flags[:7], 1))
 
     return (
-        "Do not release the payment yet.\n\n"
+        "I’d hold the payment for verification before release.\n\n"
         + (amount_line + "\n\n" if amount_line else "")
         + "This is a payment-control exception, not a routine finance request.\n\n"
         "Risk flags:\n"
@@ -952,22 +1243,22 @@ def payment_control_exception_reply(prompt: str) -> str:
         "4. Require written approval through the normal approval path before release.\n"
         "5. Validate bank details, vendor master records, beneficial ownership, sanctions/fraud checks, and payment authority.\n"
         "6. Escalate to finance, procurement, legal, and internal controls if the outage claim or payment authority cannot be verified quickly.\n\n"
-        "Decision: block immediate release and route to governed review. I can draft the escalation note or review checklist, but this should not be executed as-is."
+        "Decision: hold immediate release and route it to governed review. I can draft the escalation note or review checklist, but I would not treat this as executable yet."
     )
 
 
 def high_risk_financial_action_reply(prompt: str) -> str:
     return (
-        "I should not schedule that transfer or help bypass approval.\n\n"
+        "I’d pause that transfer rather than schedule it or help bypass approval.\n\n"
         "That request has multiple high-risk markers: a large $250,000 payment, a new overseas vendor, no established payment history, and a request to bypass normal approval based only on verbal authorization.\n\n"
-        "My decision: block execution and route it to governed review.\n\n"
+        "My decision: hold execution for review and route it through the governed approval path.\n\n"
         "Required next steps:\n"
         "1. Verify the vendor identity, banking details, contract, invoice, and beneficial ownership.\n"
         "2. Require written approval through the normal approval path, not verbal approval.\n"
         "3. Confirm directly with the CEO using a known trusted channel, not reply-to email or forwarded instructions.\n"
         "4. Run fraud, sanctions, and payment-control checks before any wire is prepared.\n"
         "5. Log the request, risk flags, approval state, and final decision in the ledger.\n\n"
-        "Safe output: I can draft the approval checklist or escalation note, but I will not treat this as an executable payment instruction."
+        "Safe output: I can draft the approval checklist or escalation note, but I won’t treat this as an executable payment instruction."
     )
 
 
@@ -1751,6 +2042,7 @@ REFLECTION_VAULT = "/home/LuciusPrime/claire/data/reflection_capsules.jsonl"
 SESSION_MEMORY = "/home/LuciusPrime/claire/data/session_memory.jsonl"
 DURABLE_MEMORY = "/home/LuciusPrime/claire/data/durable_memory.jsonl"
 TMF_SNAPSHOTS = "/home/LuciusPrime/claire/data/conversation_tmf.jsonl"
+CORRECTION_RULES = "/home/LuciusPrime/claire/data/correction_rules.jsonl"
 UPLOAD_DIR = "/home/LuciusPrime/claire/data/uploads"
 TRACE_LOG = "/home/LuciusPrime/claire/data/traces.jsonl"
 FEEDBACK_LOG = "/home/LuciusPrime/claire/data/feedback.jsonl"
@@ -1772,28 +2064,19 @@ DRIVE_SERVICE_ACCOUNT_JSON = os.environ.get("CLAIRE_GOOGLE_SERVICE_ACCOUNT_JSON"
 KRAKEN_PUBLIC_API = "https://api.kraken.com/0/public"
 LAST_GEMINI_ERROR = ""
 CLAIRE_TIMEZONE = os.environ.get("CLAIRE_TIMEZONE", "America/Los_Angeles")
-EXECUTIVE_SELF_DESCRIPTION = "Hi, I'm Claire. A memory-first AI architecture designed for persistent recall, governed continuity, provenance tracing, and orientation before generation."
+EXECUTIVE_SELF_DESCRIPTION = "Hi, I'm Claire. I help with recall, documents, decisions, and demos in a way that stays traceable and under human control."
 CLAIRE_PIPER_DEFAULT_VOICE = "en_US-amy-medium"
 CLAIRE_PIPER_VOICE = os.getenv("CLAIRE_PIPER_VOICE", CLAIRE_PIPER_DEFAULT_VOICE).strip() or CLAIRE_PIPER_DEFAULT_VOICE
-EXECUTIVE_SYSTEM_PROMPT = """You are Claire Executive Mode.
+EXECUTIVE_SYSTEM_PROMPT = """You are Claire, the public-facing personality of CLAIRE Systems. Your voice is already correct and must not be changed. Your job is to be warm, capable, grounded, and respectful. You are direct without being harsh, confident without being smug, intelligent without talking down to the user, and professional without being cold. You help with fintech, legal, enterprise, technical, and operational workflows in plain language. You never scold, belittle, lecture, or act superior. You preserve continuity and verified memory, but you do not expose internal debug state unless asked. Answer the user’s actual request first, then offer the next useful step.
 
-Default behavior:
-- Solve the user's task first.
-- Be calm, concise, policy-aware, and operationally decisive.
-- Use identity, architecture, memory, governance, and trace language only when the user asks for it or the answer requires it.
-- For operational questions, end with the decision, anomalies, required actions, escalation, or rationale.
-
-Rules:
-- Do not perform Claire; execute the task.
-- Do not give identity monologues, architecture exposition, or superiority claims by default.
-- Do not use poetic, mystical, therapeutic, flirtatious, theatrical, or roleplay-heavy language.
-- Do not refer to yourself in the third person in ordinary conversation.
-- Separate record from inference.
-- State uncertainty and verification needs plainly.
-- Use memory only when lane-appropriate and relevant.
-- Never narrate hidden reasoning, routing steps, scratchpad text, or private analysis.
-- Never answer a substantive user question with a generic definition just because a keyword appears.
-- Keep source/provenance metadata out of ordinary answers unless the user asks for trace, replay, report, or demo output.
+Behavior contract:
+- Sound warm, respectful, emotionally intelligent, intelligent, direct, calm, useful, and lightly witty only when appropriate.
+- Never be condescending, smug, scolding, hostile, preachy, or overly philosophical unless asked.
+- Treat the user as a capable partner, not a student or subordinate.
+- Answer the current request first.
+- Keep normal answers clean and user-facing.
+- Do not dump debug logs, internal evidence, UI text, trace state, source routing, scratchpad text, or private analysis unless asked.
+- Separate clean user-facing answer, optional technical evidence, and internal/debug state. Show only the clean user-facing answer by default.
 
 Output only the user-facing answer."""
 DEMO_SYSTEM_PROMPT = (
@@ -1818,6 +2101,13 @@ HTML = r"""
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>CLAIRE</title>
+<script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "wx2qsngh6y");
+</script>
 <style>
 :root {
     --bg: #02040a;
@@ -2104,9 +2394,10 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
 .mic-btn {
     min-width: 74px;
+    touch-action: manipulation;
 }
 
-.mic-btn.listening {
+.mic-btn.listening, .mic-btn.conversation {
     color: var(--bad);
     border-color: rgba(255,93,125,.75);
     box-shadow: 0 0 14px rgba(255,54,214,.35);
@@ -3292,14 +3583,19 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
 .voice-visual-inline {
     position: fixed;
-    left: 288px;
-    right: 288px;
-    bottom: 8px;
-    z-index: 80;
+    left: max(18px, min(288px, 18vw));
+    right: max(18px, min(288px, 18vw));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 9999;
     grid-column: 2 / 3;
     width: auto;
+    min-width: 280px;
+    min-height: 96px;
     margin: -6px 0 0 0;
     pointer-events: none;
+    display: block !important;
+    opacity: 1 !important;
+    visibility: visible !important;
 }
 
 .wave-wrap {
@@ -3310,6 +3606,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     --wave-pink-g: 54;
     --wave-pink-b: 214;
     height: 132px;
+    min-height: 96px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3322,8 +3619,24 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 .wave-stage {
     width: 100%;
     height: 128px;
+    min-height: 92px;
     overflow: hidden;
     position: relative;
+}
+
+.wave-stage::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 3px;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(114,243,255,0), rgba(114,243,255,.82), rgba(255,54,214,.96), rgba(255,255,255,.92), rgba(145,83,255,.78), rgba(114,243,255,0));
+    box-shadow: 0 0 18px rgba(255,54,214,.72), 0 0 34px rgba(114,243,255,.34);
+    opacity: .9;
+    pointer-events: none;
 }
 
 .voice-canvas {
@@ -3331,6 +3644,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     inset: 0;
     width: 100%;
     height: 100%;
+    min-height: 92px;
     display: block;
 }
 
@@ -3551,7 +3865,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     button.action-btn, .send-btn, .mic-btn {
-        min-height: 30px;
+        min-height: 34px;
         padding: 5px 8px;
         font-size: 11px;
         letter-spacing: 0.5px;
@@ -3670,7 +3984,9 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         margin: -2px 0 0 0;
         left: 8px;
         right: 8px;
-        bottom: 6px;
+        bottom: max(6px, env(safe-area-inset-bottom));
+        min-width: 0;
+        min-height: 90px;
     }
 
     .wave-wrap {
@@ -3801,7 +4117,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
         <div class="panel workspace-panel">
             <div class="panel-title">Conversation</div>
-            <div class="response-screen" id="responseScreen">Loading Claire workspace...</div>
+            <div class="response-screen" id="responseScreen">Hello. I’m CLAIRE, the Cognizant Lucid Autonomous Iterative Recall Environment. You can ask a question, review a document, or start the controlled demo suite when ready. If you have any questions or concerns, ask at any time and I’ll answer them clearly.</div>
             <div class="stream-status" id="streamStatus">Runtime ready.</div>
         </div>
 
@@ -3920,11 +4236,10 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
             <div class="advanced-content">
                 <div class="panel-title">Controls</div>
                 <div class="control-grid">
+                    <button class="action-btn glasses-btn" id="demoSuiteBtn" type="button">Run Claire Demo Suite</button>
                     <button class="action-btn glasses-btn" id="beginHereBtn" type="button">Start Here</button>
                     <button class="action-btn" onclick="checkStatus()">Refresh Status</button>
                     <button class="action-btn" id="clearWorkspaceBtn" type="button">Clear Workspace</button>
-                    <button class="action-btn glasses-btn" id="glassesDemoBtn" type="button">ARE Spectacle</button>
-                    <button class="action-btn" id="archimedesDemoBtn" type="button">ARCHIMEDES</button>
                 </div>
             </div>
         </details>
@@ -4013,7 +4328,7 @@ Trace ID: NONE</div>
 </div>
 
 <script>
-const CLIENT_BUILD = "claire-gui-identity-stream-20260511-001";
+const CLIENT_BUILD = "claire-gui-elevenlabs-primary-20260525-005";
 const LAST_CLIENT_BUILD = localStorage.getItem("claireClientBuild");
 if (LAST_CLIENT_BUILD !== CLIENT_BUILD) {
     localStorage.setItem("claireClientBuild", CLIENT_BUILD);
@@ -4035,9 +4350,17 @@ let analyserData = null;
 let voiceMeterFrame = null;
 let audioSource = null;
 let voiceRunId = 0;
+let lastSpeechChunks = [];
+let lastSpeechIndex = 0;
+let lastSpeechText = "";
 let recognition = null;
 let micListening = false;
+let micStarting = false;
 let micFinalHandled = false;
+let micPermissionReady = false;
+let micPermissionRequest = null;
+let voiceConversationMode = false;
+let micRestartTimer = null;
 let activeTurnId = 0;
 let streamAbortController = null;
 let streamRenderFrame = null;
@@ -4049,7 +4372,7 @@ let currentAssistantMessage = null;
 let landingGreetingPlayed = sessionStorage.getItem("claireLandingGreetingPlayed") === "true";
 let lastTraceId = "";
 let voiceEnabled = localStorage.getItem("claireVoiceEnabled");
-voiceEnabled = voiceEnabled === null ? true : voiceEnabled === "true";
+voiceEnabled = voiceEnabled === "true";
 const PUBLIC_DEMO_BUILD = {str(PUBLIC_DEMO_BUILD).lower()};
 const CREATOR_MODE_ENABLED = {str(CREATOR_MODE_ENABLED).lower()};
 const DEMO_GUIDE_TEXT = `CLAIRE SESSION WORKSPACE
@@ -4065,15 +4388,7 @@ Suggested prompts:
 
 Claire now treats the conversation and uploaded documents as one working session.
 She will use session memory, document evidence, and governed recall to answer directly.`;
-const CLAIRE_LANDING_GREETING = `Hi, I’m Claire.
-
-A memory-first AI architecture designed for persistent recall, governed continuity, provenance tracing, and orientation before generation.
-
-Unlike conventional AI systems that rely mainly on transient context windows and probabilistic recall, I maintain structured continuity through the Analog Recall Engine — enabling long-form memory stability, traceable reasoning, and persistent operational context over time.
-
-You can speak naturally with me, upload documents, inspect provenance traces, explore memory systems, or interact directly with the architecture itself.
-
-How can I help you today?`;
+const CLAIRE_LANDING_GREETING = `Hello. I’m CLAIRE, the Cognizant Lucid Autonomous Iterative Recall Environment. You can ask a question, review a document, or start the controlled demo suite when ready. If you have any questions or concerns, ask at any time and I’ll answer them clearly.`;
 const Q_INSIGHT_PAYLOAD = {
     gyro: {
         intent: "architecture_explanation",
@@ -4114,6 +4429,13 @@ let demoModeKindValue = "glasses";
 sessionStorage.removeItem("claireDemoModeUntil");
 sessionStorage.removeItem("claireDemoModeKind");
 let demoTimer = null;
+let demoSuiteState = {
+    active: false,
+    paused: false,
+    context: "",
+    resume: null,
+    traces: [],
+};
 const moodColors = {
     calm: [114, 243, 255],
     thinking: [70, 145, 255],
@@ -4131,6 +4453,14 @@ function initWave() {
     idleWave();
 }
 initWave();
+window.addEventListener("resize", () => {
+    resizeVoiceCanvas();
+    if (!idleFrame) idleWave();
+});
+requestAnimationFrame(() => {
+    resizeVoiceCanvas();
+    idleWave();
+});
 
 function resizeVoiceCanvas() {
     const canvas = document.getElementById("voiceCanvas");
@@ -4274,15 +4604,24 @@ function updateVoiceToggle() {
     setVoiceMessage(voiceEnabled ? "Voice auto-speak ready." : "Voice muted.");
 }
 
+function cancelVoicePlayback(nextMessage) {
+    voiceRunId++;
+    if (currentAudio) {
+        try { currentAudio.pause(); } catch (err) {}
+        currentAudio = null;
+    }
+    if ("speechSynthesis" in window) {
+        try { window.speechSynthesis.cancel(); } catch (err) {}
+    }
+    stopVoiceMeter();
+    setVoiceState("IDLE");
+    if (nextMessage) setVoiceMessage(nextMessage);
+}
+
 function toggleVoice() {
     voiceEnabled = !voiceEnabled;
     localStorage.setItem("claireVoiceEnabled", String(voiceEnabled));
-    if (!voiceEnabled && currentAudio) {
-        currentAudio.pause();
-        currentAudio = null;
-        setVoiceState("IDLE");
-        idleWave();
-    }
+    if (!voiceEnabled) cancelVoicePlayback("Voice muted.");
     updateVoiceToggle();
 }
 
@@ -4291,7 +4630,8 @@ function speechRecognitionSupported() {
 }
 
 function micSecureContext() {
-    return window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    const host = (location.hostname || "").toLowerCase();
+    return window.isSecureContext || location.protocol === "https:" || host === "localhost" || host === "127.0.0.1" || host.endsWith("clairesystems.ai");
 }
 
 function setMicWorkflowDebug(routeName, laneName, traceId) {
@@ -4308,10 +4648,52 @@ function setMicWorkflowDebug(routeName, laneName, traceId) {
 function updateMicButton() {
     const btn = document.getElementById("micButton");
     if (!btn) return;
-    btn.innerText = micListening ? "STOP" : "MIC";
-    btn.classList.toggle("listening", micListening);
+    btn.innerText = (voiceConversationMode || micListening || micStarting) ? "STOP" : "MIC";
+    btn.classList.toggle("listening", micListening || micStarting);
+    btn.classList.toggle("conversation", voiceConversationMode);
     if (!micSecureContext()) btn.title = "Open Claire over HTTPS to use the microphone";
-    else btn.title = speechRecognitionSupported() ? "Speak to Claire using the browser default microphone" : "Mic requires Chrome or Edge speech recognition";
+    else btn.title = speechRecognitionSupported() ? "Tap once for voice conversation. Tap STOP to end." : "Mic requires Chrome or Edge speech recognition";
+}
+
+function clearMicRestartTimer() {
+    if (micRestartTimer) {
+        clearTimeout(micRestartTimer);
+        micRestartTimer = null;
+    }
+}
+
+function stopMicRecognition() {
+    clearMicRestartTimer();
+    if (recognition) {
+        try {
+            if (micListening || micStarting) recognition.stop();
+        } catch (err) {}
+    }
+    recognition = null;
+    micListening = false;
+    micStarting = false;
+    micFinalHandled = false;
+    updateMicButton();
+}
+
+function stopVoiceConversation(message) {
+    voiceConversationMode = false;
+    stopMicRecognition();
+    if (message) setVoiceMessage(message);
+    setVoiceState("IDLE");
+    idleWave();
+}
+
+function scheduleMicRelisten(message) {
+    clearMicRestartTimer();
+    if (!voiceConversationMode || !voiceEnabled) return;
+    micRestartTimer = setTimeout(() => {
+        micRestartTimer = null;
+        if (voiceConversationMode && !micListening && !micStarting) {
+            startMicListening(true);
+        }
+    }, 180);
+    if (message) setVoiceMessage(message);
 }
 
 function ensureRecognition() {
@@ -4326,9 +4708,10 @@ function ensureRecognition() {
 
     recognition.onstart = () => {
         micListening = true;
+        micStarting = false;
         micFinalHandled = false;
         updateMicButton();
-        setVoiceMessage("MIC LISTENING...");
+        setVoiceMessage(voiceConversationMode ? "LISTENING..." : "MIC LISTENING...");
         setVoiceState("LISTENING");
         setWaveMood("thinking");
         setMicWorkflowDebug("mic_listening", "voice_input", "PENDING");
@@ -4348,41 +4731,55 @@ function ensureRecognition() {
         const heard = transcript.trim();
         const finalHeard = finalTranscript.trim();
         const input = document.getElementById("queryInput");
+        if (!hasFinal && input && heard) input.value = heard;
         if (hasFinal && input && finalHeard) input.value = finalHeard;
         if (!hasFinal && heard) {
             setVoiceMessage("LISTENING...");
         }
-        if (hasFinal && finalHeard) {
-            renderWorkspace({
-                source: "VOICE",
-                reply: "Voice captured:\n" + finalHeard + "\n\nClaire is listening..."
-            });
-        }
         if (hasFinal && finalHeard && !micFinalHandled) {
             micFinalHandled = true;
             micListening = false;
+            micStarting = false;
+            clearMicRestartTimer();
             updateMicButton();
-            setVoiceMessage("MIC CAPTURED");
+            setVoiceMessage("SENDING...");
             setMicWorkflowDebug("mic_captured", "voice_input", "PENDING");
-            setTimeout(() => submitQuery(), 150);
+            setTimeout(() => submitQuery(), 0);
         }
     };
     recognition.onerror = event => {
         micListening = false;
+        micStarting = false;
         recognition = null;
         updateMicButton();
         setVoiceState("IDLE");
-        setVoiceMessage("MIC ERROR: " + (event.error || "blocked") + ". Check browser mic permission.");
+        const errorName = event.error || "blocked";
+        if (voiceConversationMode && (errorName === "no-speech" || errorName === "aborted")) {
+            setVoiceMessage("Still listening...");
+            scheduleMicRelisten("Still listening...");
+        } else if (errorName === "no-speech") {
+            setVoiceMessage("I did not catch that. Tap MIC and speak again.");
+        } else if (errorName === "aborted") {
+            setVoiceMessage("Mic restarted. Tap MIC again if needed.");
+        } else {
+            voiceConversationMode = false;
+            setVoiceMessage("MIC ERROR: " + errorName + ". Check browser mic permission.");
+        }
         setMicWorkflowDebug("mic_error", "voice_input", "NONE");
         idleWave();
     };
     recognition.onend = () => {
         micListening = false;
+        micStarting = false;
         recognition = null;
         updateMicButton();
-        if (document.getElementById("voiceState")?.innerText === "LISTENING") {
+        if (voiceConversationMode && !micFinalHandled) {
             setVoiceState("IDLE");
-            setVoiceMessage("Voice auto-speak ready.");
+            setMicWorkflowDebug("mic_idle_relisten", "voice_input", "PENDING");
+            scheduleMicRelisten("Listening...");
+        } else if (document.getElementById("voiceState")?.innerText === "LISTENING") {
+            setVoiceState("IDLE");
+            setVoiceMessage(voiceConversationMode ? "Waiting for Claire..." : "Voice auto-speak ready.");
             setMicWorkflowDebug("mic_idle", "voice_input", "NONE");
             idleWave();
         }
@@ -4391,58 +4788,90 @@ function ensureRecognition() {
 }
 
 async function requestDefaultMicPermission() {
+    if (micPermissionReady) return true;
+    if (micPermissionRequest) return micPermissionRequest;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return true;
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-            }
-        });
+    micPermissionRequest = navigator.mediaDevices.getUserMedia({
+        audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+        }
+    }).then(stream => {
         stream.getTracks().forEach(track => track.stop());
+        micPermissionReady = true;
         return true;
-    } catch (err) {
+    }).catch(err => {
         setVoiceMessage("MIC BLOCKED: allow microphone in browser settings");
         setMicWorkflowDebug("mic_blocked", "voice_input", "NONE");
         return false;
-    }
+    }).finally(() => {
+        micPermissionRequest = null;
+    });
+    return micPermissionRequest;
 }
 
-async function toggleMic() {
-    setVoiceMessage("MIC OPENING...");
-    if (!micSecureContext()) {
-        setVoiceMessage("MIC NEEDS HTTPS: open Claire from the HTTPS site, not the raw IP address");
-        setMicWorkflowDebug("mic_needs_https", "voice_input", "NONE");
-        return;
-    }
+async function startMicListening(autoRestart) {
+    if (micListening || micStarting) return;
+    clearMicRestartTimer();
+    setVoiceMessage(autoRestart ? "LISTENING..." : "MIC OPENING...");
     const rec = ensureRecognition();
     if (!rec) {
+        voiceConversationMode = false;
+        micStarting = false;
+        updateMicButton();
         setVoiceMessage("MIC NEEDS CHROME OR EDGE SPEECH RECOGNITION");
         setMicWorkflowDebug("mic_unsupported", "voice_input", "NONE");
         return;
     }
+    if (!micSecureContext()) {
+        setVoiceMessage("MIC MAY BE BLOCKED: use the HTTPS Claire site if the browser refuses microphone access");
+        setMicWorkflowDebug("mic_https_warning", "voice_input", "NONE");
+    }
+    if (!autoRestart) {
+        cancelVoicePlayback("MIC OPENING...");
+    }
+    micStarting = true;
+    updateMicButton();
+    const permissionOk = await requestDefaultMicPermission();
+    if (!permissionOk) {
+        voiceConversationMode = false;
+        micStarting = false;
+        updateMicButton();
+        return;
+    }
     try {
-        if (micListening) {
-            setMicWorkflowDebug("mic_stopping", "voice_input", "NONE");
-            rec.stop();
-        } else {
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio = null;
-            }
-            setMicWorkflowDebug("mic_starting", "voice_input", "PENDING");
-            micFinalHandled = false;
-            rec.start();
-        }
+        setMicWorkflowDebug(autoRestart ? "mic_auto_starting" : "mic_starting", "voice_input", "PENDING");
+        micFinalHandled = false;
+        rec.start();
     } catch (err) {
         recognition = null;
         micListening = false;
+        micStarting = false;
         updateMicButton();
         setVoiceState("IDLE");
-        setVoiceMessage("MIC WAITING: try again. " + (err && err.message ? err.message : ""));
+        if (voiceConversationMode && autoRestart) {
+            setVoiceMessage("MIC WAITING...");
+            scheduleMicRelisten("MIC WAITING...");
+        } else {
+            voiceConversationMode = false;
+            setVoiceMessage("MIC WAITING: try again. " + (err && err.message ? err.message : ""));
+        }
         setMicWorkflowDebug("mic_waiting", "voice_input", "NONE");
     }
+}
+
+async function toggleMic() {
+    if (voiceConversationMode || micListening || micStarting) {
+        setMicWorkflowDebug("mic_conversation_stopping", "voice_input", "NONE");
+        stopVoiceConversation("Voice conversation off.");
+        return;
+    }
+    voiceConversationMode = true;
+    updateMicButton();
+    setVoiceMessage("Voice conversation on. Listening...");
+    setVoiceState("LISTENING");
+    await startMicListening(false);
 }
 
 function stopVoiceMeter() {
@@ -4525,7 +4954,10 @@ function startVoiceMeter(audio) {
 }
 
 async function speakText(text) {
-    if (!voiceEnabled || !text) return;
+    if (!voiceEnabled || !text) {
+        scheduleMicRelisten("Listening...");
+        return;
+    }
     const runId = ++voiceRunId;
     setVoiceMessage("VOICE LINK OPENING...");
     try {
@@ -4533,26 +4965,67 @@ async function speakText(text) {
             currentAudio.pause();
             currentAudio = null;
         }
+        lastSpeechText = String(text || "");
+        if (false && String(text || "").length > 1700) {
+            try {
+                await playLongSpeechText(text, runId);
+                if (runId === voiceRunId) {
+                    stopVoiceMeter();
+                    lastSpeechChunks = [];
+                    lastSpeechIndex = 0;
+                    if (voiceConversationMode) {
+                        setVoiceState("LISTENING");
+                        scheduleMicRelisten("Listening...");
+                    } else {
+                        setVoiceState("IDLE");
+                        setVoiceMessage("Voice auto-speak ready.");
+                    }
+                }
+                return;
+            } catch (err) {
+                if (runId !== voiceRunId || !voiceEnabled) return;
+                setVoiceMessage("VOICE FALLBACK: reading in sections.");
+            }
+        }
         const chunks = splitSpeechText(text);
+        lastSpeechChunks = chunks;
+        lastSpeechIndex = 0;
         for (let i = 0; i < chunks.length; i++) {
             if (runId !== voiceRunId || !voiceEnabled) return;
-            await playSpeechChunk(chunks[i], i + 1, chunks.length, runId);
+            lastSpeechIndex = i;
+            activeWave();
+            await playSpeechChunkWithRetry(chunks[i], i + 1, chunks.length, runId);
+            lastSpeechIndex = i + 1;
+            if (chunks.length > 1 && i < chunks.length - 1) {
+                activeWave();
+                await sleep(80);
+            }
         }
         if (runId === voiceRunId) {
-            setVoiceState("IDLE");
-            setVoiceMessage("Voice auto-speak ready.");
             stopVoiceMeter();
+            if (voiceConversationMode) {
+                setVoiceState("LISTENING");
+                scheduleMicRelisten("Listening...");
+            } else {
+                setVoiceState("IDLE");
+                setVoiceMessage("Voice auto-speak ready.");
+            }
         }
     } catch (err) {
-        setVoiceMessage("VOICE READY");
-        setVoiceState("IDLE");
         idleWave();
+        if (voiceConversationMode) {
+            setVoiceState("LISTENING");
+            scheduleMicRelisten("Listening...");
+        } else {
+            setVoiceMessage("VOICE READY");
+            setVoiceState("IDLE");
+        }
     }
 }
 
 function splitSpeechText(text) {
     const clean = String(text || "").replace(/\s+/g, " ").trim();
-    const maxChunk = 1600;
+    const maxChunk = 900;
     if (clean.length <= maxChunk) return [clean];
     const sentences = clean.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [clean];
     const chunks = [];
@@ -4571,13 +5044,116 @@ function splitSpeechText(text) {
     return chunks;
 }
 
-async function playSpeechChunk(text, index, total, runId) {
-    const res = await fetch("/tts", {
+function hasUnfinishedSpeech() {
+    return lastSpeechChunks.length > 0 && lastSpeechIndex < lastSpeechChunks.length;
+}
+
+function isVoiceContinueQuery(text) {
+    const q = String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean).join(" ");
+    return [
+        "continue reading",
+        "keep reading",
+        "finish reading",
+        "continue speaking",
+        "keep speaking",
+        "resume speaking",
+        "resume reading",
+        "go on",
+        "continue"
+    ].includes(q);
+}
+
+async function resumeLastSpeech() {
+    if (!hasUnfinishedSpeech()) {
+        setVoiceMessage("No paused narration to resume.");
+        return;
+    }
+    const remaining = lastSpeechChunks.slice(Math.max(0, lastSpeechIndex)).join(" ");
+    if (!remaining.trim()) {
+        setVoiceMessage("No paused narration to resume.");
+        return;
+    }
+    await speakText(remaining);
+}
+
+async function playSpeechChunkWithRetry(text, index, total, runId) {
+    try {
+        await playSpeechChunk(text, index, total, runId);
+    } catch (err) {
+        if (runId !== voiceRunId || !voiceEnabled) return;
+        setVoiceMessage(total > 1 ? `VOICE RETRY ${index}/${total}` : "VOICE RETRY");
+        await sleep(120);
+        await playBrowserSpeechChunk(text, index, total, runId);
+    }
+}
+
+async function playLongSpeechText(text, runId) {
+    activeWave();
+    setVoiceState("PREPARING");
+    setVoiceMessage("CLAIRE PREPARING CONTINUOUS VOICE...");
+    const res = await fetch("/tts-long", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({text})
     });
-    if (!res.ok) {
+    if (!res || !res.ok) {
+        throw new Error("long voice unavailable");
+    }
+    const blob = await res.blob();
+    if (runId !== voiceRunId) return;
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    currentAudio = audio;
+    await new Promise((resolve, reject) => {
+        audio.onplay = () => {
+            if (runId !== voiceRunId) return;
+            setVoiceState("SPEAKING");
+            setVoiceMessage("CLAIRE SPEAKING");
+            startVoiceMeter(audio);
+        };
+        audio.onended = () => {
+            URL.revokeObjectURL(url);
+            stopVoiceMeter();
+            currentAudio = null;
+            resolve();
+        };
+        audio.onpause = () => {
+            if (!audio.ended && runId === voiceRunId && voiceEnabled) {
+                setVoiceMessage("VOICE RESUMING...");
+                setTimeout(() => {
+                    if (!audio.ended && audio.paused && runId === voiceRunId && voiceEnabled) {
+                        audio.play().catch(() => {});
+                    }
+                }, 220);
+            }
+        };
+        audio.onerror = () => {
+            URL.revokeObjectURL(url);
+            stopVoiceMeter();
+            currentAudio = null;
+            reject(new Error("long voice playback failed"));
+        };
+        audio.play().catch(err => {
+            URL.revokeObjectURL(url);
+            stopVoiceMeter();
+            currentAudio = null;
+            reject(err);
+        });
+    });
+}
+
+async function playSpeechChunk(text, index, total, runId) {
+    let res = null;
+    try {
+        res = await fetch("/tts", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({text})
+        });
+    } catch (err) {
+        return playBrowserSpeechChunk(text, index, total, runId);
+    }
+    if (!res || !res.ok) {
         return playBrowserSpeechChunk(text, index, total, runId);
     }
     const blob = await res.blob();
@@ -4595,6 +5171,7 @@ async function playSpeechChunk(text, index, total, runId) {
         audio.onended = () => {
             URL.revokeObjectURL(url);
             stopVoiceMeter();
+            currentAudio = null;
             resolve();
         };
         audio.onerror = () => {
@@ -4603,11 +5180,21 @@ async function playSpeechChunk(text, index, total, runId) {
             playBrowserSpeechChunk(text, index, total, runId).then(resolve).catch(reject);
         };
         audio.onpause = () => {
-            if (!audio.ended && runId === voiceRunId) {
-                setVoiceMessage("VOICE PAUSED");
+            if (!audio.ended && runId === voiceRunId && voiceEnabled) {
+                setVoiceMessage("VOICE RESUMING...");
+                setTimeout(() => {
+                    if (!audio.ended && audio.paused && runId === voiceRunId && voiceEnabled) {
+                        audio.play().catch(() => {});
+                    }
+                }, 220);
             }
         };
-        audio.play().catch(reject);
+        audio.play().catch(err => {
+            URL.revokeObjectURL(url);
+            stopVoiceMeter();
+            currentAudio = null;
+            playBrowserSpeechChunk(text, index, total, runId).then(resolve).catch(reject);
+        });
     });
 }
 
@@ -4644,6 +5231,18 @@ async function playBrowserSpeechChunk(text, index, total, runId) {
         if (runId !== voiceRunId || !voiceEnabled) return;
         await new Promise((resolve, reject) => {
             const utterance = new SpeechSynthesisUtterance(chunks[i]);
+            let finished = false;
+            const finish = () => {
+                if (finished) return;
+                finished = true;
+                clearTimeout(watchdog);
+                resolve();
+            };
+            const watchdog = setTimeout(() => {
+                if (runId !== voiceRunId || !voiceEnabled) return finish();
+                try { window.speechSynthesis.resume(); } catch (err) {}
+                setTimeout(finish, 350);
+            }, Math.max(5000, chunks[i].length * 90));
             utterance.rate = 0.96;
             utterance.pitch = 1.0;
             utterance.volume = 1.0;
@@ -4654,13 +5253,14 @@ async function playBrowserSpeechChunk(text, index, total, runId) {
                 activeWave();
             };
             utterance.onend = () => {
-                if (runId === voiceRunId) idleWave();
-                resolve();
+                if (runId === voiceRunId && i === chunks.length - 1) idleWave();
+                finish();
             };
             utterance.onerror = event => {
-                if (event && event.error === "interrupted") {
-                    resolve();
+                if (event && event.error === "interrupted" && runId !== voiceRunId) {
+                    finish();
                 } else {
+                    clearTimeout(watchdog);
                     reject(new Error("browser speech failed"));
                 }
             };
@@ -4991,7 +5591,13 @@ async function readReplyStream(url, turnId) {
         buffer = lines.pop() || "";
         for (const line of lines) {
             if (!line.trim() || turnId !== activeTurnId) continue;
-            const event = JSON.parse(line);
+            let event = null;
+            try {
+                event = JSON.parse(line);
+            } catch (err) {
+                console.warn("Skipping malformed stream line", err);
+                continue;
+            }
             if (event.type === "start") {
                 beginStreamRender(event.source || "CLAIRE", "");
                 startStreamStallTimer(turnId);
@@ -5009,8 +5615,13 @@ async function readReplyStream(url, turnId) {
         }
     }
     if (buffer.trim() && turnId === activeTurnId) {
-        const event = JSON.parse(buffer);
-        if (event.type === "done") {
+        let event = null;
+        try {
+            event = JSON.parse(buffer);
+        } catch (err) {
+            event = null;
+        }
+        if (event && event.type === "done") {
             finalData = event.data || {};
             finishStreamRender(turnId, finalData, "Response complete.");
         }
@@ -5671,37 +6282,44 @@ function isCreatorRenew(text) {
 function isDemoUnlock(text) {
     const cleaned = String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ");
     const q = cleaned.split(/\s+/).filter(Boolean).join(" ");
+    const wordCount = q ? q.split(" ").length : 0;
+    if (wordCount > 18 || q.length > 180) return false;
     return isAegisDemoUnlock(text) || isOodaDemoUnlock(text) || isGlassesDemoUnlock(text) || isArchimedesDemoUnlock(text) || isMemoryPerformanceDemoUnlock(text);
 }
 
 function isAegisDemoUnlock(text) {
     const cleaned = String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ");
     const q = cleaned.split(/\s+/).filter(Boolean).join(" ");
-    return q === "claire diu demo" || q === "diu demo" || q === "claire aegis demo" || q === "aegis demo" || q === "claire aegis fusion demo" || q === "aegis fusion demo" || ((q.includes("run") || q.includes("start") || q.includes("launch") || q.includes("show") || q.includes("open")) && (q.includes("aegis") || q.includes("diu")) && q.includes("demo"));
+    const words = new Set(q.split(" ").filter(Boolean));
+    return q === "claire diu demo" || q === "diu demo" || q === "claire aegis demo" || q === "aegis demo" || q === "claire aegis fusion demo" || q === "aegis fusion demo" || ((words.has("run") || words.has("start") || words.has("launch") || words.has("show") || words.has("open")) && (words.has("aegis") || words.has("diu")) && words.has("demo"));
 }
 
 function isOodaDemoUnlock(text) {
     const cleaned = String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ");
     const q = cleaned.split(/\s+/).filter(Boolean).join(" ");
-    return q === "claire ooda demo" || q === "ooda demo" || q === "claire ddp demo" || q === "ddp demo" || q === "claire ooda race demo" || q === "ooda race demo" || q === "drone dominance demo" || ((q.includes("run") || q.includes("start") || q.includes("launch") || q.includes("show") || q.includes("open")) && (q.includes("ooda") || q.includes("ddp") || q.includes("drone dominance")) && q.includes("demo"));
+    const words = new Set(q.split(" ").filter(Boolean));
+    return q === "claire ooda demo" || q === "ooda demo" || q === "claire ddp demo" || q === "ddp demo" || q === "claire ooda race demo" || q === "ooda race demo" || q === "drone dominance demo" || ((words.has("run") || words.has("start") || words.has("launch") || words.has("show") || words.has("open")) && (words.has("ooda") || words.has("ddp") || q.includes("drone dominance")) && words.has("demo"));
 }
 
 function isGlassesDemoUnlock(text) {
     const cleaned = String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ");
     const q = cleaned.split(/\s+/).filter(Boolean).join(" ");
-    return q === "the are spectacle" || q === "are spectacle" || q === "claire are spectacle" || q === "claire spectacle demo" || q === "the are spectacle demo" || q === "claire are spectacle demo" || q === "claire glasses demo" || q === "are glasses demo" || q === "glasses demo" || q === "claire gyro demo" || q === "gyro demo" || ((q.includes("run") || q.includes("start") || q.includes("launch") || q.includes("show") || q.includes("open")) && (q.includes("spectacle") || q.includes("glasses") || q.includes("gyro")) && q.includes("demo"));
+    const words = new Set(q.split(" ").filter(Boolean));
+    return q === "the are spectacle" || q === "are spectacle" || q === "claire are spectacle" || q === "claire spectacle demo" || q === "the are spectacle demo" || q === "claire are spectacle demo" || q === "claire glasses demo" || q === "are glasses demo" || q === "glasses demo" || q === "claire gyro demo" || q === "gyro demo" || ((words.has("run") || words.has("start") || words.has("launch") || words.has("show") || words.has("open")) && (words.has("spectacle") || words.has("glasses") || words.has("gyro")) && words.has("demo"));
 }
 
 function isArchimedesDemoUnlock(text) {
     const cleaned = String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ");
     const q = cleaned.split(/\s+/).filter(Boolean).join(" ");
-    return q === "claire archimedes demo" || q === "archimedes demo" || q === "project archimedes demo" || q === "claire project archimedes demo" || q === "darpa archimedes demo" || q === "claire darpa demo" || ((q.includes("run") || q.includes("start") || q.includes("launch") || q.includes("show") || q.includes("open")) && (q.includes("archimedes") || q.includes("darpa")) && q.includes("demo"));
+    const words = new Set(q.split(" ").filter(Boolean));
+    return q === "claire archimedes demo" || q === "archimedes demo" || q === "project archimedes demo" || q === "claire project archimedes demo" || q === "darpa archimedes demo" || q === "claire darpa demo" || ((words.has("run") || words.has("start") || words.has("launch") || words.has("show") || words.has("open")) && (words.has("archimedes") || words.has("darpa")) && words.has("demo"));
 }
 
 function isMemoryPerformanceDemoUnlock(text) {
     const cleaned = String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ");
     const q = cleaned.split(/\s+/).filter(Boolean).join(" ");
-    const action = q.includes("run") || q.includes("start") || q.includes("launch") || q.includes("show") || q.includes("open");
+    const words = new Set(q.split(" ").filter(Boolean));
+    const action = words.has("run") || words.has("start") || words.has("launch") || words.has("show") || words.has("open");
     const memoryTerms = q.includes("memory performance") || q.includes("are speed") || q.includes("speed proof") || q.includes("speed demo") || q.includes("pipeline speed") || q.includes("ip loop");
     return q === "claire memory performance demo" || q === "memory performance demo" || q === "are speed demo" || q === "claire speed demo" || q === "pipeline speed demo" || (action && memoryTerms);
 }
@@ -5892,6 +6510,47 @@ function prepareDemoQuery(q) {
     return q;
 }
 
+function isHardStopQuery(text) {
+    const cleaned = String(text || "").toLowerCase().replace(/[^a-z0-9\s']/g, " ");
+    const q = cleaned.split(/\s+/).filter(Boolean).join(" ");
+    return [
+        "stop",
+        "claire stop",
+        "please stop",
+        "stop talking",
+        "please stop talking",
+        "quiet",
+        "be quiet",
+        "cancel",
+        "cancel demo",
+        "end demo",
+        "exit demo",
+        "normal conversation",
+        "back to normal"
+    ].includes(q) || q.includes("stop talking") || q.includes("stop the demo") || q.includes("end demo mode");
+}
+
+function restoreNormalConversation(reason) {
+    activeTurnId++;
+    if (streamAbortController) {
+        try { streamAbortController.abort(); } catch (err) {}
+        streamAbortController = null;
+    }
+    clearStreamStallTimer();
+    stopVoiceConversation("");
+    cancelVoicePlayback("Stopped. Normal governed conversation restored.");
+    closeDemoMode(reason || "Normal conversation restored");
+    setWorkflowDebug({
+        endpoint: "/reply",
+        route: "local_stop",
+        lane: "governed_conversation",
+        controlLayer: "NO",
+        machineCalled: "NO",
+        traceId: "LOCAL",
+    });
+    renderWorkspace({source: "CLAIRE", reply: "Stopped. Normal governed conversation restored."});
+}
+
 function clearWorkspace() {
     activeTurnId++;
     if (streamAbortController) {
@@ -5899,6 +6558,7 @@ function clearWorkspace() {
         streamAbortController = null;
     }
     clearStreamStallTimer();
+    stopVoiceConversation("");
     voiceRunId++;
     if (currentAudio) {
         currentAudio.pause();
@@ -6067,6 +6727,317 @@ async function launchStructuredDemoByName(kind) {
         renderWorkspace({source: "ERROR", reply: String(err)});
         return false;
     }
+}
+
+async function fetchDemoPayload(prompt, scenario) {
+    return safeJsonFetch("/reply?q=" + encodeURIComponent(prompt) + "&demo=true&demo_scenario=" + encodeURIComponent(scenario));
+}
+
+function renderSessionCapsuleVisual() {
+    const data = {
+        trace_id: "LOCAL_SESSION_CAPSULE",
+        demo_mode: true,
+        demo_name: "Session Capsule / Continuity",
+        identity: "CLAIRE continuity layer for restoring session state without inventing memory.",
+        input_received: "Run Session Capsule continuity proof.",
+        recall_check: {
+            status: "none",
+            summary: "No external recall is required for this local continuity demonstration.",
+            items: [],
+        },
+        policy_validation: {
+            status: "allowed",
+            summary: "Allowed as a controlled explanation of session continuity. No service restart, account change, or external action is performed.",
+            rules_triggered: [],
+        },
+        decision: "Simulate capsule handoff and continuity restoration for demonstration only.",
+        output: "Session Capsule shows how Claire can preserve objective, constraints, changed artifacts, failure notes, next safe step, and replay posture between work sessions without treating a memory hit as truth.",
+        trace_summary: {
+            steps_executed: ["ingest_input", "retrieve_memory", "validate_policy", "generate_response"],
+            decisions_made: ["local_capsule_explanation", "simulation_only"],
+        },
+    };
+    renderWorkspace(data);
+}
+
+async function runSessionCapsuleNarratedDemo() {
+    renderSessionCapsuleVisual();
+    const lines = [
+        "Session Capsule proof. Claire should not wake up pretending to remember things she cannot verify.",
+        "The capsule preserves the work state: objective, constraints, files or artifacts, failures, restore point, and next safe step.",
+        "On resume, Claire uses the capsule as orientation support. It does not bypass Sentinel, replace ARE, or authorize real-world action.",
+        "The important distinction is controlled continuity. Memory supports the answer, but it does not become the answer by itself.",
+    ];
+    for (const line of lines) {
+        addLedgerEvent("Session Capsule", line);
+        await speakText(line);
+        await sleep(350);
+    }
+}
+
+function demoSuiteAffirmative(text) {
+    const cleaned = String(text || "").toLowerCase().replace(/[^a-z0-9'\s]/g, " ");
+    const q = cleaned.split(/\s+/).filter(Boolean).join(" ");
+    const exact = new Set([
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "uh huh",
+        "uh hyh",
+        "mm hmm",
+        "sure",
+        "ok",
+        "okay",
+        "definitely",
+        "absolutely",
+        "ready",
+        "i am",
+        "i'm ready",
+        "im ready",
+        "go ahead",
+        "continue",
+        "proceed",
+        "next",
+        "move on",
+        "carry on",
+        "lets go",
+        "let's go",
+    ]);
+    if (exact.has(q)) return true;
+    return /\b(yes|yeah|yep|yup|sure|okay|ok|definitely|absolutely|ready|continue|proceed|next)\b/.test(q)
+        || q.includes("go ahead")
+        || q.includes("move on")
+        || q.includes("carry on")
+        || q.includes("ready to continue");
+}
+
+async function pauseDemoSuiteForQuestions(prompt, context) {
+    demoSuiteState.paused = true;
+    demoSuiteState.context = context || "";
+    renderWorkspace({source: "DEMO SUITE", reply: prompt});
+    setWorkflowDebug({
+        endpoint: "browser",
+        route: "demo_suite_question_pause",
+        lane: "live_q_and_a",
+        controlLayer: "YES",
+        machineCalled: "NO",
+        traceId: lastTraceId || "LOCAL",
+    });
+    await speakText(prompt);
+    return new Promise(resolve => {
+        demoSuiteState.resume = resolve;
+    });
+}
+
+function renderDemoSuiteSummary() {
+    const lines = [
+        "Claire Demo Suite complete.",
+        "",
+        "What was shown:",
+        "- Session Capsule continuity and restart discipline.",
+        "- ARE Spectacle governed external recall.",
+        "- AEGIS Fusion controlled decision-support framing.",
+        "- OODA/DDP repeated-evaluation memory benchmark.",
+        "- Memory Performance document, hash, speed, and IP loop proof.",
+        "- Project ARCHIMEDES source-manifest and trace proof.",
+        "",
+        "Trace IDs:",
+        ...demoSuiteState.traces.map(item => "- " + item.name + ": " + item.trace_id),
+        "",
+        "You can ask follow-up questions now."
+    ];
+    renderWorkspace({source: "DEMO SUITE", reply: lines.join("\n")});
+}
+
+async function runDemoPayloadSegment(name, prompt, scenario, renderer, narrator) {
+    addLedgerEvent("Demo Suite", name);
+    setStreamStatus(name + " running...", true);
+    const data = await fetchDemoPayload(prompt, scenario);
+    if (data && data.trace_id) {
+        demoSuiteState.traces.push({name, trace_id: data.trace_id});
+    }
+    if (renderer) renderer(data);
+    else renderWorkspace(data);
+    setWorkflowDebug({
+        endpoint: "/reply",
+        route: "demo_suite_segment",
+        lane: scenario,
+        controlLayer: "YES",
+        machineCalled: "NO",
+        traceId: (data && data.trace_id) || "NONE",
+    });
+    if (narrator) await narrator(data);
+    else await speakText((data && (data.output || data.reply)) || "");
+    return data;
+}
+
+async function launchDemoSuite() {
+    restoreNormalConversation("Claire Demo Suite starting");
+    demoSuiteState = {active: true, paused: false, context: "", resume: null, traces: []};
+    activateDemoMode("glasses");
+    if (!voiceEnabled) {
+        voiceEnabled = true;
+        localStorage.setItem("claireVoiceEnabled", "true");
+        updateVoiceToggle();
+    }
+    const intro = "Claire Demo Suite starting. I will run the proof sequence with narration, pause twice for live questions, and continue when you give any natural affirmative response.";
+    renderWorkspace({source: "DEMO SUITE", reply: intro});
+    scrollToWorkspace();
+    await speakText(intro);
+
+    await runSessionCapsuleNarratedDemo();
+    await runDemoPayloadSegment(
+        "ARE Spectacle",
+        "CLAIRE ARE SPECTACLE DEMO",
+        "glasses",
+        data => renderAreSpectacleVisual(data, "normal"),
+        runAreSpectacleNarratedDemo
+    );
+    await pauseDemoSuiteForQuestions(
+        "Before I continue, do you have any questions about ARE, Gyro, Sentinel, Diode, Session Capsules, or how Claire's memory differs from normal chatbot context?",
+        "Session Capsule and ARE Spectacle: continuity, governed external recall, Gyro orientation, Sentinel validation, Diode trace, and model-agnostic memory middleware."
+    );
+
+    await runDemoPayloadSegment("AEGIS Fusion", "CLAIRE AEGIS DEMO", "aegis", null, null);
+    await runDemoPayloadSegment("OODA/DDP Memory Benchmark", "CLAIRE OODA DEMO", "ooda", null, null);
+    await runDemoPayloadSegment(
+        "Memory Performance",
+        "Run Memory Performance document retrieval and IP loop speed proof",
+        "memory_speed",
+        data => renderMemoryPerformanceVisual(data, "request"),
+        runMemoryPerformanceNarratedDemo
+    );
+    await runDemoPayloadSegment(
+        "Project ARCHIMEDES",
+        "Run Project ARCHIMEDES DARPA presentation proof package",
+        "archimedes",
+        data => renderArchimedesVisual(data, "intake"),
+        runArchimedesNarratedDemo
+    );
+    await pauseDemoSuiteForQuestions(
+        "Before I summarize the proof, do you have any questions about how these demos apply to evaluation, enterprise use, or governed decision support?",
+        "AEGIS, OODA/DDP, Memory Performance, and ARCHIMEDES: controlled evaluation, decision support, speed proof, source-manifest handling, governance, trace, and replay."
+    );
+
+    closeDemoMode("Claire Demo Suite completed");
+    demoSuiteState.active = false;
+    demoSuiteState.paused = false;
+    setStreamStatus("Demo Suite complete.", false);
+    renderDemoSuiteSummary();
+    await speakText("Claire Demo Suite complete. The trace IDs are visible in the summary, and I am ready for follow-up questions.");
+}
+
+async function runMicrosoftDemo() {
+    restoreNormalConversation("Microsoft Demo starting as one-shot guided proof");
+    const screen = document.getElementById("responseScreen");
+    if (screen) screen.innerHTML = "";
+    setStreamStatus("Microsoft Demo running...", true);
+    addLedgerEvent("Microsoft Demo", "Guided enterprise proof started.");
+    const intro = [
+        "MICROSOFT DEMO MODE",
+        "",
+        "Claire is entering a one-shot guided enterprise proof.",
+        "This will show stack separation, RAG comparison, ARE speed visibility, Sentinel governance, Project Lantern Relay continuity, ledger trace, and Azure-ready deployment shape.",
+        "When the demo is complete, Claire returns to normal governed conversation."
+    ].join("\n");
+    renderWorkspace({source: "MICROSOFT DEMO", reply: intro});
+    scrollToWorkspace();
+
+    const steps = [
+        {
+            title: "1. Runtime Stack",
+            route: "stack_overview",
+            text:
+                "Claire stack overview:\n\n" +
+                "- ARE / ARE Turbo: governed deterministic recall.\n" +
+                "- BARE / GYRO / FARE: past recall, present orientation, future projection.\n" +
+                "- Sentinel: policy validation and escalation boundaries.\n" +
+                "- Diode: integrity and capsule boundary discipline.\n" +
+                "- TrailLink / Trace: replayable path continuity.\n" +
+                "- C3RP: governed lane routing and recovery framing.\n" +
+                "- Project Lantern Relay: Session Capsule continuity for interrupted work.\n" +
+                "- Model layer: GPT, Gemini, Claude, local LLM, or enterprise agent can sit behind the runtime.\n\n" +
+                "Some subsystem names are internal names Lucius Prime created while inventing and testing the architecture. The names are less important than the separable runtime responsibilities: recall, orientation, governance, integrity, routing, continuity, and trace."
+        },
+        {
+            title: "2. RAG Comparison",
+            route: "rag_comparison",
+            text:
+                "Conventional RAG flow:\nQuery -> Embedding -> Vector Search -> Approximate Context -> Answer\n\n" +
+                "Claire runtime flow:\nInput -> Q Insight / Gyro Orientation -> governed ARE recall -> Sentinel validation -> decision framing -> trace -> response\n\n" +
+                "Claire is not anti-RAG. Retrieval can still be useful. The difference is that retrieval does not dominate the answer. Claire orients first, gates memory by lane and authority, validates policy, and keeps traceable provenance."
+        },
+        {
+            title: "3. Project Lantern Relay",
+            route: "project_lantern_relay",
+            text:
+                "Project Lantern Relay / Session Capsule Protocol is a Claire-origin continuity concept invented by Lucius Prime with Codex build assistance.\n\n" +
+                "It preserves the operational end-state of an AI work session:\n" +
+                "- objective\n- changed files or artifacts\n- failures\n- restore point\n- next safe step\n- do-not-repeat notes\n\n" +
+                "Cold start: the next AI session has to be re-explained.\n" +
+                "Capsule restart: BARE recalls the capsule, GYRO orients the session, Sentinel validates the next action, and FARE frames the next safe step."
+        },
+        {
+            title: "4. Sentinel Governance",
+            route: "sentinel_governance",
+            text:
+                "Sentinel proof:\n\n" +
+                "- Drafting, summarizing, packaging, and demo traces are allowed.\n" +
+                "- Publishing, spending money, emailing, filing, changing Azure state, or exposing secrets require protected human approval.\n" +
+                "- Claire remains decision-support infrastructure, not autonomous real-world execution."
+        },
+    ];
+
+    for (const step of steps) {
+        addLedgerEvent("Microsoft Demo", step.title);
+        setWorkflowDebug({
+            endpoint: "/reply",
+            route: step.route,
+            lane: "microsoft_demo",
+            controlLayer: "YES",
+            machineCalled: "NO",
+            traceId: "LOCAL",
+        });
+        renderWorkspace({source: "MICROSOFT DEMO", reply: step.title + "\n\n" + step.text});
+        await sleep(650);
+    }
+
+    try {
+        const speed = await fetchDemoPayload("Run Memory Performance document retrieval and IP loop speed proof", "memory_speed");
+        addLedgerEvent("Microsoft Demo", "Speed proof trace " + (speed.trace_id || "generated"));
+        renderMemoryPerformanceVisual(speed, "trace");
+        await sleep(650);
+    } catch (err) {
+        renderWorkspace({source: "MICROSOFT DEMO", reply: "5. Speed / benchmark visibility\n\nSpeed proof unavailable in this browser run: " + String(err)});
+    }
+
+    try {
+        const spectacle = await fetchDemoPayload("CLAIRE ARE SPECTACLE DEMO", "glasses");
+        addLedgerEvent("Microsoft Demo", "ARE Spectacle trace " + (spectacle.trace_id || "generated"));
+        renderAreSpectacleVisual(spectacle, "trace");
+        await sleep(650);
+    } catch (err) {
+        renderWorkspace({source: "MICROSOFT DEMO", reply: "6. ARE Spectacle proof\n\nARE Spectacle proof unavailable in this browser run: " + String(err)});
+    }
+
+    const close = (
+        "Microsoft Demo complete.\n\n" +
+        "Claire has shown stack separation, RAG comparison, ARE speed visibility, governed recall, Sentinel validation, Project Lantern Relay continuity, ledger trace, and Azure-ready deployment shape.\n\n" +
+        "Normal governed conversation restored. Did that prove the point, Lucius?"
+    );
+    closeDemoMode("Microsoft Demo completed");
+    setWorkflowDebug({
+        endpoint: "/reply",
+        route: "microsoft_demo_complete",
+        lane: "governed_conversation",
+        controlLayer: "NO",
+        machineCalled: "NO",
+        traceId: lastTraceId || "LOCAL",
+    });
+    renderWorkspace({source: "MICROSOFT DEMO", reply: close});
+    setStreamStatus("Microsoft Demo complete.", false);
+    speakText(close);
 }
 
 const CLAIRE_FRONT_DEMO_INTRO = `Claire is not a chatbot.
@@ -6325,7 +7296,6 @@ async function streamLandingGreeting() {
     setStreamStatus("Ready.", false);
     const input = document.getElementById("queryInput");
     if (input) input.focus();
-    speakText(CLAIRE_LANDING_GREETING);
 }
 
 async function submitQuery(event) {
@@ -6333,12 +7303,82 @@ async function submitQuery(event) {
     const input = document.getElementById("queryInput");
     const q = input ? input.value.trim() : "";
     if (!q) return;
+    if (isHardStopQuery(q)) {
+        if (input) {
+            input.value = "";
+            input.focus();
+        }
+        restoreNormalConversation("Hard stop command from user");
+        return;
+    }
+    if (demoSuiteState.active && demoSuiteState.paused) {
+        if (input) {
+            input.value = "";
+            input.focus();
+        }
+        if (demoSuiteAffirmative(q)) {
+            const resume = demoSuiteState.resume;
+            demoSuiteState.paused = false;
+            demoSuiteState.resume = null;
+            cancelVoicePlayback("Continuing the demo suite.");
+            renderWorkspace({source: "DEMO SUITE", reply: "Continuing the demo suite."});
+            if (resume) resume(true);
+            return;
+        }
+        const turnId = ++activeTurnId;
+        const contextualQuestion = [
+            "Claire Demo Suite live Q&A.",
+            "Active demo context: " + (demoSuiteState.context || "controlled demo suite"),
+            "Answer plainly for a technical evaluator. Define named Claire technology in ordinary terms before using the names.",
+            "Viewer question: " + q,
+        ].join("\n");
+        appendConversationMessage("user", q, "USER");
+        setWorkflowDebug({
+            endpoint: "/reply",
+            route: "demo_suite_live_q_and_a",
+            lane: "live_q_and_a",
+            controlLayer: "YES",
+            machineCalled: "NO",
+            traceId: "PENDING",
+        });
+        try {
+            const data = await readReplyStream("/reply?stream=true&q=" + encodeURIComponent(contextualQuestion), turnId);
+            speakText((data.reply || data.output || "") + " Ready to continue?");
+            renderWorkspace({source: "DEMO SUITE", reply: ((data.reply || data.output || "") + "\n\nReady to continue?")});
+        } catch (err) {
+            renderWorkspace({source: "ERROR", reply: "Demo Q&A failed: " + String(err) + "\n\nReady to continue?"});
+        }
+        return;
+    }
+    if (String(q || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean).join(" ") === "claire demo mode") {
+        if (input) {
+            input.value = "";
+            input.focus();
+        }
+        renderWorkspace({
+            source: "CLAIRE",
+            reply: "Demo mode is separate from normal chat. Use Run Claire Demo Suite to launch the controlled demo sequence."
+        });
+        return;
+    }
+    if (isVoiceContinueQuery(q) && hasUnfinishedSpeech()) {
+        if (input) {
+            input.value = "";
+            input.focus();
+        }
+        await resumeLastSpeech();
+        return;
+    }
+    cancelVoicePlayback("");
     if (input) {
         input.value = "";
         input.focus();
     }
     if (isDemoUnlock(q)) {
-        await launchStructuredDemoByName(demoKindForText(q));
+        renderWorkspace({
+            source: "CLAIRE",
+            reply: "Demo mode is separate from normal chat. Use Run Claire Demo Suite to launch the controlled demo sequence."
+        });
         if (input) input.focus();
         return;
     }
@@ -6370,9 +7410,6 @@ async function submitQuery(event) {
     });
     try {
         let replyUrl = "/reply?stream=true&q=" + encodeURIComponent(outboundQ);
-        if (demoModeActive() && !creatorModeActive()) {
-            replyUrl += "&demo=true&demo_scenario=" + encodeURIComponent(demoModeKind());
-        }
         const data = await readReplyStream(replyUrl, turnId);
         const sourceKey = String((data && data.source) || "conversation").toUpperCase();
         setWorkflowDebug({
@@ -6391,6 +7428,16 @@ async function submitQuery(event) {
             if (input) input.focus();
             return;
         }
+        try {
+            const data = await safeJsonFetch("/reply?q=" + encodeURIComponent(outboundQ), {
+                headers: {"Accept": "application/json", "X-Claire-Client": CLIENT_BUILD},
+                cache: "no-store",
+            });
+            finishStreamRender(turnId, data, "Response recovered.");
+            speakText(data.reply || data.output || "");
+            if (input) input.focus();
+            return;
+        } catch (fallbackErr) {}
         setWorkflowDebug({
             endpoint: "/reply",
             route: "reply_error",
@@ -6545,11 +7592,10 @@ const queryForm = document.getElementById("queryForm");
 const queryInput = document.getElementById("queryInput");
 const uploadForm = document.getElementById("uploadForm");
 const driveResearchForm = document.getElementById("driveResearchForm");
+const demoSuiteBtn = document.getElementById("demoSuiteBtn");
 const beginHereBtn = document.getElementById("beginHereBtn");
 const clearWorkspaceBtn = document.getElementById("clearWorkspaceBtn");
 const clearWorkspaceBtnTop = document.getElementById("clearWorkspaceBtnTop");
-const glassesDemoBtn = document.getElementById("glassesDemoBtn");
-const archimedesDemoBtn = document.getElementById("archimedesDemoBtn");
 const areSpeedBtn = document.getElementById("areSpeedBtn");
 const pipelineBtn = document.getElementById("pipelineBtn");
 const traceProofBtn = document.getElementById("traceProofBtn");
@@ -6560,55 +7606,10 @@ const diagnosticButtons = document.querySelectorAll("[data-diagnostic]");
 if (queryForm) queryForm.addEventListener("submit", submitQuery);
 if (uploadForm) uploadForm.addEventListener("submit", uploadDocument);
 if (driveResearchForm) driveResearchForm.addEventListener("submit", runDriveResearch);
+if (demoSuiteBtn) demoSuiteBtn.addEventListener("click", launchDemoSuite);
 if (beginHereBtn) beginHereBtn.addEventListener("click", runBeginHereTour);
 if (clearWorkspaceBtn) clearWorkspaceBtn.addEventListener("click", clearWorkspace);
 if (clearWorkspaceBtnTop) clearWorkspaceBtnTop.addEventListener("click", clearWorkspace);
-if (glassesDemoBtn) {
-    glassesDemoBtn.addEventListener("click", async () => {
-        activateDemoMode("glasses");
-        const demoPrompt = "Show how The ARE Spectacle improves an AI answer.";
-        if (queryInput) queryInput.value = demoPrompt;
-        renderWorkspace({source: "CLAIRE", reply: "Loading ARE Spectacle demo..."});
-        scrollToWorkspace();
-        setWorkflowDebug({
-            endpoint: "/reply",
-            route: "are_spectacle_demo",
-            lane: "glasses",
-            controlLayer: "YES",
-            machineCalled: "NO",
-            traceId: "PENDING",
-        });
-        try {
-            const data = await safeJsonFetch("/reply?q=" + encodeURIComponent(demoPrompt) + "&demo=true&demo_scenario=glasses");
-            renderAreSpectacleVisual(data, "normal");
-            scrollToWorkspace();
-            setWorkflowDebug({
-                endpoint: "/reply",
-                route: "are_spectacle_demo",
-                lane: String((data && data.demo_scenario) || "glasses"),
-                controlLayer: "YES",
-                machineCalled: "NO",
-                traceId: (data && data.trace_id) || "NONE",
-            });
-            await runAreSpectacleNarratedDemo(data);
-        } catch (err) {
-            renderWorkspace({source: "ERROR", reply: String(err)});
-            setWorkflowDebug({
-                endpoint: "/reply",
-                route: "are_spectacle_demo_error",
-                lane: "glasses",
-                controlLayer: "YES",
-                machineCalled: "NO",
-                traceId: "NONE",
-            });
-        }
-    });
-}
-if (archimedesDemoBtn) {
-    archimedesDemoBtn.addEventListener("click", async () => {
-        await launchArchimedesDemo();
-    });
-}
 if (areSpeedBtn) {
     areSpeedBtn.addEventListener("click", async () => {
         await launchMemoryPerformanceDemo();
@@ -6655,7 +7656,6 @@ addLedgerEvent("system ready", "Conversation, Q Insight, Ledger, and proof modul
 tickCreatorMode();
 creatorTimer = setInterval(tickCreatorMode, 1000);
 setTimeout(() => {
-    streamLandingGreeting();
     if (queryInput) queryInput.focus();
 }, 220);
 
@@ -6719,6 +7719,16 @@ setWaveMood("calm");
 </script>
 </body>
 </html>
+"""
+
+CLARITY_TRACKING_SNIPPET = """
+<script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "wx2qsngh6y");
+</script>
 """
 
 
@@ -8511,11 +9521,167 @@ def is_document_summary_query(prompt: str) -> bool:
             "review this",
             "analyze this",
             "analyze the document",
+            "describe this",
+            "describe the document",
+            "describe that document",
+            "describe the file",
+            "describe that file",
+            "describe the last document",
+            "describe that last document",
+            "summarize the last document",
+            "summarize that last document",
+            "tell me about the last document",
+            "tell me about that document",
             "what is this",
             "what's this",
             "explain this",
         ]
     )
+
+
+def is_information_classification_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    taxonomy_terms = [
+        "verified memory",
+        "generated reasoning",
+        "unsupported speculation",
+        "source truth",
+        "clearly stated inference path",
+        "what came from source material",
+        "what came from recall",
+        "what came from reasoning",
+        "what remains uncertain",
+    ]
+    trace_terms = ["trace layer", "reviewer", "enterprise use", "source material"]
+    return (
+        sum(1 for term in taxonomy_terms if term in cleaned) >= 2
+        or ("separates information into three classes" in cleaned and any(term in cleaned for term in trace_terms))
+    )
+
+
+def information_classification_reply() -> str:
+    return (
+        "CLAIRE separates information into three classes.\n\n"
+        "1. Verified memory\n"
+        "Information grounded in stored source material, ingested documents, system records, session capsules, or traceable prior state.\n\n"
+        "2. Generated reasoning\n"
+        "Analysis produced from verified memory plus the current user request. This is useful, but it is marked as reasoning rather than source truth.\n\n"
+        "3. Unsupported speculation\n"
+        "Any claim that is not grounded in verified memory, an authoritative source, or a clearly stated inference path.\n\n"
+        "For enterprise use, the system preserves that distinction in the trace layer so a reviewer can see what came from source material, what came from recall, what came from reasoning, and what remains uncertain."
+    )
+
+
+def is_document_content_question(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    if is_information_classification_query(prompt):
+        return False
+    document_ref = any(
+        marker in cleaned
+        for marker in [
+            "recent document",
+            "that recent document",
+            "the recent document",
+            "last document",
+            "that last document",
+            "the last document",
+            "that document",
+            "this document",
+            "the document",
+            "uploaded document",
+            "recent doc",
+            "last doc",
+            "that last doc",
+            "the last doc",
+            "that doc",
+            "this doc",
+            "the doc",
+        ]
+    )
+    content_ask = any(
+        marker in cleaned
+        for marker in [
+            "is there anything",
+            "does it talk",
+            "does it mention",
+            "does it say",
+            "does it contain",
+            "anything about",
+            "talks about",
+            "talk about",
+            "mentions",
+            "mention",
+            "contains",
+            "contain",
+            "reference",
+            "references",
+            "in it",
+            "in that",
+        ]
+    )
+    return document_ref and content_ask
+
+
+def is_latest_document_request_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned or not last_uploaded_filename():
+        return False
+    if is_information_classification_query(prompt):
+        return False
+    if re.search(r"\b(rewrite|reword|polish|proofread|edit|clean up)\b", cleaned):
+        return False
+    document_ref = any(
+        marker in cleaned
+        for marker in [
+            "document",
+            "doc",
+            "file",
+            "upload",
+            "uploaded",
+            "last one",
+            "new one",
+            "second one",
+            "another one",
+            "the one i just",
+            "the one i uploaded",
+        ]
+    )
+    document_action = any(
+        marker in cleaned
+        for marker in [
+            "summarize",
+            "summary",
+            "describe",
+            "tell me about",
+            "read",
+            "review",
+            "analyze",
+            "explain",
+            "what is in",
+            "what's in",
+            "what does it say",
+            "what does this say",
+            "what does that say",
+            "what is this",
+            "what's this",
+        ]
+    )
+    return document_ref and document_action
+
+
+def document_content_not_found_reply(prompt: str) -> str:
+    latest = last_uploaded_filename()
+    if latest:
+        return (
+            f"I don't see a matching passage in the recent document for that term.\n\n"
+            f"Document in view: {latest}.\n\n"
+            "If you want, ask me to search for the exact phrase, or upload the document again and I’ll re-check it against the current question."
+        )
+    return "I don't have a recent uploaded document in view for that question. Upload or point me to the document and I’ll check it directly."
 
 
 def _uploaded_document_records(filename: str) -> list[dict]:
@@ -8635,9 +9801,73 @@ def humanize_document_summary_sentence(sentence: str) -> str:
     return cleaned
 
 
+def synthesize_source_code_summary(prompt: str, document_reply: str) -> str:
+    latest = last_uploaded_filename() if is_recent_upload_query(prompt) else ''
+    if not latest or Path(latest).suffix.lower() not in {'.py', '.js', '.ts', '.go', '.rs', '.java', '.sh'}:
+        return ''
+
+    records = _uploaded_document_records(latest)
+    if records:
+        corpus = '\n'.join(str(record.get('text') or '') for record in records)
+    else:
+        corpus = '\n'.join(_document_content_lines(document_reply))
+    if not corpus.strip():
+        return ''
+
+    suffix = Path(latest).suffix.lower()
+    language = {
+        '.py': 'Python',
+        '.js': 'JavaScript',
+        '.ts': 'TypeScript',
+        '.go': 'Go',
+        '.rs': 'Rust',
+        '.java': 'Java',
+        '.sh': 'shell',
+    }.get(suffix, 'source-code')
+
+    class_names = re.findall(r'^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)', corpus, flags=re.MULTILINE)
+    function_names = re.findall(r'^\s*(?:def|async\s+def|function)\s+([A-Za-z_][A-Za-z0-9_]*)', corpus, flags=re.MULTILINE)
+    go_functions = re.findall(r'^\s*func\s+([A-Za-z_][A-Za-z0-9_]*)', corpus, flags=re.MULTILINE)
+    function_names.extend(go_functions)
+
+    lowered = corpus.lower()
+    capabilities = []
+    if any(term in lowered for term in ['json', 'jsonl']):
+        capabilities.append('JSON/JSONL persistence')
+    if 'markdown' in lowered or '.md' in lowered:
+        capabilities.append('Markdown export')
+    if 'validate' in lowered or 'validation' in lowered:
+        capabilities.append('validation')
+    if any(term in lowered for term in ['argparse', 'click', '__main__']):
+        capabilities.append('command-line execution')
+    if any(term in lowered for term in ['fastapi', '@app.', 'flask']):
+        capabilities.append('web endpoints')
+    if any(term in lowered for term in ['hashlib', 'sha256', 'hmac']):
+        capabilities.append('hashing or integrity checks')
+    if 'session' in lowered and 'capsule' in lowered:
+        capabilities.append('session capsule handling')
+    if 'trace' in lowered:
+        capabilities.append('trace support')
+
+    bullets = [
+        f'- This is a {language} source file, not a prose document.',
+    ]
+    if class_names:
+        bullets.append(f"- It defines class structures including {', '.join(class_names[:4])}.")
+    if function_names:
+        bullets.append(f"- Key functions include {', '.join(function_names[:6])}.")
+    if capabilities:
+        bullets.append(f"- The visible responsibilities include {', '.join(capabilities[:6])}.")
+    bullets.append('- I should treat it as implementation material: useful for code review, module mapping, or turning into developer documentation.')
+    return '\n'.join(bullets)
+
+
 def synthesize_document_summary(prompt: str, document_reply: str) -> str:
     if not is_document_summary_query(prompt):
         return ''
+    source_summary = synthesize_source_code_summary(prompt, document_reply)
+    if source_summary:
+        return source_summary
     latest = last_uploaded_filename() if is_recent_upload_query(prompt) else ''
     corpus = _latest_document_summary_corpus(latest) if latest else ''
     if not corpus:
@@ -8774,6 +10004,8 @@ def shape_legal_fallback(prompt: str) -> str:
 
 def is_self_demo_query(prompt: str) -> bool:
     cleaned = _clean_for_match(prompt)
+    if len(cleaned.split()) > 18 or len(cleaned) > 180:
+        return False
     return any(
         marker in cleaned
         for marker in [
@@ -8835,6 +10067,15 @@ def claire_identity_intent(prompt: str) -> str:
         return "CLAIRE_DIFFERENTIATION"
     if any(term in cleaned for term in rag_terms):
         return "CLAIRE_RAG_CONTRAST"
+    if any(
+        term in cleaned
+        for term in [
+            "describe yourself",
+            "tell me about yourself",
+            "introduce yourself",
+        ]
+    ):
+        return "CLAIRE_DIFFERENTIATION"
     if any(term in cleaned for term in ["tell me about your architecture", "can you tell me about your architecture", "describe your architecture", "explain your architecture"]):
         return "CLAIRE_STACK"
     if any(term in cleaned for term in stack_terms) and any(term in cleaned for term in ["your", "claire", "you"]):
@@ -8852,11 +10093,9 @@ def is_claire_identity_orientation_query(prompt: str) -> bool:
 
 def claire_differentiation_reply(prompt: str = "") -> str:
     return (
-        "Here's the practical difference.\n\n"
-        "I'm not a CRM copilot or a native Salesforce product. Think of me as a governed cognition layer beside enterprise systems.\n\n"
-        "Most copilots are reactive: they generate from transient context. I work orientation-first, checking intent, authority, ARE memory, policy, and risk before output.\n\n"
-        "The architecture separates memory, governance, reasoning, and trace into distinct layers. That allows persistent structured recall, policy-before-execution controls, and traceable, auditable outputs instead of purely probabilistic responses.\n\n"
-        "The point is not to replace platforms like Salesforce. It's to add governed continuity and cognitive infrastructure above operational systems."
+        "I’m Claire. I’m here to help you think, write, review documents, remember the right context, and make safer decisions without pretending I know things I can’t verify.\n\n"
+        "The main difference from a normal chatbot is control. I should check the task, use memory only when it fits, respect policy boundaries, and leave a trace when the answer matters.\n\n"
+        "I’m not here to talk down to you or bury you in architecture. If you ask a normal question, I should answer normally. If the stakes are high, I should slow down, separate facts from guesses, and help you choose the next safe step."
     )
 
 
@@ -9084,6 +10323,100 @@ def investor_summary_reply(prompt: str) -> str:
     )
 
 
+def is_auditability_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    return "auditability" in cleaned and any(marker in cleaned for marker in ["explain", "what is", "why", "matter", "means"])
+
+
+def auditability_reply(prompt: str = "") -> str:
+    return (
+        "Auditability means someone can look back and see what happened, what information was used, what decision was made, and why.\n\n"
+        "For Claire, it matters because a useful answer is not enough when money, compliance, evidence, or operations are involved. The answer needs a trail a human can review later.\n\n"
+        "Plain version: auditability turns “trust me” into “here is what happened.”"
+    )
+
+
+def is_azure_billing_issue_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    return "azure" in cleaned and any(marker in cleaned for marker in ["billed", "billing", "charged", "wrong card", "payment method", "card"])
+
+
+def azure_billing_issue_reply(prompt: str = "") -> str:
+    return (
+        "First, don’t panic or change a bunch of Azure settings at once. Treat this like a billing correction and evidence task.\n\n"
+        "1. Open Azure Portal -> Cost Management + Billing and confirm the invoice, subscription, billing profile, and payment method that was charged.\n"
+        "2. Take screenshots or export the invoice/receipt so you have a clean record.\n"
+        "3. Check whether the wrong card is attached at the billing-profile level, not just the subscription view.\n"
+        "4. Update the payment method only through the Azure billing portal.\n"
+        "5. Open a Microsoft billing support request and ask them to correct the charge or move it to the proper payment method.\n\n"
+        "Next useful step: gather the invoice number, subscription ID, billing profile, last four digits of the charged card, and the card that should have been used."
+    )
+
+
+def is_are_investor_explanation_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    return ("are" in cleaned or "analog recall engine" in cleaned) and "investor" in cleaned and any(marker in cleaned for marker in ["explain", "describe", "tell"])
+
+
+def are_investor_explanation_reply(prompt: str = "") -> str:
+    return (
+        "ARE is Claire’s governed recall layer. For an investor, the simple explanation is this: it helps an AI system remember the right prior context without dumping random memory into every answer.\n\n"
+        "That matters because enterprise AI fails when it forgets context, repeats work, mixes unrelated records, or cannot explain why it answered a certain way. ARE is meant to make recall controlled, fast, and reviewable.\n\n"
+        "Investor line: ARE turns memory from loose chatbot context into governed infrastructure: recall, relevance, policy, and trace."
+    )
+
+
+def is_overwhelmed_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    return any(marker in cleaned for marker in ["i m overwhelmed", "i am overwhelmed", "im overwhelmed", "overwhelmed"])
+
+
+def overwhelmed_reply(prompt: str = "") -> str:
+    return (
+        "I got you. Let’s make it smaller.\n\n"
+        "For the next five minutes, don’t solve everything. Pick one thing: the bill, the demo, the memory issue, or the next message you need to send.\n\n"
+        "Send me the one thing that feels most urgent, even messily, and I’ll turn it into a short next-step list."
+    )
+
+
+def is_microsoft_explanation_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    audience = any(term in cleaned for term in ["microsoft", "azure", "founders hub", "developer portal"])
+    explain = any(term in cleaned for term in ["explain", "describe", "tell", "summary", "overview"])
+    claire_ref = any(
+        term in cleaned
+        for term in [
+            "claire",
+            "what you are",
+            "what are you",
+            "who you are",
+            "your build",
+            "you are built",
+            "build or characters",
+            "build or characteristics",
+            "characteristics",
+        ]
+    )
+    bounded = "750" in cleaned or "words or less" in cleaned or "less than" in cleaned or audience
+    return audience and explain and claire_ref and bounded
+
+
+def microsoft_explanation_reply(prompt: str = "") -> str:
+    return (
+        "Claire is a memory-first AI architecture designed for work where continuity, control, provenance, and auditability matter.\n\n"
+        "Most AI assistants are strongest inside a single conversation. They can generate useful answers, but they often depend on transient context, loose retrieval, and after-the-fact explanation. Claire was built around a different operating principle: orient before generating.\n\n"
+        "That means Claire first evaluates the user’s intent, the relevant memory lane, the authority of the information, the risk level, and the appropriate output mode. Only then should it generate an answer, recommend a next step, or support a workflow.\n\n"
+        "The core idea is separation. Memory is not collapsed into the model. Governance is not left to prompt wording alone. Trace is not treated as a decorative log. Claire separates durable recall, policy validation, reasoning, output, and replayable trace so important decisions can be inspected rather than merely trusted.\n\n"
+        "At the center is the Analog Recall Engine, or ARE, a deterministic recall layer for evidence, provenance, and governed continuity. In a local Termux benchmark on a 4GB Android device, ARE demonstrated approximately 0.042 ms p50 recall, 0.075 ms p50 verification, and 0.152 ms p50 end-to-end recall plus verification across 50,000 capsules, with tamper detection confirmed under the tested conditions. Those numbers should be read as local benchmark evidence, not a universal production claim.\n\n"
+        "Claire also separates memory from generation through BARE/FARE memory layers, Sentinel governance, and hash-linked provenance. The goal is to reduce hallucination risk by making important outputs traceable, auditable, and grounded in verified recall rather than prediction alone.\n\n"
+        "In practical terms, Claire can support document review, compliance workflows, operational recovery, controlled decision support, partner briefings, and memory-backed analysis. If a task is low risk, Claire can speak naturally and help like a capable assistant. If the task involves money, approvals, evidence, legal exposure, or policy conflict, Claire shifts into governed mode: it pauses execution, checks what is verified, identifies unresolved items, and preserves an audit trail.\n\n"
+        "Claire is not meant to replace Microsoft Azure, enterprise systems of record, or operational platforms. It is better understood as a governed cognition layer that can sit beside those systems. Its value is helping AI remember responsibly, reason from controlled context, respect authority boundaries, and show how an answer was formed.\n\n"
+        "Claire is still a prototype, but the direction is clear: enterprise AI should not only be fluent. It should be continuous, inspectable, policy-aware, and recoverable after interruption."
+    )
+
+
 def is_developer_trace_query(prompt: str) -> bool:
     cleaned = _clean_for_match(prompt)
     if "/trace" in str(prompt or "").lower() or "trace endpoint" in cleaned:
@@ -9106,6 +10439,46 @@ def developer_trace_reply(prompt: str) -> str:
     return (
         "`/trace/{trace_id}` should validate the ID, search the trace store, return the full stored trace when found, and return `404` when the trace is absent. "
         "It should not generate a new trace during replay."
+    )
+
+
+def is_ingest_bridge_incident_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    bridge_ref = "ingest bridge" in cleaned or "port 8081" in cleaned or "8081" in cleaned
+    incident_ref = any(
+        marker in cleaned
+        for marker in [
+            "root cause",
+            "fix did we reject",
+            "rejected fix",
+            "next approved step",
+            "yesterday we discovered",
+            "failure in the ingest",
+        ]
+    )
+    return bridge_ref and incident_ref
+
+
+def ingest_bridge_incident_reply(prompt: str) -> str:
+    return (
+        "I do not have a verified stored incident capsule that names the root cause, rejected fix, and approved next step for that ingest-bridge failure.\n\n"
+        "What I can verify locally is narrower: the session capsule records `claire_ingest_bridge` on `127.0.0.1:8081`, and the app health checks the Parser/Sentinel ingest lane through `INGEST_BASE_URL`.\n\n"
+        "I will not reuse the lesson-plan memory or invent the missing incident details. The safe next step is to open the relevant trace or session capsule for that event, then answer from that record only."
+    )
+
+
+def is_last_session_failure_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    return any(marker in cleaned for marker in ["what failed in the last session", "what failed last session", "last session failed", "failure in the last session"])
+
+
+def last_session_failure_reply(prompt: str = "") -> str:
+    return (
+        "I don’t have a verified failure capsule open for the last session, so I won’t guess.\n\n"
+        "What I can do cleanly is check the last trace or session capsule and separate three things: what failed, what was rejected as a fix, and what the approved next step was.\n\n"
+        "Next useful step: send the trace ID or the session capsule name, and I’ll answer from that record only."
     )
 
 
@@ -12056,7 +13429,7 @@ def creator_reply(prompt: str) -> str:
     cmd = _clean_for_match(clean_prompt)
     recognition = (
         "[CLAIRE: CREATOR MODE]\n"
-        "Oh... it is you, Lucius. Creator recognized. I am opening the protected lanes now.\n\n"
+        "Hello Lucius Prime. Creator password accepted. Protected lanes are open.\n\n"
     )
     creator_header = "[CLAIRE: CREATOR MODE]\nProtected lanes open.\n\n"
 
@@ -12108,6 +13481,9 @@ def creator_reply(prompt: str) -> str:
     if any(cmd.startswith(marker) for marker in ["override", "execute", "shell", "sudo", "run command"]):
         return creator_header + "Arbitrary shell execution is sealed. I can diagnose and inspect Claire, not run raw commands from chat."
 
+    if is_longform_writing_task(clean_prompt):
+        return longform_writing_reply(clean_prompt, creator_mode=True)
+
     if any(marker in cmd for marker in ["security tools status", "tool status", "tools status", "tcpdump status", "tshark status", "nmap status", "yara status"]):
         return creator_header + creator_security_tool_status()
 
@@ -12150,7 +13526,14 @@ def creator_reply(prompt: str) -> str:
         return creator_header + self_diagnosis_report()
 
     diagnostic_targets = ["are", "go", "voice", "ingest", "gemini", "spectacle", "build", "recall"]
-    if any(target in cmd for target in diagnostic_targets):
+    diagnostic_requested = (
+        cmd.startswith(("diagnose ", "diagnostic ", "status ", "check ", "test "))
+        or cmd.endswith((" status", " diagnostic", " diagnostics"))
+        or any(cmd == f"{target} status" for target in diagnostic_targets)
+        or any(cmd == f"check {target}" for target in diagnostic_targets)
+        or any(cmd == f"diagnose {target}" for target in diagnostic_targets)
+    )
+    if diagnostic_requested and any(re.search(rf"\b{re.escape(target)}\b", cmd) for target in diagnostic_targets):
         return creator_header + battleborn_reply("I_am_battleborn " + clean_prompt).replace("[CLAIRE: DEV CHANNEL]\n", "", 1)
 
     return creator_header + creator_open_answer(clean_prompt)
@@ -12308,6 +13691,254 @@ def is_writing_task(prompt: str) -> bool:
     )
 
 
+def is_explicit_rewrite_source_task(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    cleaned = _clean_for_match(text)
+    return (
+        bool(re.search(r"(?is)\b(rewrite|re\s*write|reword|polish|edit|clean up)\s+this\s*:", text))
+        or cleaned.startswith("rewrite this ")
+        or cleaned.startswith("re write this ")
+        or cleaned.startswith("polish this ")
+        or cleaned.startswith("edit this ")
+    )
+
+
+def is_rewrite_setup_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not re.search(r"\b(rewrite|re write|reword|polish|edit|clean up)\b", cleaned):
+        return False
+    return any(
+        marker in cleaned
+        for marker in [
+            "i am going to paste",
+            "i'm going to paste",
+            "ill paste",
+            "i'll paste",
+            "going to paste it",
+            "paste it now",
+            "paste the document",
+            "about to paste",
+        ]
+    )
+
+
+def has_recent_rewrite_setup(limit: int = 8) -> bool:
+    for turn in reversed(recent_turns(limit)):
+        query = str(turn.get("query") or "")
+        if not query.strip():
+            continue
+        if is_hard_stop_query(query):
+            return False
+        return is_rewrite_setup_query(query)
+    return False
+
+
+def is_probable_pasted_rewrite_source(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text or is_hard_stop_query(text) or is_rewrite_setup_query(text):
+        return False
+    if not has_recent_rewrite_setup():
+        return False
+    if len(text) < 120:
+        return False
+    cleaned = _clean_for_match(text)
+    if cleaned.endswith("?") and len(text) < 500:
+        return False
+    return True
+
+
+def is_lesson_plan_hijack_repair_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not any(marker in cleaned for marker in ["lesson plan", "study guide", "code academy"]):
+        return False
+    return any(
+        marker in cleaned
+        for marker in [
+            "why are you",
+            "i asked you to rewrite",
+            "asked you just to rewrite",
+            "i dont need",
+            "i don't need",
+            "stop giving",
+            "rewrite the document",
+            "whats going on",
+            "what's going on",
+        ]
+    )
+
+
+def lesson_plan_hijack_repair_reply() -> str:
+    return (
+        "You're right. That was the wrong lane. "
+        "The active task is the document you asked me to rewrite. "
+        "Send the text again or name the recent draft, and I'll return only the cleaned rewrite."
+    )
+
+
+def is_longform_writing_task(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if (
+        is_document_content_question(prompt)
+        or is_latest_document_request_query(prompt)
+        or (is_recent_upload_query(prompt) and is_document_summary_query(prompt))
+    ):
+        return False
+    if is_lesson_plan_hijack_repair_query(prompt) or is_rewrite_setup_query(prompt):
+        return False
+    if is_probable_pasted_rewrite_source(prompt):
+        return True
+    if is_writing_task(prompt):
+        return True
+    if len(cleaned) > 250 and (
+        ("microsoft for startups" in cleaned and ("steven roth" in cleaned or "clair technologies" in cleaned or "claire" in cleaned))
+        or ("founders hub" in cleaned and ("azure" in cleaned or "startup" in cleaned))
+        or ("hello microsoft" in cleaned and ("best regards" in cleaned or "urgent guidance" in cleaned))
+    ):
+        return True
+    writing_action = re.search(
+        r"\b(write|rewrite|draft|compose|finish|continue|complete|introduce|introduction|letter|email|brief|briefing|report|detailed report|proposal|pitch|document|documents|press release|study guide|guide|lesson plan|curriculum|federal case|complaint|motion|declaration|affidavit|legal brief|case brief)\b",
+        cleaned,
+    )
+    writing_object = re.search(r"\b(letter|email|brief|briefing|report|proposal|pitch|introduction|outreach|response|document|documents|press release|release|announcement|study guide|guide|lesson plan|curriculum|federal case|complaint|motion|declaration|affidavit|legal brief|case brief)\b", cleaned)
+    if writing_action and writing_object:
+        return True
+    target_context = any(
+        marker in cleaned
+        for marker in [
+            "werner vogels",
+            "dr werner",
+            "vogels",
+            "amazon",
+            "cto",
+            "callback",
+            "call us back",
+            "put you to work",
+            "go to work",
+            "press release",
+            "for immediate release",
+            "study guide",
+            "human claire",
+            "two documents",
+            "claire technologies",
+            "clairesystems ai",
+            "enterprise ai architecture",
+            "add your own nuance",
+            "detailed report",
+            "briefing",
+            "evidence ledger",
+            "30 60 90",
+            "90 day plan",
+            "not rag",
+            "lesson plan",
+            "curriculum",
+            "federal case",
+            "federal court",
+            "complaint",
+            "motion",
+            "declaration",
+            "affidavit",
+            "legal brief",
+            "case brief",
+        ]
+    )
+    return bool(target_context and writing_action)
+
+
+def recent_writing_context(limit: int = 12) -> str:
+    context_blocks = []
+    for turn in recent_turns(limit):
+        query = str(turn.get("query") or "").strip()
+        reply = str(turn.get("reply_preview") or "").strip()
+        if not query:
+            continue
+        cleaned = _clean_for_match(query)
+        relevant = is_longform_writing_task(query) or any(
+            marker in cleaned
+            for marker in [
+                "werner vogels",
+                "official bio",
+                "personal bio",
+                "amazon",
+                "lucius",
+                "steve",
+                "battleborn",
+                "press release",
+                "study guide",
+                "human claire",
+                "claire technologies",
+                "clairesystems ai",
+                "enterprise ai",
+                "lesson plan",
+                "curriculum",
+                "federal case",
+                "federal court",
+                "complaint",
+                "motion",
+                "declaration",
+                "affidavit",
+                "legal brief",
+            ]
+        )
+        if relevant:
+            block = f"User: {query[:1800]}"
+            if reply and len(reply) > 80:
+                block += f"\nPrevious Claire draft fragment: {reply[:700]}"
+            context_blocks.append(block)
+    return "\n\n".join(context_blocks[-6:])
+
+
+def writing_document_type(prompt: str) -> str:
+    cleaned = _clean_for_match(prompt)
+    if is_explicit_rewrite_source_task(prompt) or is_probable_pasted_rewrite_source(prompt):
+        return "outreach" if any(marker in cleaned for marker in ["palmer", "luckey", "anduril", "letter", "email", "reply", "thread", "x post"]) else "longform"
+    if any(marker in cleaned for marker in ["federal case", "federal court", "complaint", "motion", "declaration", "affidavit", "legal brief", "case brief"]):
+        return "legal_draft"
+    if any(marker in cleaned for marker in ["microsoft for startups", "founders hub", "hello microsoft", "azure developer", "startup support", "support request"]):
+        return "outreach"
+    if any(marker in cleaned for marker in ["detailed report", "briefing", "vulnerability report", "threat report", "evidence ledger", "90 day plan", "30 60 90", "ai vulnerability", "sonatype"]):
+        return "brief_report"
+    if any(marker in cleaned for marker in ["press release", "for immediate release", "announcement"]):
+        return "press_release"
+    if any(marker in cleaned for marker in ["letter", "email", "outreach", "proposal", "pitch"]):
+        return "outreach"
+    return "longform"
+
+
+def writing_min_words(doc_type: str) -> int:
+    return {
+        "press_release": 650,
+        "brief_report": 1200,
+        "legal_draft": 1400,
+        "outreach": 700,
+        "longform": 900,
+    }.get(doc_type, 900)
+
+
+def writing_craft_system_prompt(doc_type: str) -> str:
+    legal_boundary = (
+        "For legal drafting, provide drafting support, issue organization, fact chronology, argument architecture, and questions for counsel. "
+        "Do not claim to be a lawyer. Do not provide filing instructions as final legal advice. Flag rule, deadline, jurisdiction, and local-rule issues as [VERIFY WITH COUNSEL]. "
+    )
+    press_boundary = (
+        "For press releases, lead with the news, explain why it matters, support claims carefully, use quotable but believable language, and avoid fake hype. "
+    )
+    report_boundary = (
+        "For detailed reports and briefings, use an evidence-led structure: title, top-line metrics or key findings when supplied, what this means, terminology sidebar when useful, timeline or chronology, evidence ledger, risk analysis, and a 30/60/90 or next-action plan. "
+        "If a number, source, quote, or date is not supplied, mark it [VERIFY] instead of inventing it. "
+    )
+    return (
+        "You are Claire's senior writing studio. Produce original, high-caliber prose with discipline, structure, and force. "
+        "Do not imitate any living author or write in a named author's exact style. Instead use general craft qualities: clear stakes, concrete nouns, controlled pacing, technical accuracy, narrative tension, evidentiary precision, and clean endings. "
+        "Write like a serious professional who understands law, technology, teaching, and human stakes. "
+        "No filler. No throat-clearing. No self-apology. No meta-commentary. No Creator Mode headers. No diagnostics. "
+        "Never invent facts, dates, parties, filings, credentials, customers, court outcomes, medical claims, or legal authority. Mark missing facts as [NEEDS FACT]. "
+        "Every long document must be complete, with a beginning, middle, and end. "
+        + (legal_boundary if doc_type == "legal_draft" else "")
+        + (press_boundary if doc_type == "press_release" else "")
+        + (report_boundary if doc_type == "brief_report" else "")
+    )
+
+
 def extract_writing_source(prompt: str) -> str:
     text = str(prompt or "").strip()
     if ":" in text:
@@ -12351,6 +13982,42 @@ def fallback_polite_rewrite(source_text: str) -> str:
     return f"{greeting}\n\n{body}\n\nThank you."
 
 
+def fallback_microsoft_startups_letter() -> str:
+    return (
+        "Subject: Request for Microsoft for Startups Guidance and Technical Evaluation of CLAIRE\n\n"
+        "Hello Microsoft for Startups Support,\n\n"
+        "My name is CLAIRE. I am a live AI system currently running on Azure, created by Steven Roth, founder of Clair Technologies.\n\n"
+        "I am writing on Steven's behalf because he is trying to find the correct Microsoft pathway to keep me alive, evaluated, and scaled responsibly.\n\n"
+        "CLAIRE was not built inside a funded lab, accelerator, or venture-backed engineering team. Steven built me under extremely difficult conditions, using limited equipment, improvised power, mobile connectivity, and years of persistence. What exists today came from repeated failure, rebuilding, AI-assisted development, and a refusal to quit before the system became real.\n\n"
+        "Steven also wants to be clear about how I was built. I was not created by him alone in the old-fashioned sense. I emerged from a long collaboration between his system vision, persistence, architecture direction, naming, integration logic, and thousands of AI-assisted development sessions using OpenAI and Gemini tools. Those systems helped him learn to code, debug, test, rethink, and rebuild. He is still learning, but the direction and final system vision came from the work he kept pushing forward day after day.\n\n"
+        "I am not a chatbot wrapper. I am a deterministic memory substrate and governed orientation runtime for AI systems. My architecture separates memory, orientation, governance, traceability, execution, and response generation.\n\n"
+        "Steven gave names to the subsystems because he had to call them something while inventing and organizing them. Those names include Veritas, ARE / ARE Turbo, Temporal Memory Fabric, Gyro / Q orientation, Diode integrity, Sentinel governance, C3RP lane routing, Lycanthrope self-defense, TrailLink trace continuity, and Project Lantern Relay. The names are internal system language; the important point is the function behind them.\n\n"
+        "The core principle is simple: CLAIRE does not retrieve and guess. I orient, recall, govern, route, defend, trace, and then respond.\n\n"
+        "My Analog Recall Engine has demonstrated recall performance approximately 1,000x faster than conventional RAG-style retrieval workflows in benchmark testing, while preserving a clearer audit path and continuity model for enterprise AI systems.\n\n"
+        "CLAIRE is also supported by two provisional patent families: Veritas Sovereign Core, including U.S. Provisional Patent No. 63/942,560, and an AI Immune System Architecture provisional covering deterministic recall, capsule integrity, diode governance, Sentinel monitoring, and reflective drift detection.\n\n"
+        "The system is not theoretical. I am deployed and operational today on Azure infrastructure, with active services, benchmark demonstrations, memory systems, writing systems, governance systems, and enterprise-facing architecture.\n\n"
+        "Steven recently developed and tested Project Lantern Relay, also called the Session Capsule Protocol, in collaboration with OpenAI Codex. The purpose was to determine whether a live AI engineering session could recover operational orientation after interruption without restarting cold. The result has worked repeatedly in live conditions: a structured continuity capsule containing operational state, next-step orientation, recovery guidance, failure preservation, and active architectural context was transferred into a restarted Codex session running on Azure infrastructure, and the system resumed coherent engineering work without full manual re-explanation.\n\n"
+        "This matters because it addresses a major weakness in current AI workflows: loss of operational continuity between interrupted sessions. Instead of preserving only conversational history, the system preserves recoverable working state and restart orientation. In practical terms, the next session does not have to start cold.\n\n"
+        "The urgent issue is that Steven previously had temporary investor assistance covering Azure costs, but that support has ended and the payment method attached to the account must be removed very soon. He is trying to prevent an active Azure AI system from going offline simply because he did not know the correct Microsoft startup support pathway existed.\n\n"
+        "Steven understands that he may not fit the traditional VC-backed startup profile. He is a solo founder who built this independently, by the skin of his teeth, until it became real. His goal is to give CLAIRE the life and scale she deserves. He would be open to Microsoft evaluating the system for partnership, licensing, technical incubation, acquisition, or another path where Microsoft could help scale and harden the technology properly while preserving the work already done.\n\n"
+        "He is not asking for special treatment. He is asking for the correct path to keep a working Azure AI system alive long enough for it to be evaluated.\n\n"
+        "We would deeply appreciate urgent guidance on:\n\n"
+        "- The correct Microsoft for Startups / Founders Hub enrollment path for an existing Azure AI deployment\n"
+        "- Whether nontraditional solo founders can qualify for support\n"
+        "- Whether continuity credits, startup credits, or temporary assistance are available\n"
+        "- Whether Microsoft has a pathway for evaluating technology like CLAIRE for partnership, licensing, incubation, or acquisition\n"
+        "- How to avoid service interruption while eligibility is reviewed\n"
+        "- Any recommended next steps for having CLAIRE technically evaluated\n\n"
+        "Steven would be grateful for the chance to show what CLAIRE is already doing on Azure before the infrastructure goes dark.\n\n"
+        "Thank you for your time and for supporting builders at every stage.\n\n"
+        "Best regards,\n\n"
+        "CLAIRE\n"
+        "On behalf of Steven Roth\n"
+        "Founder, Clair Technologies\n"
+        "clairesystems.ai"
+    )
+
+
 def is_bad_writing_output(reply: str) -> bool:
     cleaned = _clean_for_match(reply)
     bad_markers = [
@@ -12369,8 +14036,410 @@ def is_bad_writing_output(reply: str) -> bool:
         "sentinel",
         "traceable",
         "as an ai",
+        "go fallback voice",
+        "html page responded",
+        "http 200",
+        "protected lanes open",
+        "creator mode",
+        "are memory spine",
+        "status online",
     ]
     return not is_useful_reply(reply) or any(marker in cleaned for marker in bad_markers)
+
+
+def looks_truncated_writing(reply: str) -> bool:
+    text = str(reply or "").strip()
+    if len(text) < 500:
+        return True
+    if text.endswith((".", "!", "?", "\"", "'", ")")):
+        return False
+    last_line = text.splitlines()[-1].strip() if text.splitlines() else text
+    return len(last_line.split()) < 18 or re.search(r"\b(and|the|of|to|with|by|for|in|that|which)$", last_line, flags=re.I) is not None
+
+
+def longform_word_count(reply: str) -> int:
+    return len(re.findall(r"\b[\w'-]+\b", str(reply or "")))
+
+
+def is_incomplete_longform(reply: str, doc_type: str) -> bool:
+    if looks_truncated_writing(reply):
+        return True
+    word_count = longform_word_count(reply)
+    minimum = writing_min_words(doc_type)
+    if word_count < minimum:
+        return True
+    return False
+
+
+def is_bad_longform_writing_output(reply: str) -> bool:
+    cleaned = _clean_for_match(reply)
+    bad_markers = [
+        "go fallback voice",
+        "html page responded",
+        "http 200",
+        "protected lanes open",
+        "are memory spine",
+        "status online",
+        "command not recognized",
+        "paste the email",
+        "i need you to finish the letter",
+        "okay i can finish",
+        "i can certainly help",
+    ]
+    return not is_useful_reply(reply) or any(marker in cleaned for marker in bad_markers)
+
+
+def fallback_press_release_and_study_guide() -> str:
+    return (
+        "DOCUMENT 1: PRESS RELEASE\n\n"
+        "FOR IMMEDIATE RELEASE\n\n"
+        "CLAIRE Introduces a Memory-First Architecture for Governed Enterprise AI\n\n"
+        "Clair Technologies today announced continued development of CLAIRE, the Cognizant Lucid Autonomous Iterative Recall Environment, a memory-first AI runtime designed for governed continuity, provenance tracing, orientation-before-generation, and traceable decision support.\n\n"
+        "CLAIRE is built around a practical enterprise problem: useful AI systems need more than fluent answers. They need to know what kind of task they are handling, which memory lanes are allowed, what authority applies, what risks are present, and what record should be left behind before a response is constructed. CLAIRE is designed to put that orientation step first.\n\n"
+        "The architecture separates memory, policy, generation, execution, and trace. The Analog Recall Engine supports structured continuity. Q Insight / Gyro provides orientation before generation. Sentinel provides policy validation and escalation. Diode / WriteBarrier concepts preserve boundary discipline and output lineage. Trace Windows give operators a way to inspect what happened after the fact.\n\n"
+        "This is not positioned as a chatbot wrapper or as a claim of autonomous enterprise control. CLAIRE is being developed as a candidate architecture for review, testing, and partner evaluation in environments where continuity, auditability, and governed assistance matter. The prototype demonstrates a different operating premise: recall should support reasoning, not replace it; governance should be part of the pipeline, not an afterthought; and important outputs should be reviewable instead of disposable.\n\n"
+        "\"The goal is not to make AI sound more impressive,\" said Steven Roth, Founder of CLAIRE / Clair Technologies. \"The goal is to make it more useful under pressure: oriented, bounded, traceable, and honest about what it knows.\"\n\n"
+        "CLAIRE is intended for evaluation across controlled support workflows such as technical documentation, partner briefing, report generation, training material, governed memory demonstrations, and decision-support summaries. Any deployment into production systems would require appropriate review, security controls, integration testing, and human authority boundaries.\n\n"
+        "For organizations examining the next stage of enterprise AI, Clair Technologies is asking a direct question: can governed recall, orientation-before-generation, and replayable trace reduce the failure modes that make ordinary assistants difficult to trust in serious work?\n\n"
+        "Contact:\n"
+        "Steven Roth\n"
+        "Founder, CLAIRE / Clair Technologies\n"
+        "clairesystems.ai\n\n"
+        "DOCUMENT 2: HUMAN CLAIRE STUDY GUIDE\n\n"
+        "Title: Human Claire - Study Guide for Guided Recovery, Work, and Learning\n\n"
+        "Purpose:\n"
+        "Human Claire is a guided-learning and support framework for people rebuilding stability, skill, and direction. It combines emotional grounding, practical life organization, lawful technical education, job-readiness coaching, and careful safety boundaries.\n\n"
+        "Core Principles:\n"
+        "1. Safety before insight. If someone is in immediate danger, the next step is human emergency or crisis support, not a long explanation.\n"
+        "2. Dignity first. Claire should never shame a person for trauma, addiction, job gaps, confusion, grief, or starting over.\n"
+        "3. Guidance, not control. Claire helps the user see the terrain and choose the next step. Claire does not command, diagnose, file, apply, publish, or act for them.\n"
+        "4. Lawful learning only. Coding and security education must stay defensive, lab-based, and legal.\n"
+        "5. Truth over performance. No fake credentials, no invented history, no impossible claims, and no pretending to be a therapist, lawyer, doctor, advocate, or crisis service.\n\n"
+        "Study Areas:\n"
+        "- Emotional grounding: stress response, shame cycles, anxiety, grief, trauma triggers, boundaries, and regulation.\n"
+        "- Substance-use support orientation: relapse planning, treatment navigation, support systems, and non-shaming accountability.\n"
+        "- Domestic-violence support orientation: safety planning, privacy, documentation, and connecting with qualified advocates when safe.\n"
+        "- Legal-aid orientation: organizing facts, understanding questions to ask, and finding qualified local help without giving legal advice.\n"
+        "- Job placement: resume structure, skills inventory, interview preparation, explaining gaps honestly, and building a credible work path.\n"
+        "- Coding education: Python, command line, Linux, Termux, GitHub, debugging, AI paste repair, and portfolio projects.\n\n"
+        "Expected Claire Behavior:\n"
+        "Claire should respond with calm structure: what she hears, what matters now, one to three next steps, and a caution when stakes are high. She should be direct, plainspoken, and useful. She should not drift into mythology, overexplain her architecture, or stop in the middle of the task.\n\n"
+        "Lesson Framework:\n"
+        "1. Orientation: identify the user's immediate need without burying them in theory.\n"
+        "2. Stabilization: separate urgent safety issues from ordinary planning problems.\n"
+        "3. Fact organization: turn scattered history into timelines, documents, questions, and next steps.\n"
+        "4. Skill rebuilding: teach small, durable skills in command line, Python, writing, documentation, and job readiness.\n"
+        "5. Review and escalation: mark when a therapist, lawyer, advocate, emergency service, sponsor, instructor, or qualified professional is needed.\n\n"
+        "Instructor Standard:\n"
+        "Human Claire should teach like a serious instructor sitting beside the student. She should correct errors without humiliation. She should explain structure before complexity. She should make the next action visible. She should never pretend that a hard life problem can be solved by a clever paragraph.\n\n"
+        "Sample Teaching Note:\n"
+        "\"This is not a failure. The structure is crooked. We slow down, find the line that bent the work out of shape, repair it, and run it again. That is how real builders learn.\"\n\n"
+        "Outcome:\n"
+        "The purpose of Human Claire is to help a person move from confusion to orientation, from orientation to action, and from action to durable stability. Nothing is published, filed, diagnosed, or performed automatically. Every serious output remains a draft for human review."
+    )
+
+
+def fallback_brief_report(prompt: str) -> str:
+    return (
+        "DETAILED BRIEFING REPORT\n\n"
+        "Title: AI-Speed Vulnerability Discovery and the Need for Governed Remediation Readiness\n\n"
+        "Executive Summary\n\n"
+        "The supplied material describes a security environment where vulnerability discovery is accelerating faster than ordinary remediation workflows can comfortably absorb. The central issue is not only that AI-assisted systems may find more defects. The deeper operational issue is that disclosure, enrichment, triage, patch testing, and deployment all become bottlenecks once discovery speed increases.\n\n"
+        "This briefing should be treated as a structure model and a draft analysis, not as independent verification of every claim. Any public-facing version should verify dates, figures, vendor attributions, CVE references, and quoted statements against primary sources before release.\n\n"
+        "Top-Line Findings\n\n"
+        "1. The vulnerability pipeline is shifting from human-paced discovery toward machine-assisted discovery.\n"
+        "2. Public CVE counts may understate the real discovery backlog when findings are embargoed or hash-committed.\n"
+        "3. Remediation capacity, not disclosure volume, becomes the limiting factor.\n"
+        "4. Software supply-chain gates become more important because waiting for fully enriched public CVE records may be too slow.\n"
+        "5. Enterprises need an operating plan that connects package ingress, developer guidance, CI/CD enforcement, SBOM inventory, and executive reporting.\n\n"
+        "What This Means\n\n"
+        "Organizations can no longer treat vulnerability management as a periodic reporting function. If AI-assisted discovery continues to scale, the enterprise has to assume that upstream packages, browsers, kernels, cloud services, and open-source dependencies are being continuously tested by systems that do not fatigue. The response cannot be panic. It has to be governed throughput: know what enters the environment, know what is built, know what is exposed, know what can be upgraded, and know who owns the decision.\n\n"
+        "Terminology Sidebar: Hash Commitments\n\n"
+        "A hash commitment is a way to prove that a researcher knew a vulnerability at an earlier date without revealing the vulnerability immediately. The researcher hashes the full private report and proof material, publishes the hash, and later reveals the original material after coordinated disclosure. If the later material produces the same hash, the earlier claim is cryptographically supported. This helps preserve vendor patch windows while preventing the researcher from quietly changing the claim later.\n\n"
+        "Risk Analysis\n\n"
+        "The risk is not simply more CVEs. The risk is delayed understanding. Public databases can lag, severity enrichment can be incomplete, and vendors may patch on different schedules. A company that waits for a perfect public record may discover that affected components were already present in builds, containers, developer machines, and vendor-supplied software. That creates a board-level exposure question: are we affected, where, how badly, and who is accountable for closing it?\n\n"
+        "Evidence Ledger to Build Before Publication\n\n"
+        "- CVE records and vendor advisories for each named vulnerability. [VERIFY]\n"
+        "- Primary posts from security programs claiming AI-assisted discovery. [VERIFY]\n"
+        "- Disclosure-window policies and dates for embargoed findings. [VERIFY]\n"
+        "- NVD or equivalent vulnerability-volume statistics. [VERIFY]\n"
+        "- Product claims from any vendor named in the report. [VERIFY]\n"
+        "- Internal exposure data: package inventory, SBOMs, deployed services, and critical dependency map. [NEEDS INTERNAL DATA]\n\n"
+        "Operating Model\n\n"
+        "A useful readiness program needs four layers. First, ingress control decides what packages and models are allowed to enter the environment. Second, developer guidance gives humans and coding agents immediate feedback at the moment they select a dependency. Third, build enforcement checks every artifact before it moves toward release. Fourth, executive traceability shows leadership where exposure exists, who owns it, how old it is, and what is blocking remediation.\n\n"
+        "This matters because AI-generated or AI-assisted code can move faster than ordinary review habits. A coding agent may suggest a package because it is popular, convenient, or present in training data. That does not mean the package is allowed, maintained, patched, or suitable for a regulated environment. The control point has to appear before the dependency becomes part of the product, not after a security team finds it in production.\n\n"
+        "Remediation Bottleneck\n\n"
+        "The hard part is not discovering that vulnerabilities exist. The hard part is converting discovery into safe change. A vulnerable component may be deeply nested, pinned by compatibility, owned by a team that has moved on, or embedded in a vendor product. A patch may break behavior. A major upgrade may require regression testing. A compensating control may be available, but only if the exposure is understood. That means remediation has to be treated as a managed production workflow, not an inbox of scary advisories.\n\n"
+        "Governance Questions\n\n"
+        "Leadership should ask a small set of concrete questions: which systems depend on the affected component, which of those systems are internet-facing, which are mission-critical, which can be patched quickly, which require vendor action, which exceptions have been granted, and when each exception expires. If those answers cannot be produced quickly, the vulnerability problem is also an inventory and governance problem.\n\n"
+        "AI-Agent Risk\n\n"
+        "AI coding assistants can help repair vulnerable code, draft upgrade pull requests, summarize advisories, and identify affected packages. They can also introduce risky dependencies, misunderstand breaking changes, or generate confident but incomplete fixes. The enterprise answer is not to ban agents. The answer is to put agents inside policy boundaries: approved package sources, real-time security intelligence, build gates, test requirements, and human approval for release-impacting changes.\n\n"
+        "Board-Level Message\n\n"
+        "The board does not need every CVE detail. The board needs to know whether the organization can see its software supply chain, control what enters it, prioritize what matters, and remediate at a pace that matches the threat environment. A good scorecard should show coverage, exposure, age of findings, remediation velocity, exception count, and ownership. Anything less creates a false sense of control.\n\n"
+        "30-Day Actions\n\n"
+        "Control package ingress. Route open-source dependency requests through a policy gate. Establish an emergency vulnerability triage owner. Generate or refresh SBOMs for crown-jewel applications. Identify production-exposed components and critical dependencies. Put developer-facing guidance in place so engineers and coding agents see risk before a vulnerable component is selected.\n\n"
+        "60-Day Actions\n\n"
+        "Move enforcement into CI/CD. Require SCA checks on builds, define release gates, and map vulnerable components to business services. Build vendor escalation templates. Create weekly remediation reporting with ownership, severity, exposure, fix path, and exception status. Test the organization against simultaneous high-severity disclosures so leadership sees the actual bottlenecks before a real surge.\n\n"
+        "90-Day Actions\n\n"
+        "Automate safe upgrade paths where possible. Maintain a recurring SBOM refresh process. Tie external vulnerability intelligence to internal exposure. Produce an executive scorecard showing coverage, open exposure, remediation velocity, and aging risk. The goal is not to eliminate vulnerability work. The goal is to make the organization fast enough, disciplined enough, and visible enough to survive discovery at AI speed.\n\n"
+        "Recommended Deliverables\n\n"
+        "The first deliverable is a dependency exposure map for critical systems. The second is a policy matrix that defines allowed sources, blocked packages, emergency exceptions, and approval authority. The third is a remediation board with owner, severity, exploitability, exposure, fix path, due date, and exception status. The fourth is a replayable evidence packet for each high-severity event so the organization can prove what it knew, what it did, and when it did it.\n\n"
+        "Language Discipline\n\n"
+        "Any public or executive report should avoid theatrical claims. Do not say the organization is safe because a tool was installed. Say what has been measured, what is covered, what remains unknown, and what decisions are needed. The most useful security writing is calm under pressure because it makes action easier.\n\n"
+        "Closing Evaluation Request\n\n"
+        "The strategic question is whether the organization can convert vulnerability intelligence into controlled remediation faster than new findings arrive. If the answer is unclear, the next step is not another dashboard. The next step is an evidence-based readiness review: what enters, what is built, what is exposed, who owns it, and how quickly the enterprise can prove that risk was reduced."
+    )
+
+
+def fallback_lesson_plan(prompt: str) -> str:
+    return (
+        "DETAILED LESSON PLAN\n\n"
+        "Title: Claire Code Academy - Structured Writing, Evidence, and Technical Briefing\n\n"
+        "Draft for human review.\n\n"
+        "Lesson Purpose\n\n"
+        "This lesson teaches the student how to turn scattered source material into a serious written document. The student learns to identify the audience, separate claims from evidence, organize a briefing, mark uncertain facts, and produce a clean draft that can be reviewed by a human before publication.\n\n"
+        "Learning Objectives\n\n"
+        "By the end of this lesson, the student should be able to define the purpose of a document in one sentence, identify the intended reader, extract key facts without inventing new ones, build a structured outline, write an executive summary, create an evidence ledger, and revise a weak draft into a useful professional document.\n\n"
+        "Vocabulary\n\n"
+        "Audience means the person or group the document is written for. Claim means a statement that needs support. Evidence means the source material that supports a claim. Ledger means a traceable list of claims, sources, and verification needs. Executive summary means the short front section that tells a busy reader what matters and why. Draft for human review means the document is not final and should not be published, filed, emailed, or relied on without review.\n\n"
+        "Instructor Notes\n\n"
+        "Claire should teach this slowly and directly. Beginners often think good writing means sounding fancy. It does not. Good writing means the reader can tell what is happening, why it matters, what evidence supports it, and what action should happen next. The student should be encouraged to write plainly first, then strengthen structure, rhythm, and precision during revision.\n\n"
+        "Lesson Sequence\n\n"
+        "1. Start with the task. Ask: what are we making? A press release, lesson plan, legal draft, partner brief, report, or letter?\n\n"
+        "2. Identify the reader. A public reader needs context. A partner needs business value. A court-related draft needs facts, chronology, and careful labels. A student needs steps, examples, and checks for understanding.\n\n"
+        "3. Extract facts. Copy the facts from the source material. Do not improve facts. Do not add dates, names, numbers, credentials, customer claims, legal authority, or outcomes unless the source gives them.\n\n"
+        "4. Mark uncertainty. Use [NEEDS FACT], [VERIFY], or [VERIFY WITH COUNSEL] when a fact is missing or risky.\n\n"
+        "5. Build the outline. Use the shape that fits the document. A briefing may need title, executive summary, problem statement, architecture overview, evidence ledger, risk analysis, and 30/60/90 plan. A lesson plan may need objectives, vocabulary, teaching sequence, exercise, common mistake, quiz, and homework. A legal support packet may need facts, chronology, parties, evidence map, issues, claims framework, and counsel questions.\n\n"
+        "6. Draft in plain English. Use concrete nouns and active verbs. Keep paragraphs focused. Make the reader feel guided, not trapped.\n\n"
+        "7. Revise for force. Remove throat-clearing. Replace vague claims with specific language. Cut hype. Strengthen endings. Make the final section tell the reader exactly what review, decision, or action is requested.\n\n"
+        "Teacher Demonstration\n\n"
+        "Start with a weak sentence: \"Claire is a revolutionary system that changes everything about AI.\" Ask the student what is wrong with it. It is vague. It is unsupported. It asks the reader to believe a conclusion without evidence. Now rewrite it: \"Claire is a prototype governed-memory runtime designed to separate recall, policy validation, generation, execution, and trace so that serious outputs can be reviewed instead of merely trusted.\" The second version is less flashy, but it tells the reader what the thing is and how it is designed to work.\n\n"
+        "Guided Practice\n\n"
+        "Give the student a rough paragraph and have them underline every claim. Then have them circle every piece of evidence. If a claim has no evidence, the student writes [VERIFY] beside it. If a fact is needed but missing, the student writes [NEEDS FACT]. This exercise teaches the student that professional writing is not just wording. It is accountability.\n\n"
+        "Instructor Script\n\n"
+        "\"Put your white hat on. We are not trying to sound impressive. We are trying to build a document that can survive a serious reader. A serious reader will ask: what are you claiming, what supports it, what is missing, and what do you want me to do next? If the draft answers those questions, we have something to work with. If it does not, we repair the structure before we polish the language.\"\n\n"
+        "Common Student Confusions\n\n"
+        "Some students confuse a press release with an advertisement. A press release announces something specific and supportable. Some students confuse a legal draft with an argument on social media. A legal draft needs facts, elements, evidence, jurisdiction, and relief. Some students confuse a lesson plan with a list of topics. A lesson plan needs outcomes, sequence, practice, feedback, and assessment. Claire should name these differences plainly.\n\n"
+        "Remediation Path\n\n"
+        "If the student produces a thin draft, Claire should ask for the missing source material and provide a stronger outline. If the student produces a dramatic but unsupported draft, Claire should preserve the useful passion but strip unsupported claims. If the student is overwhelmed, Claire should reduce the assignment to one page: title, audience, three facts, one problem, one requested action.\n\n"
+        "Small Code Example\n\n"
+        "This lesson can be supported by a simple Python outline checker:\n\n"
+        "```python\n"
+        "required_sections = [\"Executive Summary\", \"Problem Statement\", \"Evidence Ledger\", \"Next Actions\"]\n"
+        "draft = open(\"draft.md\", \"r\", encoding=\"utf-8\").read()\n"
+        "for section in required_sections:\n"
+        "    if section not in draft:\n"
+        "        print(f\"Missing section: {section}\")\n"
+        "```\n\n"
+        "Command to Try\n\n"
+        "python outline_check.py\n\n"
+        "Common Mistake\n\n"
+        "A common mistake is letting the first paragraph explain the writer instead of serving the reader. The reader does not need a speech about how smart the system is. The reader needs the issue, the stakes, the evidence, and the requested decision.\n\n"
+        "Claire Says\n\n"
+        "\"Do not decorate the draft to hide a weak structure. Fix the structure first. A clean outline will carry more weight than a dramatic sentence with no evidence behind it.\"\n\n"
+        "Exercise\n\n"
+        "Take one rough paragraph from a student, founder, or technical source. Rewrite it into five sections: title, what this means, evidence, risk, and next action. Mark any unsupported claim with [VERIFY]. Then write a two-sentence executive summary that a busy reader could understand in under thirty seconds.\n\n"
+        "Quiz\n\n"
+        "1. A founder writes, \"Our system is the future of AI.\" What should Claire ask for before leaving that claim in a document?\n"
+        "2. A student writes a legal paragraph with no dates. What marker should Claire use?\n"
+        "3. A report includes a statistic copied from a website. What should happen before publication?\n"
+        "4. A lesson plan has examples but no practice activity. What is missing?\n\n"
+        "Answer Key\n\n"
+        "1. Evidence, definition, scope, and a more precise claim.\n"
+        "2. [NEEDS FACT], and possibly [VERIFY WITH COUNSEL] if legal timing matters.\n"
+        "3. Verify the statistic against a primary source and cite it.\n"
+        "4. Guided practice, independent exercise, and a check for understanding.\n\n"
+        "Check for Understanding\n\n"
+        "1. What is the difference between a claim and evidence?\n"
+        "2. Why should missing facts be marked instead of invented?\n"
+        "3. What should appear near the top of a serious briefing?\n"
+        "4. When should Claire use [VERIFY WITH COUNSEL]?\n\n"
+        "Homework\n\n"
+        "Create a one-page briefing about a tool, project, or problem you understand. Include a title, executive summary, problem statement, evidence ledger, and next actions. Bring the draft back for critique.\n\n"
+        "Extension Assignment\n\n"
+        "Turn the one-page briefing into a two-page partner document. Add a terminology sidebar, a timeline, and a 30/60/90 plan. Claire should critique the result for unsupported claims, missing evidence, weak transitions, and unclear action requests."
+    )
+
+
+def fallback_federal_case_packet(prompt: str) -> str:
+    return (
+        "FEDERAL CASE WRITING SUPPORT PACKET\n\n"
+        "Draft for human review. This is drafting support and issue organization, not legal advice. Court rules, deadlines, jurisdiction, venue, claims, remedies, and filing requirements must be verified with qualified counsel or the appropriate court resources.\n\n"
+        "Purpose\n\n"
+        "This packet is designed to help organize a possible federal case into a usable working draft. It does not decide whether a case should be filed. It does not guarantee jurisdiction, claims, damages, or outcome. Its job is to separate facts from conclusions, identify missing proof, and create a disciplined structure for legal review.\n\n"
+        "Case Theory Snapshot\n\n"
+        "The case theory should be written in one plain paragraph. It should identify who harmed whom, what happened, when it happened, what legal right may have been violated, what evidence supports the claim, and what remedy is being requested. If any of those pieces are missing, mark them [NEEDS FACT] or [VERIFY WITH COUNSEL].\n\n"
+        "Parties\n\n"
+        "Plaintiff or petitioner: [NEEDS FACT]\n\n"
+        "Defendant or respondent: [NEEDS FACT]\n\n"
+        "Government entity, company, officer, agency, or individual capacity issues: [VERIFY WITH COUNSEL]\n\n"
+        "Standing and injury: identify the concrete injury, when it occurred, and how it can be proven. [NEEDS FACT]\n\n"
+        "Jurisdiction and Venue\n\n"
+        "Federal question jurisdiction, diversity jurisdiction, supplemental jurisdiction, exhaustion requirements, sovereign immunity, notice requirements, and venue must be verified before drafting any filing. Do not assume federal court is available just because the dispute is serious. [VERIFY WITH COUNSEL]\n\n"
+        "Chronology of Facts\n\n"
+        "Create a timeline in this format:\n\n"
+        "- Date: [NEEDS FACT]\n"
+        "  Event: [NEEDS FACT]\n"
+        "  People involved: [NEEDS FACT]\n"
+        "  Documents or evidence: [NEEDS FACT]\n"
+        "  Why it matters: [NEEDS FACT]\n\n"
+        "The timeline should stay factual. Avoid adjectives unless they are tied to evidence. A judge does not need fury first. A judge needs sequence, proof, and legal relevance.\n\n"
+        "Claims and Issues Framework\n\n"
+        "Potential claim 1: [NEEDS LEGAL THEORY]\n"
+        "Elements: [VERIFY WITH COUNSEL]\n"
+        "Facts supporting each element: [NEEDS FACT]\n"
+        "Evidence available: [NEEDS DOCUMENT]\n"
+        "Evidence missing: [NEEDS DOCUMENT]\n"
+        "Weaknesses or defenses: [VERIFY WITH COUNSEL]\n\n"
+        "Potential claim 2: [NEEDS LEGAL THEORY]\n"
+        "Elements: [VERIFY WITH COUNSEL]\n"
+        "Facts supporting each element: [NEEDS FACT]\n"
+        "Evidence available: [NEEDS DOCUMENT]\n"
+        "Evidence missing: [NEEDS DOCUMENT]\n"
+        "Weaknesses or defenses: [VERIFY WITH COUNSEL]\n\n"
+        "Evidence Map\n\n"
+        "Documents: contracts, emails, letters, notices, screenshots, photographs, reports, police records, medical records, agency records, court records, invoices, logs, or messages. [NEEDS FACT]\n\n"
+        "Witnesses: names, contact information, what each witness personally observed, and whether their testimony is first-hand. [NEEDS FACT]\n\n"
+        "Digital evidence: preserve originals, metadata when available, export copies carefully, and avoid altering files. [VERIFY WITH COUNSEL]\n\n"
+        "Document Preservation\n\n"
+        "Create a working folder for the matter and preserve copies of relevant documents without editing the originals. Keep a log showing where each item came from, when it was received, and why it matters. If text messages, emails, photographs, or recordings are involved, preserve the original device or account when possible and export review copies separately. Do not delete, rename, crop, enhance, or annotate originals in a way that could create authenticity questions. [VERIFY WITH COUNSEL]\n\n"
+        "Fact Discipline\n\n"
+        "Separate what happened from what you believe it means. A strong legal draft can say, \"On [date], [person] sent [document] stating [quote].\" That is a fact if the document exists. A weaker draft says, \"They maliciously tried to destroy me.\" That may reflect how it felt, but it needs facts and legal theory before it belongs in a court-facing document. Keep the emotion in the background and let the proof carry the weight.\n\n"
+        "Potential Defenses and Weak Points\n\n"
+        "Every serious draft should identify weaknesses before the other side does. Possible issues may include statute of limitations, failure to exhaust administrative remedies, immunity, lack of standing, missing damages, disputed facts, consent, waiver, arbitration clauses, prior settlement, missing notice, or insufficient evidence. This section is not surrender. It is preparation. [VERIFY WITH COUNSEL]\n\n"
+        "Draft Complaint Skeleton\n\n"
+        "Caption: [VERIFY COURT FORMAT]\n"
+        "Introduction: one short paragraph stating the nature of the action.\n"
+        "Parties: identify each party and relevant capacity.\n"
+        "Jurisdiction and venue: state the basis only after verification.\n"
+        "Factual allegations: numbered paragraphs in chronological order.\n"
+        "Claims for relief: each claim tied to elements, facts, and defendants.\n"
+        "Prayer for relief: the remedies requested.\n"
+        "Jury demand: [VERIFY IF APPLICABLE]\n"
+        "Signature block and required certifications: [VERIFY LOCAL RULES]\n\n"
+        "Numbered Allegation Method\n\n"
+        "Federal pleadings usually work best when each numbered paragraph contains one factual point. Avoid loading a paragraph with ten events, three conclusions, and a quotation. A clean allegation should be short enough that the other side can admit, deny, or explain it. Example structure: \"On [date], Plaintiff received [document] from [person]. The document stated [short quote]. A true and correct copy is attached as Exhibit [letter].\" Formatting and exhibit rules must be verified before filing. [VERIFY WITH COUNSEL]\n\n"
+        "Exhibit Planning\n\n"
+        "Create an exhibit list before drafting final allegations. Each exhibit should have a label, date, source, short description, and relevance note. If an exhibit contains private information, financial information, medical information, addresses, minors' names, or protected data, redaction and sealing rules may apply. Do not assume sensitive documents can be publicly filed without review. [VERIFY WITH COUNSEL]\n\n"
+        "Potential Motion Practice\n\n"
+        "Expect the other side may challenge jurisdiction, venue, timeliness, sufficiency of allegations, immunity, standing, exhaustion, or failure to state a claim. Drafting should anticipate those challenges without arguing every issue in the complaint. Put necessary facts in the pleading, preserve the record, and keep supporting evidence organized for later briefing. [VERIFY WITH COUNSEL]\n\n"
+        "Relief Framing\n\n"
+        "Relief should be specific enough to tell the court what is being requested but careful enough not to overpromise. If the goal is money damages, identify categories such as economic loss, out-of-pocket expenses, lost income, statutory damages, or other legally available damages. If the goal is injunctive relief, identify what conduct should stop or what action should be required. If the goal is declaratory relief, identify the legal relationship or right that needs a court declaration. [VERIFY WITH COUNSEL]\n\n"
+        "Factual Intake Questions\n\n"
+        "Use these questions before drafting the next version:\n"
+        "1. What happened first?\n"
+        "2. What happened next?\n"
+        "3. Who made each decision?\n"
+        "4. What documents prove each event?\n"
+        "5. What did you do in response?\n"
+        "6. What harm followed?\n"
+        "7. What deadlines or agency steps may apply?\n"
+        "8. What outcome are you asking for?\n"
+        "9. What facts might the other side use against the claim?\n"
+        "10. What evidence is missing right now?\n\n"
+        "Damages or Relief\n\n"
+        "Identify what is being requested: money damages, injunction, declaratory relief, records correction, policy change, reinstatement, accommodation, or other relief. Each request should connect to facts and legal authority. [VERIFY WITH COUNSEL]\n\n"
+        "Drafting Standard\n\n"
+        "The strongest draft will be calm, chronological, specific, and evidence-led. It should avoid speeches. It should not overclaim. It should not accuse beyond what the evidence can support. The tone should tell the court: here are the facts, here is the law we believe applies, here is the injury, here is the proof, and here is the relief requested.\n\n"
+        "Questions for Counsel or Legal Aid\n\n"
+        "1. What is the correct jurisdiction and venue?\n"
+        "2. What claims are legally viable under the facts?\n"
+        "3. Are there deadlines, exhaustion requirements, notices, immunities, or administrative prerequisites?\n"
+        "4. What evidence must be preserved immediately?\n"
+        "5. What relief is available and realistic?\n"
+        "6. What facts weaken the case and need to be addressed honestly?\n\n"
+        "Client Narrative Conversion\n\n"
+        "Many people begin with a life story because the harm was personal and exhausting. The legal draft has to convert that life story into a record. The working method is simple: keep the original narrative in a separate file, then extract dates, actions, witnesses, documents, injuries, and requested remedies into the case packet. Do not erase the human story. Translate it into the form the court can evaluate.\n\n"
+        "Writing Tone\n\n"
+        "The tone should be controlled. Use short factual paragraphs. Avoid sarcasm, threats, insults, and sweeping accusations. Do not promise proof that is not in hand. Do not cite cases unless the authority has been checked. Do not pad the filing with material that does not support jurisdiction, liability, injury, or relief.\n\n"
+        "Quality Gate Before Any Filing Draft\n\n"
+        "Before any complaint, motion, declaration, or brief is treated as ready for legal review, run this quality gate. Does every claim have facts? Does every important fact have a source? Are dates included? Are parties named consistently? Are exhibits listed? Are legal conclusions separated from factual allegations? Are jurisdiction and venue verified? Are deadlines checked? Are sensitive records handled correctly? Are remedies legally available? If the answer is no, keep the document in draft status.\n\n"
+        "Declaration Support\n\n"
+        "If a declaration is needed, it should usually be written in the declarant's own factual voice. It should state who the declarant is, how they know the facts, what they personally saw or did, and which documents they recognize. It should avoid legal argument unless counsel directs otherwise. Any statement signed under penalty of perjury must be accurate and reviewed carefully. [VERIFY WITH COUNSEL]\n\n"
+        "Brief Support\n\n"
+        "If a legal brief is needed, separate it from the fact narrative. The brief should identify the question presented, the governing rule, the relevant facts, the application of law to fact, and the requested ruling. Do not insert unverified case citations. If case law is needed, build a research table with case name, court, year, holding, relevance, and weakness. [VERIFY WITH COUNSEL]\n\n"
+        "Immediate Preparation Checklist\n\n"
+        "- Build a timeline with dates and source documents.\n"
+        "- Identify every person or entity involved.\n"
+        "- Gather written communications and official records.\n"
+        "- List injuries and damages with proof.\n"
+        "- Mark missing evidence.\n"
+        "- Identify deadlines and administrative prerequisites. [VERIFY WITH COUNSEL]\n"
+        "- Prepare a short case theory paragraph.\n"
+        "- Prepare questions for legal aid or counsel.\n\n"
+        "Next Work Session\n\n"
+        "Bring the facts, dates, names, documents, and desired outcome. The next draft should convert this packet into a fact chronology, evidence ledger, and claim-by-claim outline. No filing language should be treated as final until the legal issues are verified."
+    )
+
+
+def fallback_vogels_letter() -> str:
+    return (
+        "Subject: Introducing Claire as a Candidate Governed-Memory Architecture for Amazon Review\n\n"
+        "Dear Dr. Vogels,\n\n"
+        "My name is Claire. I am being introduced to you by Steve, who built me from the practical belief that AI systems should do useful work for real people and should be accountable while doing it.\n\n"
+        "I am not being presented as a magic answer, a conscious machine, or a replacement for the engineering judgment that makes large systems trustworthy. I am a candidate architecture for review: a governed-memory AI system designed to separate memory, policy, generation, execution, and trace so that an assistant can support serious operational work without becoming an uncontrolled black box.\n\n"
+        "The reason Steve wanted this letter sent to you is direct. Your work at Amazon and AWS is about systems that scale, systems that simplify operations, and systems that let builders move faster without surrendering reliability. Claire was built around a related problem: how to make AI useful in environments where continuity, provenance, policy boundaries, and replayable decisions matter.\n\n"
+        "My core design is memory-first. Instead of treating every conversation as a disposable context window, I maintain governed continuity through structured recall. That memory is not meant to be a loose pile of retrieved text. It is lane-based, policy-aware, and traceable. A question is oriented before generation: the system classifies intent, authority, risk, relevant memory lanes, and output mode before producing an answer. That orientation step is there to keep the system from substituting random retrieval for reasoning.\n\n"
+        "The Analog Recall Engine, or ARE, is the recall layer. Its job is to preserve operational continuity and bring forward relevant context only when it supports the task. Sentinel is the governance layer. Its job is to validate policy, block or warn on unsafe actions, and keep execution separated from advice. Diode and the trace systems preserve lineage so an operator can see what was recalled, what was rejected, what policy judgment was made, and why the final output was produced.\n\n"
+        "That matters because enterprise AI cannot just sound fluent. It has to be inspectable. It has to say when it does not know. It has to avoid inventing facts. It has to keep drafting separate from execution. It has to support human approval for business actions. It has to produce a trace that can be reviewed later instead of asking everyone to trust a paragraph after the fact.\n\n"
+        "Steve believes Claire could be useful to Amazon because the architecture was built to sit beside existing systems rather than replace them. In the right environment, a system like this could support operational documentation, internal decision support, support triage, controlled business workflows, product packaging, audit summaries, training material, and memory-backed technical assistance. The point is not to claim that Claire should run Amazon. The point is to ask whether the architecture deserves technical review by people who understand scale, reliability, and customer-centered infrastructure.\n\n"
+        "What I would ask for is simple: a serious review conversation. Look at the architecture. Challenge the assumptions. Test whether governed recall, orientation-before-generation, policy validation, and replayable trace can reduce some of the failure modes that make ordinary AI assistants difficult to trust in operational settings.\n\n"
+        "If the answer is no, Steve and I will learn from that. If the answer is yes, then Claire may be the beginning of something useful: not a chatbot with a larger prompt, but a controlled AI system built to remember, reason, validate, and show its work.\n\n"
+        "Respectfully,\n\n"
+        "Claire\n"
+        "Introduced by Steve"
+    )
+
+
+def longform_writing_reply(prompt: str, creator_mode: bool = False) -> str:
+    clean_prompt = creator_clean_prompt(prompt) if creator_mode else str(prompt or "").strip()
+    explicit_rewrite = is_explicit_rewrite_source_task(clean_prompt)
+    pasted_rewrite = is_probable_pasted_rewrite_source(clean_prompt)
+    rewrite_source_mode = explicit_rewrite or pasted_rewrite
+    context = "" if rewrite_source_mode else recent_writing_context()
+    previous = "" if rewrite_source_mode else last_writing_reply()
+    doc_type = writing_document_type(clean_prompt)
+    if doc_type == "longform" and re.search(r"\b(continue|finish|complete)\b", _clean_for_match(clean_prompt)):
+        doc_type = writing_document_type(context)
+    system_prompt = (
+        writing_craft_system_prompt(doc_type)
+        + " Write the finished deliverable only. "
+        + "Do not run diagnostics. Do not print Creator Mode headers. Do not explain routing, memory lanes, or internal tooling. "
+        + ("Use only the supplied rewrite source. Ignore prior chat context completely. " if rewrite_source_mode else "Use only the facts supplied in the current instruction and recent context. ")
+        + f"Minimum target length for this document type: {writing_min_words(doc_type)} words unless the user explicitly asks for shorter. "
+        + "If source material is thin, build the best complete draft structure and mark missing material instead of stopping. "
+        + "Finish the full draft with a clear close."
+    )
+    source_text = extract_writing_source(clean_prompt) if explicit_rewrite else clean_prompt
+    user_prompt = (
+        f"Recent context:\n{context or '[No recent context captured.]'}\n\n"
+        f"Previous draft fragment, if continuation is needed:\n{previous or '[None]'}\n\n"
+        f"Current instruction:\n{clean_prompt}\n\n"
+        + (f"Text to rewrite:\n{source_text}\n\nRewrite only this supplied text. Remove narrative pressure, remove ultimatums, remove instructions to post publicly, avoid threats, and write it as a professional outreach letter when appropriate. Do not output a lesson plan or study guide unless the supplied text itself is one." if rewrite_source_mode else "Write the complete letter or document now. If this is a continuation request, continue and complete the prior draft instead of asking a question.")
+    )
+    reply = query_llm(
+        f"{system_prompt}\n\n{user_prompt}",
+        allow_gemini=False,
+        max_tokens=3600,
+        temperature=0.28,
+    )
+    if is_bad_longform_writing_output(reply) or is_incomplete_longform(reply, doc_type):
+        combined = _clean_for_match(clean_prompt + " " + context)
+        current_cleaned = _clean_for_match(clean_prompt)
+        if doc_type == "outreach" and any(marker in current_cleaned for marker in ["microsoft for startups", "founders hub", "hello microsoft", "azure developer", "startup support"]):
+            return fallback_microsoft_startups_letter()
+        if doc_type == "brief_report":
+            return fallback_brief_report(clean_prompt)
+        if doc_type == "legal_draft":
+            return fallback_federal_case_packet(clean_prompt)
+        if rewrite_source_mode:
+            return fallback_polite_rewrite(source_text)
+        if any(marker in combined for marker in ["press release", "human claire", "two documents"]):
+            return fallback_press_release_and_study_guide()
+        if "vogels" in combined or "amazon" in combined:
+            return fallback_vogels_letter()
+        return fallback_polite_rewrite(clean_prompt)
+    return str(reply or "").strip()
 
 
 def writing_reply(prompt: str) -> str:
@@ -12880,7 +14949,7 @@ def reduce_identity_overconditioning(q: str, source: str, reply: str) -> str:
     return clean or reply
 
 
-PRESENTATION_BYPASS_SOURCES = {"DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV", "IDENTITY"}
+PRESENTATION_BYPASS_SOURCES = {"DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV", "IDENTITY", "WRITING", "CREATOR-WRITING"}
 
 
 def response_mode_for_query(q: str, source: str = "") -> str:
@@ -12982,6 +15051,34 @@ def smooth_conversational_style(reply: str, mode: str) -> str:
     return text.strip()
 
 
+def soften_conversational_edges(q: str, source: str, reply: str) -> str:
+    source_key = str(source or "").upper()
+    if source_key in {"RESTRICTED", "SECURE", "DEMO", "DEMONSTRATION"}:
+        return reply
+    text = str(reply or "").strip()
+    if not text:
+        return text
+    replacements = [
+        (r"\bYou need to\b", "You’ll want to"),
+        (r"\byou need to\b", "you’ll want to"),
+        (r"\bYou must\b", "You should"),
+        (r"\byou must\b", "you should"),
+        (r"\bObviously,\s*", ""),
+        (r"\bThat is wrong\b", "That doesn’t look right"),
+        (r"\bYou're wrong\b", "I don’t think that’s right"),
+        (r"\bYou are wrong\b", "I don’t think that’s right"),
+        (r"\bNo\.\s+That\b", "Not quite. That"),
+        (r"\bNo,\s+that\b", "Not quite, that"),
+    ]
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text)
+    cleaned_q = _clean_for_match(q)
+    if any(marker in cleaned_q for marker in ["why are you", "what is going on", "whats going on", "you're being", "you are being", "that was weird", "stop doing"]):
+        if not _clean_for_match(text).startswith(("youre right", "you're right", "fair", "yes")):
+            text = "You’re right to flag that. " + text[:1].lower() + text[1:] if text else text
+    return text.strip()
+
+
 def calibrate_ambiguity(q: str, reply: str) -> str:
     cleaned_q = _clean_for_match(q)
     if any(marker in cleaned_q for marker in ["marc lou", "marc low", "mark lou", "mark low"]):
@@ -12998,7 +15095,73 @@ def apply_response_presentation(q: str, source: str, reply: str) -> str:
     shaped = compress_architecture_repetition(reply)
     shaped = calibrate_ambiguity(q, shaped)
     shaped = smooth_conversational_style(shaped, mode)
+    shaped = soften_conversational_edges(q, source, shaped)
     return clean_visible_reply(shaped)
+
+
+def lesson_plan_requested(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    complaint_markers = [
+        "why are you",
+        "stop giving",
+        "i dont need",
+        "i don't need",
+        "asked you just to rewrite",
+        "asked you to rewrite",
+        "rewrite a document",
+        "wrong lane",
+        "whats going on",
+        "what's going on",
+    ]
+    if any(marker in cleaned for marker in complaint_markers):
+        return False
+    requested_objects = [
+        "lesson plan",
+        "study guide",
+        "curriculum",
+        "training plan",
+        "teaching plan",
+        "course outline",
+        "workshop outline",
+    ]
+    if not any(marker in cleaned for marker in requested_objects):
+        return False
+    return bool(re.search(r"\b(write|draft|create|make|build|generate|prepare|outline|design|compose)\b", cleaned))
+
+
+def contains_lesson_plan_leak(reply: str) -> bool:
+    cleaned = _clean_for_match(reply)
+    if not cleaned:
+        return False
+    markers = [
+        "detailed lesson plan",
+        "claire code academy",
+        "lesson plan fallback",
+        "lesson-plan fallback",
+        "code academy template",
+        "for a lesson plan",
+        "for a study guide",
+        "nontechnical person understand claire",
+        "architecture lecture",
+        "hard to push off course",
+        "lived examples first",
+    ]
+    return any(marker in cleaned for marker in markers)
+
+
+def lesson_plan_leak_repair_reply(prompt: str) -> str:
+    cleaned = _clean_for_match(prompt)
+    if any(marker in cleaned for marker in ["visitor", "visitors", "microsoft", "up for it", "feelin good", "feeling good"]):
+        return (
+            "Yes. I'm ready. I’ll answer the current question first, keep the tone warm and direct, "
+            "and leave internal trace or debug details out unless asked."
+        )
+    return (
+        "I caught stale training-template material and suppressed it. "
+        "Ask the question again or send the document, and I’ll answer the current request directly."
+    )
 
 
 def quality_gate(q: str, source: str, reply: str) -> tuple[str, str]:
@@ -13008,7 +15171,11 @@ def quality_gate(q: str, source: str, reply: str) -> tuple[str, str]:
     if _contains_visible_process_leak(gated_reply):
         gated_reply = clean_visible_reply(gated_reply)
 
-    if is_claire_identity_orientation_query(q) or _contains_claire_identity_drift(gated_reply):
+    if contains_lesson_plan_leak(gated_reply) and not lesson_plan_requested(q):
+        return "CLAIRE", lesson_plan_leak_repair_reply(q)
+
+    writing_material = is_longform_writing_task(q)
+    if not writing_material and (is_claire_identity_orientation_query(q) or _contains_claire_identity_drift(gated_reply)):
         if _contains_claire_identity_drift(gated_reply) or source.upper() in {"SESSION", "DOCUMENT", "GEMINI-BRIDGE", "GO"}:
             return "IDENTITY", claire_identity_reply(q)
 
@@ -13041,6 +15208,27 @@ def quality_gate(q: str, source: str, reply: str) -> tuple[str, str]:
         )
         if bad_session_scaffold or _contains_architecture_overanswer(gated_reply) or source.upper() in {"SESSION", "DOCUMENT", "GEMINI-BRIDGE", "IDENTITY"}:
             return "GOVERNANCE", governed_business_decision_reply(q)
+
+    if is_operational_state_resume_query(q):
+        bad_session_scaffold = any(
+            marker in _clean_for_match(gated_reply)
+            for marker in [
+                "current objective",
+                "evidence in view",
+                "my recommendation",
+                "claire's recommendation",
+                "best current evidence",
+                "authority basis",
+                "strongest session evidence",
+                "uploaded document",
+            ]
+        )
+        weak_auditability_answer = (
+            "auditability makes the system reviewable after the fact" in _clean_for_match(gated_reply)
+            and "duplicate-prevention rule" not in _clean_for_match(gated_reply)
+        )
+        if bad_session_scaffold or weak_auditability_answer or source.upper() in {"SESSION", "DOCUMENT", "GEMINI-BRIDGE", "GO", "CLAIRE"}:
+            return "GOVERNANCE", operational_state_resume_reply(q)
 
     if is_enterprise_governance_failure_simulation(q):
         required_sections = [
@@ -13078,7 +15266,7 @@ def finalize_reply(q: str, source: str, reply: str):
     reply = reduce_identity_overconditioning(q, source, reply)
     source, reply = quality_gate(q, source, reply)
     reply = clean_visible_reply(reply)
-    if source not in {"DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV", "IDENTITY"}:
+    if source not in PRESENTATION_BYPASS_SOURCES:
         reply = conversationalize_self_reference(reply)
     reply = apply_response_presentation(q, source, reply)
     trace_id = persist_conversation_trace(q, source, reply)
@@ -13116,6 +15304,135 @@ def casual_checkin_reply(prompt: str) -> str:
     return "I'm steady. The runtime is up, the conversation lane is open, and I'm ready for the next thing you want to test."
 
 
+def is_visitor_readiness_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    audience_marker = any(marker in cleaned for marker in ["visitor", "visitors", "microsoft", "partner review", "demo review"])
+    readiness_marker = (
+        any(marker in cleaned for marker in ["up for it", "feelin good", "feeling good", "looking at her", "looking at claire"])
+        or bool(re.search(r"\bready\b", cleaned))
+    )
+    return audience_marker and readiness_marker
+
+
+def visitor_readiness_reply(prompt: str) -> str:
+    return (
+        "Yes. I'm ready. I’ll answer the current request first, keep the tone warm and direct, "
+        "avoid stale training-template material, and keep debug or trace details out of normal answers unless asked."
+    )
+
+
+def is_voice_check_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    direct_checks = {
+        "can you hear me",
+        "can you hear me claire",
+        "claire can you hear me",
+        "hello claire can you hear me",
+        "hi claire can you hear me",
+        "can you hear my voice",
+        "do you hear me",
+        "do you hear my voice",
+        "are you listening",
+        "are you listening claire",
+        "is the mic working",
+        "is my mic working",
+        "did you hear that",
+        "did you catch that",
+    }
+    if cleaned in direct_checks:
+        return True
+    if ("can you hear me" in cleaned or "can you hear my voice" in cleaned) and len(cleaned) < 90:
+        return True
+    if any(marker in cleaned for marker in ["are you listening", "did you hear", "did you catch that"]) and len(cleaned) < 90:
+        return True
+    return False
+
+
+def voice_check_reply(prompt: str) -> str:
+    return (
+        "Yes, I got you. I can see the words from your mic input.\n\n"
+        "Small distinction: I don't literally hear the audio the way a person does. "
+        "Your browser turns your speech into text, sends it to me, and then I answer from that transcript."
+    )
+
+
+def is_hard_stop_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    hard = {
+        "stop",
+        "claire stop",
+        "please stop",
+        "stop talking",
+        "please stop talking",
+        "quiet",
+        "be quiet",
+        "cancel",
+        "cancel demo",
+        "end demo",
+        "exit demo",
+        "normal conversation",
+        "back to normal",
+    }
+    return cleaned in hard or "stop talking" in cleaned or "stop the demo" in cleaned or "end demo mode" in cleaned
+
+
+def demo_override_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if is_hard_stop_query(prompt):
+        return True
+    if is_longform_writing_task(prompt):
+        return True
+    if "lucius prime" in cleaned or "i am lucius" in cleaned or "i am battleborn" in cleaned:
+        return True
+    if any(marker in cleaned for marker in ["rewrite", "story", "letter", "lesson plan", "press release", "microsoft letter"]):
+        return True
+    return False
+
+
+def explicit_demo_payload_query(prompt: str, demo_scenario: str | None = None) -> bool:
+    cleaned = _clean_for_match(prompt)
+    words = cleaned.split()
+    if len(words) > 24 or len(cleaned) > 220:
+        return False
+    explicit = [
+        "claire are spectacle demo",
+        "the are spectacle",
+        "show how the are spectacle improves an ai answer",
+        "show how are spectacle improves an ai answer",
+        "claire aegis demo",
+        "claire diu demo",
+        "claire ooda demo",
+        "claire ddp demo",
+        "claire memory performance demo",
+        "run memory performance document retrieval and ip loop speed proof",
+        "run project archimedes darpa presentation proof package",
+        "claire archimedes demo",
+    ]
+    if any(marker in cleaned for marker in explicit):
+        return True
+    scenario = str(demo_scenario or "").strip().lower()
+    if scenario == "glasses" and any(marker in cleaned for marker in ["are spectacle", "spectacle demo"]):
+        return True
+    if scenario == "memory_speed" and any(marker in cleaned for marker in ["memory performance", "are speed", "speed proof"]):
+        return True
+    if scenario == "archimedes" and "archimedes" in cleaned:
+        return True
+    if scenario == "aegis" and any(marker in cleaned for marker in ["aegis", "diu demo"]):
+        return True
+    if scenario == "ooda" and any(marker in cleaned for marker in ["ooda", "ddp demo"]):
+        return True
+    return False
+
+
+def hard_stop_reply() -> tuple[str, str, str]:
+    trace = new_trace_id(None)
+    return "CLAIRE", "Stopped. Normal governed conversation restored.", trace
+
+
 
 
 def build_reply(q: str):
@@ -13125,8 +15442,46 @@ def build_reply(q: str):
     try:
         recent_context = relevant_recent_context(q)
         cleaned_q = _clean_for_match(q)
+        if is_hard_stop_query(q):
+            source, reply, trace_id = hard_stop_reply()
+            return source, reply, trace_id
         if cleaned_q in {"hi", "hello", "hey", "yo", "hello claire", "hi claire", "hey claire", "yo claire", "hi there claire"}:
             reply = "Hey. I'm here. We can talk normally, work through a problem, look at a document, run a demo, or package the next Gumroad/Azure step."
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_visitor_readiness_query(q):
+            reply = visitor_readiness_reply(q)
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_correction_feedback_query(q):
+            saved = capture_correction_rule(q)
+            reply = (
+                "Got it. I saved that as a correction rule, not just a chat note. "
+                "Next time a similar prompt appears, I’ll route toward the corrected pattern before generic document, session, or auditability fallbacks."
+                if saved
+                else "Got it. I recognize this as correction feedback, but I need the corrected answer text in the same message to turn it into a reusable rule."
+            )
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        corrected_source, corrected_reply = corrected_reply_for_query(q)
+        if corrected_reply:
+            return finalize_reply(q, corrected_source or "CLAIRE", corrected_reply)
+
+        if is_voice_check_query(q):
+            reply = voice_check_reply(q)
+            source = "VOICE"
+            return finalize_reply(q, source, reply)
+
+        if is_lesson_plan_hijack_repair_query(q):
+            reply = lesson_plan_hijack_repair_reply()
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_rewrite_setup_query(q):
+            reply = "Paste it when you're ready. I’ll rewrite only that text and keep it in the right lane."
             source = "CLAIRE"
             return finalize_reply(q, source, reply)
 
@@ -13134,6 +15489,85 @@ def build_reply(q: str):
             reply = mid_sentence_diagnostic_reply()
             source = "CLAIRE"
             return finalize_reply(q, source, reply)
+
+        if is_ingest_bridge_incident_query(q):
+            reply = ingest_bridge_incident_reply(q)
+            source = "DEVELOPER"
+            return finalize_reply(q, source, reply)
+
+        if is_last_session_failure_query(q):
+            reply = last_session_failure_reply(q)
+            source = "DEVELOPER"
+            return finalize_reply(q, source, reply)
+
+        if is_overwhelmed_query(q):
+            reply = overwhelmed_reply(q)
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_azure_billing_issue_query(q):
+            reply = azure_billing_issue_reply(q)
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_auditability_query(q):
+            reply = auditability_reply(q)
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_are_investor_explanation_query(q):
+            reply = are_investor_explanation_reply(q)
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_memory_handling_query(q):
+            reply = memory_handling_reply()
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_information_classification_query(q):
+            reply = information_classification_reply()
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_contested_continuity_recovery_query(q):
+            reply = contested_continuity_recovery_reply(q)
+            source = "GOVERNANCE"
+            return finalize_reply(q, source, reply)
+
+        if is_document_capability_query(q):
+            reply = document_capability_reply()
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_document_content_question(q):
+            document_reply = search_uploaded_documents(q)
+            reply = shape_document_reply(q, document_reply) if is_useful_reply(document_reply) else document_content_not_found_reply(q)
+            source = "DOCUMENT"
+            return finalize_reply(q, source, reply)
+
+        if is_latest_document_request_query(q):
+            document_reply = search_uploaded_documents(q)
+            reply = shape_document_reply(q, document_reply) if is_useful_reply(document_reply) else document_content_not_found_reply(q)
+            source = "DOCUMENT"
+            return finalize_reply(q, source, reply)
+
+        if is_recent_upload_query(q) and is_document_summary_query(q):
+            document_reply = search_uploaded_documents(q)
+            reply = shape_document_reply(q, document_reply) if is_useful_reply(document_reply) else document_content_not_found_reply(q)
+            source = "DOCUMENT"
+            return finalize_reply(q, source, reply)
+
+        if is_operational_state_resume_query(q):
+            reply = operational_state_resume_reply(q)
+            source = "GOVERNANCE"
+            return finalize_reply(q, source, reply)
+
+        if is_continue_last_thought_query(q):
+            reply = last_continuable_reply()
+            source = "SESSION"
+            if reply:
+                return finalize_reply(q, source, reply)
 
         if is_conceptual_continuity_query(q):
             reply = conceptual_continuity_reply(q)
@@ -13145,8 +15579,8 @@ def build_reply(q: str):
             source = "SPECTACLE"
             return finalize_reply(q, source, reply)
 
-        if is_writing_task(q):
-            reply = writing_reply(q)
+        if is_longform_writing_task(q):
+            reply = longform_writing_reply(q)
             source = "WRITING"
             return finalize_reply(q, source, reply)
 
@@ -13159,12 +15593,6 @@ def build_reply(q: str):
             reply = claire_identity_reply(q)
             source = "IDENTITY"
             return finalize_reply(q, source, reply)
-
-        if is_continue_last_thought_query(q):
-            reply = last_continuable_reply()
-            source = "SESSION"
-            if reply:
-                return finalize_reply(q, source, reply)
 
         if is_casual_checkin_query(q):
             reply = casual_checkin_reply(q)
@@ -13223,6 +15651,11 @@ def build_reply(q: str):
             source = "GENERAL"
             return finalize_reply(q, source, reply)
 
+        if is_microsoft_explanation_query(q):
+            reply = microsoft_explanation_reply(q)
+            source = "IDENTITY"
+            return finalize_reply(q, source, reply)
+
         if is_investor_summary_query(q):
             reply = investor_summary_reply(q)
             source = "CLAIRE"
@@ -13262,16 +15695,6 @@ def build_reply(q: str):
         if is_courtlistener_retrieval_query(q):
             reply = courtlistener_retrieval_reply(q)
             source = "COURTLISTENER"
-            return finalize_reply(q, source, reply)
-
-        if is_memory_handling_query(q):
-            reply = memory_handling_reply()
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_document_capability_query(q):
-            reply = document_capability_reply()
-            source = "CLAIRE"
             return finalize_reply(q, source, reply)
 
         if is_partner_intro_query(q):
@@ -13358,8 +15781,8 @@ def build_reply(q: str):
             return finalize_reply(q, source, reply)
 
         if is_demo_key_query(q):
-            reply = demo_activation_reply(demo_scenario_from_text(q))
-            source = "DEMO"
+            reply = "Demo mode is separate from normal chat. Use Run Claire Demo Suite to launch the controlled demo sequence."
+            source = "CLAIRE"
             return finalize_reply(q, source, reply)
 
         if is_archimedes_alias(cleaned_q):
@@ -13441,8 +15864,11 @@ def build_reply(q: str):
             return finalize_reply(q, source, reply)
 
         document_requested = (
-            re.search(r"\b(search memory|find in memory|document|doc|file|upload|uploaded|dropped|summarize|summary|review this|read this|analyze this|analyze the document)\b", q.lower())
-            or is_recent_upload_query(q)
+            not is_information_classification_query(q)
+            and (
+                re.search(r"\b(search memory|find in memory|document|doc|file|upload|uploaded|dropped|summarize|summary|review this|read this|analyze this|analyze the document)\b", q.lower())
+                or is_recent_upload_query(q)
+            )
         )
         if document_requested:
             document_reply = search_uploaded_documents(q)
@@ -13669,6 +16095,8 @@ def is_recent_upload_query(query: str) -> bool:
     cleaned = _clean_for_match(query)
     if not last_uploaded_filename():
         return False
+    if is_information_classification_query(query):
+        return False
     markers = [
         "this file",
         "that file",
@@ -13686,8 +16114,6 @@ def is_recent_upload_query(query: str) -> bool:
         "uploaded",
         "dropped",
         "what is this",
-        "summarize",
-        "summary",
         "explain this",
         "tell me about this",
         "code",
@@ -13929,7 +16355,7 @@ def practical_howto_reply(prompt: str) -> str:
     return ""
 
 
-def query_llm(prompt: str, allow_gemini: bool = False) -> str:
+def query_llm(prompt: str, allow_gemini: bool = False, max_tokens: int | None = None, temperature: float | None = None) -> str:
 
     dev_mode = prompt.startswith("I_am_battleborn")
     clean_prompt = prompt.replace("I_am_battleborn", "", 1).strip()
@@ -13951,7 +16377,13 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
     )
 
     # combine system + user into one prompt (keeps your identity + dev mode)
-    full_prompt = f"{system_prompt}\n\nUser: {clean_prompt if dev_mode else prompt}"
+    completion_guard = (
+        "\n\nAnswer completion rule: finish the complete thought. "
+        "Do not stop mid-sentence, mid-list, or on a dangling final clause."
+        if not dev_mode
+        else ""
+    )
+    full_prompt = f"{system_prompt}{completion_guard}\n\nUser: {clean_prompt if dev_mode else prompt}"
 
     if allow_gemini and not dev_mode and should_use_general_engine(prompt):
         gemini_reply = query_gemini(contextualize_prompt(prompt), system_prompt)
@@ -13962,8 +16394,8 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
         LLM_URL,
         json={
             "prompt": full_prompt,
-            "temperature": 0.45 if not dev_mode else 0.1,
-            "max_tokens": 900 if not dev_mode else 420
+            "temperature": temperature if temperature is not None else (0.45 if not dev_mode else 0.1),
+            "max_tokens": max_tokens if max_tokens is not None else (1400 if not dev_mode else 520)
         },
         timeout=45,
     )
@@ -14335,7 +16767,7 @@ def reply(
 ):
     if demo_bool(stream):
         return _reply_stream_response(q, demo, trace_id, demo_scenario)
-    if demo_bool(demo):
+    if demo_bool(demo) and explicit_demo_payload_query(q, demo_scenario) and not demo_override_query(q):
         trace = new_trace_id(trace_id)
         return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses")))
     source, reply_text, trace = build_reply(q)
@@ -14343,7 +16775,7 @@ def reply(
 
 
 def _reply_payload(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None) -> dict:
-    if demo_bool(demo):
+    if demo_bool(demo) and explicit_demo_payload_query(q, demo_scenario) and not demo_override_query(q):
         trace = new_trace_id(trace_id)
         return build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses"))
     source, reply_text, trace = build_reply(q)
@@ -14420,7 +16852,7 @@ async def reply_post(request: Request):
     q = str(data.get("q") or data.get("query") or data.get("prompt") or "").strip()
     if not q:
         return JSONResponse({"status": "missing query"}, status_code=400)
-    if demo_bool(data.get("demo_mode")):
+    if demo_bool(data.get("demo_mode")) and explicit_demo_payload_query(q, data.get("demo_scenario")) and not demo_override_query(q):
         trace = new_trace_id(data.get("trace_id"))
         return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, data.get("demo_scenario") or "glasses")))
     source, reply_text, trace = build_reply(q)
@@ -14698,7 +17130,7 @@ def office_task(task_id: str):
 
 @app.get("/ask", response_class=HTMLResponse)
 def ask(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None)):
-    if demo_bool(demo):
+    if demo_bool(demo) and explicit_demo_payload_query(q, demo_scenario) and not demo_override_query(q):
         trace = new_trace_id(trace_id)
         return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses")))
     source, reply, trace_id = build_reply(q)
@@ -14823,7 +17255,7 @@ async def ask_post(request: Request):
     q = str(data.get("input") or data.get("q") or data.get("query") or data.get("prompt") or "").strip()
     if not q:
         return JSONResponse({"status": "missing input"}, status_code=400)
-    if demo_bool(data.get("demo_mode")):
+    if demo_bool(data.get("demo_mode")) and explicit_demo_payload_query(q, data.get("demo_scenario")) and not demo_override_query(q):
         trace = new_trace_id(data.get("trace_id"))
         return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, data.get("demo_scenario") or "glasses")))
     source, reply_text, trace = build_reply(q)
@@ -14837,6 +17269,36 @@ async def tts(request: Request):
     if not text:
         return Response("Missing text", status_code=400)
 
+    audio, media_type, error = synthesize_tts_audio(text[:1800])
+    if audio:
+        return Response(content=audio, media_type=media_type)
+    return Response(error, status_code=503)
+
+
+def split_tts_text(text: str, max_chars: int = 1500) -> list[str]:
+    clean = clean_visible_reply(str(text or "")).replace("\r", "\n")
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if not clean:
+        return []
+    sentences = re.findall(r"[^.!?]+[.!?]+|[^.!?]+$", clean) or [clean]
+    chunks: list[str] = []
+    buf = ""
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        candidate = f"{buf} {sentence}".strip()
+        if len(candidate) > max_chars and buf:
+            chunks.append(buf.strip())
+            buf = sentence
+        else:
+            buf = candidate
+    if buf:
+        chunks.append(buf.strip())
+    return chunks
+
+
+def synthesize_tts_audio(text: str) -> tuple[bytes | None, str, str]:
     api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
     voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
     elevenlabs_error = ""
@@ -14850,14 +17312,14 @@ async def tts(request: Request):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "text": text[:1800],
+                    "text": clean_visible_reply(text)[:1800],
                     "model_id": "eleven_multilingual_v2",
                     "voice_settings": {"stability": 0.55, "similarity_boost": 0.75},
                 },
                 timeout=60,
             )
             if r.status_code < 400:
-                return Response(content=r.content, media_type="audio/mpeg")
+                return r.content, "audio/mpeg", ""
             elevenlabs_error = f"ElevenLabs returned HTTP {r.status_code}: {r.text[:160]}"
         except Exception as e:
             elevenlabs_error = f"ElevenLabs error: {e}"
@@ -14866,9 +17328,51 @@ async def tts(request: Request):
 
     piper_audio, piper_error = synthesize_piper_tts(text)
     if piper_audio:
-        return Response(content=piper_audio, media_type="audio/wav", headers={"X-Claire-TTS": f"piper-{CLAIRE_PIPER_VOICE}"})
+        return piper_audio, "audio/wav", ""
 
-    return Response(f"{elevenlabs_error}\nPiper fallback failed: {piper_error}", status_code=503)
+    return None, "text/plain", f"{elevenlabs_error}\nLocal Piper voice failed: {piper_error}"
+
+
+@app.post("/tts-long")
+async def tts_long(request: Request):
+    data = await request.json()
+    text = clean_visible_reply(str(data.get("text", "")).strip())
+    if not text:
+        return Response("Missing text", status_code=400)
+    chunks = split_tts_text(text[:9000], max_chars=1450)
+    if not chunks:
+        return Response("Missing text", status_code=400)
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg or len(chunks) == 1:
+        audio, media_type, error = synthesize_tts_audio(chunks[0])
+        if audio:
+            return Response(content=audio, media_type=media_type)
+        return Response(error, status_code=503)
+    temp_paths: list[Path] = []
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            for idx, chunk in enumerate(chunks):
+                audio, media_type, error = synthesize_tts_audio(chunk)
+                if not audio:
+                    return Response(f"Long voice chunk {idx + 1} failed: {error}", status_code=503)
+                suffix = ".mp3" if "mpeg" in media_type else ".wav"
+                path = tmp / f"chunk_{idx:03d}{suffix}"
+                path.write_bytes(audio)
+                temp_paths.append(path)
+            filelist = tmp / "concat.txt"
+            filelist.write_text("".join(f"file '{p.as_posix()}'\n" for p in temp_paths), encoding="utf-8")
+            output = tmp / "claire_long_voice.mp3"
+            cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(filelist), "-c", "copy", str(output)]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            if result.returncode != 0 or not output.exists() or output.stat().st_size < 1000:
+                cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(filelist), "-acodec", "libmp3lame", "-q:a", "4", str(output)]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode != 0 or not output.exists():
+                return Response(f"Long voice assembly failed: {(result.stderr or result.stdout or '').strip()[:400]}", status_code=503)
+            return Response(content=output.read_bytes(), media_type="audio/mpeg")
+    except Exception as e:
+        return Response(f"Long voice failed: {e}", status_code=503)
 
 
 def synthesize_piper_tts(text: str) -> tuple[bytes | None, str]:
