@@ -619,3 +619,34 @@ Current and planned scenario names:
 
 All scenarios must preserve the same strict demo contract:
 observe -> recall -> validate -> decide -> output -> trace -> replay.
+
+---
+
+# PUBLIC CLAIRE ARCHITECTURE RULES
+
+Public-facing CLAIRE Systems copy must present the architecture safely and consistently:
+
+1. CLAIRE is governed memory-and-orientation infrastructure, not a standard chatbot and not standard RAG.
+2. Claire is the mouth, personality, voice, and expressive reasoning presence.
+3. Durable memory is not stored inside Claire or inside the LLM.
+4. Gyro-ARE is the external cognitive gyroscope and orientation field.
+5. Q Insight / Q Omni-Awareness is the multi-plane bearing field: active, latent, blocked, risky, and future bearings.
+6. Recognition Rail maps recognized patterns to controlled operating tracks.
+7. Sentinel is the gatekeeper: allow, deny, quarantine, sanitize, escalate.
+8. SweeperBot is the refinery: clean, dedupe, compact, structure, and package digital gravel into memory-ready capsules.
+9. Diode / WriteBarrier protects directional integrity and prevents model-side output from corrupting upstream memory.
+10. ARE is the nearby governed memory field.
+11. BARE handles backward recall / historical memory.
+12. FARE handles forward projection / likely next-state context.
+13. Anticipatory Context combines Recognition Rail, ARE, and FARE for likely next-state preparation; it must not be described as literal future prediction.
+14. TrailLink / Ledger proves the path with trace, provenance, session events, and append-only records.
+15. The LLM is the horse/raw reasoning power, not the authority. CLAIRE is the rider for raw AI power.
+16. Public metaphor: unmanaged model power is dangerous; CLAIRE gives the horse a rider.
+
+Public flow:
+Sense -> Orient -> Recognize -> Gate -> Refine -> Protect -> Remember -> Project -> Reason -> Prove -> Speak
+
+Detailed flow:
+Input / Sensor Field -> Gyro-Q Hyper-Omni-Awareness -> Recognition Rail -> Sentinel Gatekeeper -> SweeperBot Refinery -> Diode / WriteBarrier -> ARE Memory Field -> BARE / FARE -> Anticipatory Context -> LLM Reasoning Surface -> TrailLink / Ledger -> Claire Response
+
+Do not expose source code, secrets, API keys, private algorithms, internal file paths, or proprietary implementation details. Do not claim sentience. Do not claim literal future prediction.

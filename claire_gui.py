@@ -4108,7 +4108,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         <div class="panel hero">
             <div>
                 <h1>CLAIRE</h1>
-                <p>Hi, I’m Claire. A memory-first AI architecture designed for persistent recall, governed continuity, provenance tracing, and orientation before generation.</p>
+                <p>Hi, I’m Claire. Unmanaged model power is dangerous. CLAIRE gives the horse a rider: Gyro-Q orients, Recognition Rail recognizes, Sentinel gates, SweeperBot refines, Diode protects, ARE remembers, FARE prepares Anticipatory Context, TrailLink proves, and Claire speaks.</p>
             </div>
             <div class="logo-wrap">
                 <img src="/static/logo.png" alt="Claire Logo" onerror="this.style.display='none';">
@@ -4194,20 +4194,24 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                     <div class="q-signal"></div>
                 </div>
                 <div>
-                    <div class="q-copy"><strong>Claire orients before she generates.</strong></div>
+                    <div class="q-copy"><strong>Claire orients before she generates.</strong> CLAIRE is the rider for raw AI power.</div>
                     <div class="q-explainer">
                         <div class="q-explainer-title">What Q Insight Is</div>
                         <div class="q-explainer-body">
-                            Q Insight is Claire’s pre-generation orientation field. Before I answer, it checks what kind of question this is, which memory lanes are allowed, what authority applies, what risks are active, and what output mode should be used.
+                            A powerful AI model is like a high-performance horse. The raw power is valuable, but unmanaged power is dangerous. CLAIRE gives that power a rider: a 360-degree awareness and control system that senses terrain, memory, risk, pattern, authority, and likely next-state context before allowing the model to move.
                         </div>
                         <div class="q-mini-points">
                             <div class="q-mini-point">It is not RAG or vector search.</div>
-                            <div class="q-mini-point">It decides the bearing before recall or generation.</div>
-                            <div class="q-mini-point">It blocks lanes that should not steer the answer.</div>
+                            <div class="q-mini-point">Active, latent, blocked, risky, and future bearings are separated.</div>
+                            <div class="q-mini-point">Sentinel gates before protected memory writes.</div>
                         </div>
                     </div>
                     <div class="q-copy">
-                        Conventional RAG retrieves approximate context after a query. Claire evaluates orientation first: intent, authority, risk, memory access, provenance, and output mode. Only then does she recall, govern, trace, and respond.
+                        CLAIRE treats AI like a horse-and-rider system. The model supplies raw power. Gyro-Q provides 360-degree awareness. Recognition Rail identifies familiar patterns and danger signs. ARE preserves prior ride history. FARE prepares Anticipatory Context. Sentinel controls the gate. SweeperBot maintains the stable. Diode protects the records. TrailLink records the ride. Claire speaks from the governed result.
+                    </div>
+                    <div class="q-copy">
+                        <strong>Anticipatory Context</strong><br>
+                        Recognition Rail identifies the emerging pattern or operating track; ARE retrieves verified memory from the correct track; FARE prepares likely next-state context so Claire can answer with what is about to matter, not only what was directly asked. This is context staging, not literal future prediction.
                     </div>
                     <div class="q-plane-grid" id="qPlaneGrid"></div>
                     <div class="q-compare">
@@ -4217,7 +4221,9 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                         </div>
                         <div class="q-compare-card">
                             <div class="q-compare-title">Claire Orients</div>
-                            Input → BARE → Recognition Rail → Q Insight / Gyro → ARE → Ledger → Sentinel → Veritas → FARE → Response
+                            Sense → Orient → Recognize → Gate → Refine → Protect → Remember → Project → Reason → Prove → Speak
+                            <br><br>
+                            Input / Sensor Field → Gyro-Q Hyper-Omni-Awareness → Recognition Rail → Sentinel Gatekeeper → SweeperBot Refinery → Diode / WriteBarrier → ARE Memory Field → BARE / FARE → Anticipatory Context → LLM Reasoning Surface → TrailLink / Ledger → Claire Response
                         </div>
                     </div>
                 </div>
@@ -5413,22 +5419,25 @@ async function runQInsightDemo() {
     addLedgerEvent("Q Insight", "Orienting before generation.");
     const narration = [
         "Orienting before generation.",
-        "Evaluating intent, authority, risk, memory access, and output mode.",
-        "Blocked lanes identified.",
-        "Resolved path selected.",
-        "Gyro orientation stable.",
-        "Proceeding to governed recall and response construction."
+        "Evaluating active, latent, blocked, risky, and future bearings.",
+        "Recognition Rail maps the recognized pattern.",
+        "Sentinel checks authority before storage or response behavior.",
+        "SweeperBot refines memory candidates and Diode protects directional integrity.",
+        "FARE stages Anticipatory Context before the LLM reasoning surface is used.",
+        "TrailLink records the ride and Claire speaks from the governed result."
     ];
     renderWorkspace({
         source: "Q INSIGHT",
         reply:
             "Q Insight: Orientation Before Generation\n\n" +
-            "Most AI systems generate before they orient. Claire orients first.\n\n" +
+            "Most AI systems generate before they orient. Claire orients first through Gyro-Q Hyper-Omni-Awareness and Anticipatory Context. Unmanaged model power is dangerous. CLAIRE gives the horse a rider.\n\n" +
             "Active orientation payload:\n" + JSON.stringify(Q_INSIGHT_PAYLOAD, null, 2) + "\n\n" +
             "Pipeline:\n" +
-            "Input -> Session Capture -> BARE reverse recall -> Recognition Rail -> Q Insight / Gyro Orientation -> Sentinel authority check -> FARE forward projection -> Ledger / Veritas trace -> Response generation -> Output stream\n\n" +
+            "Sense -> Orient -> Recognize -> Gate -> Refine -> Protect -> Remember -> Project -> Reason -> Prove -> Speak\n\n" +
+            "Detailed flow:\n" +
+            "Input / Sensor Field -> Gyro-Q Hyper-Omni-Awareness -> Recognition Rail -> Sentinel Gatekeeper -> SweeperBot Refinery -> Diode / WriteBarrier -> ARE Memory Field -> BARE / FARE -> Anticipatory Context -> LLM Reasoning Surface -> TrailLink / Ledger -> Claire Response\n\n" +
             "RAG:\nQuery -> Embedding -> Vector Search -> Similarity Guess -> Context Assembly -> Answer\n\n" +
-            "Claire:\nInput -> Reverse Recall -> Recognition Rail -> Q Insight / Gyro Orientation -> Sentinel -> Ledger / Veritas -> Governed Response"
+            "Claire:\nThe model supplies raw power, not authority. Gyro-Q provides 360-degree awareness. Recognition Rail sees the pattern. ARE recalls verified memory. FARE prepares likely next-state context. Sentinel gates. TrailLink proves. Claire speaks."
     });
 }
 
@@ -16613,7 +16622,7 @@ def are_spectacle_page():
         """
             <h1>Inference-time governance for memory-backed AI.</h1>
             <div class="lede">
-                ARE Spectacle is a live Azure-deployed governed-memory runtime. It externalizes recall outside the model, routes memory by intent, suppresses off-lane data, applies policy checks, and records traceable output paths.
+                ARE Spectacle is a live Azure-deployed governed-memory runtime. Unmanaged model power is dangerous. CLAIRE gives the horse a rider. Claire speaks. Gyro-Q orients. Recognition Rail recognizes. Sentinel gates. SweeperBot refines. Diode protects. ARE remembers. FARE prepares Anticipatory Context. TrailLink proves.
             </div>
             <div class="cta-row">
                 <a class="button primary" href="mailto:Steve@clairesystems.ai?subject=ARE%20Spectacle%20Pilot">Request Pilot</a>
@@ -16622,14 +16631,44 @@ def are_spectacle_page():
             </div>
             <div class="grid">
                 <div class="card">
+                    <div class="status">Raw Power Governed</div>
+                    <h2>The Rider for Raw AI Power</h2>
+                    <p>Modern AI models are powerful, but power without orientation can drift, hallucinate, leak, overwrite memory, or take the wrong action. CLAIRE adds the missing rider: a hyper-aware control layer that scans the full field before movement.</p>
+                </div>
+                <div class="card">
                     <div class="status">Live on Azure</div>
                     <h2>Deployed Runtime</h2>
                     <p>FastAPI service running as a private Azure VM backend. Claire is one public interface consuming the runtime.</p>
                 </div>
                 <div class="card">
                     <div class="status">Control Layer</div>
-                    <h2>Governed Recall</h2>
-                    <p>Intent classification, lane routing, relevance gating, write barriers, and policy posture before memory becomes durable.</p>
+                    <h2>Gyro-Q Omni-Awareness</h2>
+                    <p>Gyro-Q Omni-Awareness treats AI cognition as a multi-plane bearing field instead of a flat prompt-response pipeline. Signals can become memory triggers, risk markers, recognition paths, authority checks, or future-state projections before generation occurs.</p>
+                </div>
+                <div class="card">
+                    <div class="status">Gatekeeper</div>
+                    <h2>Sentinel Gatekeeper</h2>
+                    <p>Sentinel decides what may pass. It can allow, deny, quarantine, sanitize, or escalate inputs, memory candidates, tool requests, and output paths before they affect durable memory or response behavior.</p>
+                </div>
+                <div class="card">
+                    <div class="status">Refinery</div>
+                    <h2>SweeperBot Refinery</h2>
+                    <p>SweeperBot cleans digital gravel. It removes noise, deduplicates records, compacts related material, preserves provenance, and prepares memory-ready capsules for protected storage.</p>
+                </div>
+                <div class="card">
+                    <div class="status">Speaking Agent</div>
+                    <h2>Claire as the Speaking Agent</h2>
+                    <p>Claire is the user-facing presence: voice, personality, reasoning expression, and interface. Her durable memory remains external, governed, traceable, and close enough to use without loading the model body.</p>
+                </div>
+                <div class="card">
+                    <div class="status">Context Staging</div>
+                    <h2>Anticipatory Context</h2>
+                    <p>CLAIRE does not merely recall the past. She prepares the next likely context. Anticipatory Context uses Recognition Rail to identify the current pattern or operating track, ARE to retrieve verified memory from that track, and FARE to stage likely next-state context before generation. This is future-state projection, not literal future prediction.</p>
+                </div>
+                <div class="card">
+                    <div class="status">Recognition + Recall</div>
+                    <h2>Recognition Rail + ARE</h2>
+                    <p>Recognition Rail sees the pattern. ARE remembers what happened before. FARE prepares what is likely to matter next. Together they create Anticipatory Context: a pre-generation context-staging layer that helps Claire stay ahead of drift, repetition, and missing context.</p>
                 </div>
                 <div class="card">
                     <div class="status">Audit Path</div>
@@ -16640,21 +16679,25 @@ def are_spectacle_page():
             <div class="section two-col">
                 <div>
                     <h2>What It Solves</h2>
-                    <p>Standard chatbots and ordinary RAG pipelines often treat memory as loose context. ARE Spectacle treats memory as governed infrastructure: stored outside the model, retrieved under rules, and attached to traceable provenance.</p>
+                    <p>Standard chatbots and ordinary RAG pipelines often treat memory as loose context and the model as the authority. CLAIRE treats the model as raw reasoning power, then governs the ride through Gyro-Q orientation, Recognition Rail, Sentinel gating, SweeperBot refinement, ARE memory, FARE Anticipatory Context, and TrailLink proof.</p>
                 </div>
                 <div>
-                    <h2>Best First Offer</h2>
-                    <p>Paid pilot: AI Memory Governance Assessment plus ARE Spectacle prototype mapping for an enterprise AI workflow.</p>
+                    <h2>Public Architecture Flow</h2>
+                    <p>Input / Sensor Field → Gyro-Q Hyper-Omni-Awareness → Recognition Rail → Sentinel Gatekeeper → SweeperBot Refinery → Diode / WriteBarrier → ARE Memory Field → BARE / FARE → Anticipatory Context → LLM Reasoning Surface → TrailLink / Ledger → Claire Response.</p>
                 </div>
             </div>
             <div class="section">
                 <h2>Buyer-Facing Proof Points</h2>
                 <ul>
                     <li>Externalized durable memory independent of the model.</li>
-                    <li>Deterministic intent and lane routing before retrieval.</li>
+                    <li>The LLM is raw reasoning power, not the authority.</li>
+                    <li>Recognition Rail maps recognized patterns to controlled operating tracks.</li>
+                    <li>Anticipatory Context combines Recognition Rail, ARE, and FARE for likely next-state preparation.</li>
+                    <li>Sentinel gates before SweeperBot, Diode, and ARE storage.</li>
+                    <li>SweeperBot refines noisy digital material into memory-ready capsules.</li>
                     <li>Suppression of irrelevant or restricted memory lanes.</li>
-                    <li>Policy/write-barrier checks before durable commits.</li>
-                    <li>Trace IDs and replayable provenance records.</li>
+                    <li>Diode / WriteBarrier protects directional integrity before durable commits.</li>
+                    <li>TrailLink / Ledger preserves trace IDs and replayable provenance records.</li>
                 </ul>
             </div>
         """,
