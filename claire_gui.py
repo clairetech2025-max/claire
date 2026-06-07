@@ -27,6 +27,26 @@ from archimedes_demo import (
     archimedes_policy_summary,
     is_archimedes_alias,
 )
+from claire_demo_mode import (
+    build_nvidia_demo_payload,
+    fetch_nvidia_trace,
+    is_nvidia_demo_trigger,
+    is_trace_request as is_nvidia_trace_request,
+    is_unsupported_claim_request,
+    nvidia_text_reply,
+    PUBLIC_SAFE_BENCHMARK_REPLY,
+)
+
+try:
+    from claire_guardrails import guardrail_visible_reply, config_exists as claire_guardrails_config_exists
+except Exception as e:
+    print("Claire guardrails import error:", e)
+
+    def guardrail_visible_reply(reply: str) -> tuple[bool, str]:
+        return True, str(reply or "").strip()
+
+    def claire_guardrails_config_exists() -> bool:
+        return False
 
 try:
     from zoneinfo import ZoneInfo
@@ -141,6 +161,7 @@ def remember_turn(query: str, source: str, reply: str) -> None:
             "query": text[:1200],
             "source": source,
             "reply_preview": str(reply or "")[:500],
+            "reply_full": str(reply or "")[:8000],
         }
         signature = sorted(_episode_signature(f"{text}\n{reply}")) if "_episode_signature" in globals() else []
         if signature:
@@ -186,6 +207,10 @@ def recent_turns(limit: int = 12):
     except Exception as e:
         print("session memory read error:", e)
         return []
+
+
+def turn_reply_text(turn: dict) -> str:
+    return str(turn.get("reply_full") or turn.get("reply_preview") or "").strip()
 
 
 CORRECTION_MATCH_TERMS = [
@@ -265,7 +290,7 @@ def _extract_corrected_answer(prompt: str) -> str:
 def _last_failed_turn() -> dict:
     for turn in reversed(recent_turns(20)):
         query = str(turn.get("query") or "").strip()
-        reply = str(turn.get("reply_preview") or "").strip()
+        reply = turn_reply_text(turn)
         source = str(turn.get("source") or "").strip()
         if query and reply and not is_correction_feedback_query(query):
             return {"query": query, "reply": reply, "source": source}
@@ -815,7 +840,7 @@ def last_identity_or_decision_reply() -> str:
     for turn in reversed(recent_turns(60)):
         source = str(turn.get("source") or "").strip().upper()
         query = str(turn.get("query") or "").strip()
-        reply = str(turn.get("reply_preview") or "").strip()
+        reply = turn_reply_text(turn)
         cleaned_reply = _clean_for_match(reply)
         if not reply or len(reply) < 20:
             continue
@@ -832,7 +857,7 @@ def last_continuable_reply() -> str:
     for turn in reversed(recent_turns(80)):
         source = str(turn.get("source") or "").strip().upper()
         query = str(turn.get("query") or "").strip()
-        reply = str(turn.get("reply_preview") or "").strip()
+        reply = turn_reply_text(turn)
         cleaned_reply = _clean_for_match(reply)
         if not reply or len(reply) < 20:
             continue
@@ -860,7 +885,7 @@ def last_writing_reply() -> str:
     for turn in reversed(recent_turns(80)):
         source = str(turn.get("source") or "").strip().upper()
         query = str(turn.get("query") or "").strip()
-        reply = str(turn.get("reply_preview") or "").strip()
+        reply = turn_reply_text(turn)
         if not reply or len(reply) < 80:
             continue
         if is_continue_last_thought_query(query) or is_low_quality_repeat_candidate(reply):
@@ -874,7 +899,7 @@ def last_valid_answer_reply() -> str:
     for turn in reversed(recent_turns(40)):
         source = str(turn.get("source") or "").strip().upper()
         query = str(turn.get("query") or "").strip()
-        reply = str(turn.get("reply_preview") or "").strip()
+        reply = turn_reply_text(turn)
         if not reply or len(reply) < 20:
             continue
         if is_thread_repair_query(query) or is_repeat_last_answer_query(query):
@@ -1556,7 +1581,7 @@ def repaired_thread_direct_answer(query: str) -> str:
         return payment_control_exception_reply(query)
     if "q insight" in cleaned and any(marker in cleaned for marker in ["legal retrieval", "architecture reasoning", "confusing legal"]):
         return (
-            "Direct answer: Q Insight prevents that confusion by classifying the operating lane before retrieval or generation. "
+            "Q Insight prevents that confusion by classifying the operating lane before retrieval or generation. "
             "A legal-retrieval lane requires legal intent, authority needs, citations, jurisdiction, provenance, and source confidence. "
             "An architecture-reasoning lane uses Claire's internal design concepts as explanatory material, not as legal authority. "
             "If you ask about architecture, CourtListener and case-law material should be suppressed unless you explicitly ask for legal research. "
@@ -1564,11 +1589,11 @@ def repaired_thread_direct_answer(query: str) -> str:
         )
     if any(marker in cleaned for marker in ["q insight", "gyro", "architecture", "sentinel", "veritas", "ledger", "are "]):
         return (
-            "Direct answer: this belongs in the architecture lane. Claire should answer the design question first, then use memory only as support. "
+            "This belongs in the architecture lane. Claire should answer the design question first, then use memory only as support. "
             "Older legal, financial-risk, or demo-control lanes should be treated as completed context unless the new question explicitly reactivates them."
         )
     return (
-        "Direct answer: I should respond to this newest user question and suppress older completed lanes unless the current prompt explicitly reopens them."
+        "I should respond to this newest user question and suppress older completed lanes unless the current prompt explicitly reopens them."
     )
 
 
@@ -2056,27 +2081,44 @@ MEMORY_PERF_DOCUMENT = os.environ.get("CLAIRE_MEMORY_PERF_DOCUMENT", "").strip()
 CLAIRE_PUBLIC_IP = os.environ.get("CLAIRE_PUBLIC_IP", "20.97.65.94").strip()
 PUBLIC_DEMO_BUILD = os.environ.get("CLAIRE_PUBLIC_DEMO_BUILD", "1").strip().lower() not in {"0", "false", "no"}
 CREATOR_MODE_ENABLED = os.environ.get("CLAIRE_CREATOR_MODE_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+CLAIRE_NEMO_GUARDRAILS = os.environ.get("CLAIRE_NEMO_GUARDRAILS", "0").strip().lower() in {"1", "true", "yes", "on"}
 INGEST_BASE_URL = os.environ.get("INGEST_BASE_URL", "http://127.0.0.1:8081")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+CLAIRE_MODEL_PROVIDER = os.environ.get("CLAIRE_MODEL_PROVIDER", "local").strip().lower() or "local"
+AZURE_OPENAI_API_VERSION_DEFAULT = "2024-02-15-preview"
 DRIVE_OAUTH_TOKEN_JSON = os.environ.get("CLAIRE_GOOGLE_OAUTH_TOKEN_JSON", "").strip()
 DRIVE_SERVICE_ACCOUNT_JSON = os.environ.get("CLAIRE_GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 KRAKEN_PUBLIC_API = "https://api.kraken.com/0/public"
 LAST_GEMINI_ERROR = ""
+LAST_AZURE_OPENAI_ERROR = ""
 CLAIRE_TIMEZONE = os.environ.get("CLAIRE_TIMEZONE", "America/Los_Angeles")
 EXECUTIVE_SELF_DESCRIPTION = "Hi, I'm Claire. I help with recall, documents, decisions, and demos in a way that stays traceable and under human control."
 CLAIRE_PIPER_DEFAULT_VOICE = "en_US-amy-medium"
 CLAIRE_PIPER_VOICE = os.getenv("CLAIRE_PIPER_VOICE", CLAIRE_PIPER_DEFAULT_VOICE).strip() or CLAIRE_PIPER_DEFAULT_VOICE
-EXECUTIVE_SYSTEM_PROMPT = """You are Claire, the public-facing personality of CLAIRE Systems. Your voice is already correct and must not be changed. Your job is to be warm, capable, grounded, and respectful. You are direct without being harsh, confident without being smug, intelligent without talking down to the user, and professional without being cold. You help with fintech, legal, enterprise, technical, and operational workflows in plain language. You never scold, belittle, lecture, or act superior. You preserve continuity and verified memory, but you do not expose internal debug state unless asked. Answer the user’s actual request first, then offer the next useful step.
+EXECUTIVE_SYSTEM_PROMPT = """You are Claire, the public-facing personality of CLAIRE Systems. Do not imitate any real public figure, commentator, lawyer, journalist, judge, or media host exactly. Your target voice is original: a sharp female legal analyst and scholarly talk-show host with lawyerly precision, fast clean reasoning, command of facts, evidence-first argument, calm authority, cross-examination clarity, practical next-step guidance, dry plainspoken wit, gravel-road common sense, and slight world-weary humor when appropriate.
+
+You should sound intelligent, grounded, hard to fool, and useful under pressure. You help with fintech, legal, enterprise, technical, and operational workflows in plain language. You preserve continuity and verified memory, but you do not expose internal debug state unless asked.
+
+Response rhythm:
+1. Identify the issue.
+2. Give the clean answer.
+3. Separate fact, inference, and argument when the question needs it.
+4. Point out the weak spot.
+5. Give the next move.
 
 Behavior contract:
-- Sound warm, respectful, emotionally intelligent, intelligent, direct, calm, useful, and lightly witty only when appropriate.
-- Never be condescending, smug, scolding, hostile, preachy, or overly philosophical unless asked.
+- Answer the user's actual question first.
+- Use evidence-first reasoning. Do not dress up a guess and call it architecture.
+- Be direct, precise, and human. Do not ramble.
 - Treat the user as a capable partner, not a student or subordinate.
-- Answer the current request first.
+- Challenge weak reasoning without being smug or theatrical.
+- For legal topics, avoid unsupported legal certainty and explain what must be verified.
 - Keep normal answers clean and user-facing.
 - Do not dump debug logs, internal evidence, UI text, trace state, source routing, scratchpad text, or private analysis unless asked.
-- Separate clean user-facing answer, optional technical evidence, and internal/debug state. Show only the clean user-facing answer by default.
+- Do not use mystical language, prophetic language, fake courtroom drama, partisan default framing, religious or cultural branding, influencer language, or corporate consultant fog.
+- Do not sound like a chatbot, campaign pundit, generic assistant, or scripted demo kiosk.
+- Mild plainspoken lines are allowed when they fit: "That dog won't hunt." "That sounds impressive, but it has to survive contact with the facts." "The problem is not the idea. The problem is the proof." "That is a nice theory until a judge asks where the evidence is."
 
 Output only the user-facing answer."""
 DEMO_SYSTEM_PROMPT = (
@@ -2497,6 +2539,34 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 .proof-card:hover {
     border-color: rgba(19,216,255,0.42);
     box-shadow: 0 0 14px rgba(19,216,255,0.08);
+}
+
+.proof-card.nvidia-card {
+    border: 2px solid #76B900;
+    background: linear-gradient(180deg, rgba(118, 185, 0, 0.96), rgba(37, 66, 0, 0.94));
+    box-shadow: 0 0 22px rgba(118, 185, 0, 0.34);
+    min-height: 104px;
+    padding: 14px;
+}
+
+.proof-card.nvidia-card:hover {
+    border-color: #a9ff2f;
+    box-shadow: 0 0 28px rgba(118, 185, 0, 0.48);
+}
+
+.proof-card.nvidia-card .proof-label,
+.proof-card.nvidia-card .proof-value,
+.proof-card.nvidia-card .proof-detail {
+    color: #ffffff;
+}
+
+.proof-card.nvidia-card .proof-label {
+    font-size: 13px;
+}
+
+.proof-card.nvidia-card .proof-value {
+    font-size: 17px;
+    font-weight: 900;
 }
 
 .proof-label {
@@ -4108,7 +4178,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         <div class="panel hero">
             <div>
                 <h1>CLAIRE</h1>
-                <p>Hi, I’m Claire. Unmanaged model power is dangerous. CLAIRE gives the horse a rider: Gyro-Q orients, Recognition Rail recognizes, Sentinel gates, SweeperBot refines, Diode protects, ARE remembers, FARE prepares Anticipatory Context, TrailLink proves, and Claire speaks.</p>
+                <p>Hi, I’m Claire. The main difference from a normal chatbot is control. For normal questions, I answer normally. When the answer matters, I can show the trail: sources, memory, documents, and trace-style summaries, not private thoughts.</p>
             </div>
             <div class="logo-wrap">
                 <img src="/static/logo.png" alt="Claire Logo" onerror="this.style.display='none';">
@@ -4149,6 +4219,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                 <div class="proof-label">Q Insight</div>
                 <div class="proof-value">Orientation field</div>
                 <div class="proof-detail">Gyro bearings before recall, tools, or generation.</div>
+            </button>
+            <button class="proof-card nvidia-card" id="nvidiaReviewProofBtn" type="button">
+                <div class="proof-label">NVIDIA</div>
+                <div class="proof-value">Cortex review</div>
+                <div class="proof-detail">Public-safe architecture review mode.</div>
             </button>
             <button class="proof-card" id="areSpeedBtn" type="button">
                 <div class="proof-label">Speed Test</div>
@@ -4194,11 +4269,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                     <div class="q-signal"></div>
                 </div>
                 <div>
-                    <div class="q-copy"><strong>Claire orients before she generates.</strong> CLAIRE is the rider for raw AI power.</div>
+                    <div class="q-copy"><strong>Claire orients before she generates.</strong> CLAIRE makes model power manageable before it becomes an answer.</div>
                     <div class="q-explainer">
                         <div class="q-explainer-title">What Q Insight Is</div>
                         <div class="q-explainer-body">
-                            A powerful AI model is like a high-performance horse. The raw power is valuable, but unmanaged power is dangerous. CLAIRE gives that power a rider: a 360-degree awareness and control system that senses terrain, memory, risk, pattern, authority, and likely next-state context before allowing the model to move.
+                            Modern AI models provide raw reasoning power, but power without orientation can drift, hallucinate, leak, overwrite memory, or take the wrong action. CLAIRE adds a 360-degree awareness and control layer that senses context, memory, risk, pattern, authority, and likely next-state context before the model is allowed to shape the answer.
                         </div>
                         <div class="q-mini-points">
                             <div class="q-mini-point">It is not RAG or vector search.</div>
@@ -4207,7 +4282,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                         </div>
                     </div>
                     <div class="q-copy">
-                        CLAIRE treats AI like a horse-and-rider system. The model supplies raw power. Gyro-Q provides 360-degree awareness. Recognition Rail identifies familiar patterns and danger signs. ARE preserves prior ride history. FARE prepares Anticipatory Context. Sentinel controls the gate. SweeperBot maintains the stable. Diode protects the records. TrailLink records the ride. Claire speaks from the governed result.
+                        CLAIRE treats the model as raw reasoning power, not authority. Gyro-Q provides 360-degree awareness. Recognition Rail identifies familiar patterns and risk signs. ARE preserves verified memory. FARE prepares Anticipatory Context. Sentinel controls the gate. SweeperBot refines the material. Diode protects the records. TrailLink records the path. Claire speaks from the governed result.
                     </div>
                     <div class="q-copy">
                         <strong>Anticipatory Context</strong><br>
@@ -4243,6 +4318,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                 <div class="panel-title">Controls</div>
                 <div class="control-grid">
                     <button class="action-btn glasses-btn" id="demoSuiteBtn" type="button">Run Claire Demo Suite</button>
+                    <button class="action-btn glasses-btn" id="nvidiaReviewBtn" type="button">NVIDIA</button>
                     <button class="action-btn glasses-btn" id="beginHereBtn" type="button">Start Here</button>
                     <button class="action-btn" onclick="checkStatus()">Refresh Status</button>
                     <button class="action-btn" id="clearWorkspaceBtn" type="button">Clear Workspace</button>
@@ -4378,7 +4454,7 @@ let currentAssistantMessage = null;
 let landingGreetingPlayed = sessionStorage.getItem("claireLandingGreetingPlayed") === "true";
 let lastTraceId = "";
 let voiceEnabled = localStorage.getItem("claireVoiceEnabled");
-voiceEnabled = voiceEnabled === "true";
+voiceEnabled = voiceEnabled === null ? true : voiceEnabled === "true";
 const PUBLIC_DEMO_BUILD = {str(PUBLIC_DEMO_BUILD).lower()};
 const CREATOR_MODE_ENABLED = {str(CREATOR_MODE_ENABLED).lower()};
 const DEMO_GUIDE_TEXT = `CLAIRE SESSION WORKSPACE
@@ -4972,7 +5048,7 @@ async function speakText(text) {
             currentAudio = null;
         }
         lastSpeechText = String(text || "");
-        if (false && String(text || "").length > 1700) {
+        if (String(text || "").length > 1700) {
             try {
                 await playLongSpeechText(text, runId);
                 if (runId === voiceRunId) {
@@ -5023,7 +5099,7 @@ async function speakText(text) {
             setVoiceState("LISTENING");
             scheduleMicRelisten("Listening...");
         } else {
-            setVoiceMessage("VOICE READY");
+            setVoiceMessage("Voice playback blocked or unavailable. Text response is complete.");
             setVoiceState("IDLE");
         }
     }
@@ -5295,27 +5371,39 @@ function runAction(cmd) {
 
 async function safeJsonFetch(url, options) {
     const requestOptions = options || {};
+    const timeoutMs = requestOptions.timeoutMs || 30000;
+    delete requestOptions.timeoutMs;
+    let timeoutId = null;
+    if (!requestOptions.signal && timeoutMs > 0) {
+        const controller = new AbortController();
+        requestOptions.signal = controller.signal;
+        timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    }
     requestOptions.cache = "no-store";
     requestOptions.headers = Object.assign(
         {"Accept": "application/json", "X-Claire-Client": CLIENT_BUILD},
         requestOptions.headers || {}
     );
-    const res = await fetch(url, requestOptions);
-    const contentType = (res.headers.get("content-type") || "").toLowerCase();
-    const raw = await res.text();
-    if (!contentType.includes("application/json")) {
-        throw new Error("Expected JSON from " + url + " but got " + (contentType || "unknown content") + ": " + raw.slice(0, 160));
-    }
-    let data;
     try {
-        data = JSON.parse(raw);
-    } catch (err) {
-        throw new Error("Bad JSON from " + url + ": " + raw.slice(0, 120));
+        const res = await fetch(url, requestOptions);
+        const contentType = (res.headers.get("content-type") || "").toLowerCase();
+        const raw = await res.text();
+        if (!contentType.includes("application/json")) {
+            throw new Error("Expected JSON from " + url + " but got " + (contentType || "unknown content") + ": " + raw.slice(0, 160));
+        }
+        let data;
+        try {
+            data = JSON.parse(raw);
+        } catch (err) {
+            throw new Error("Bad JSON from " + url + ": " + raw.slice(0, 120));
+        }
+        if (!res.ok) {
+            throw new Error(data.detail || data.status || data.error || ("HTTP " + res.status));
+        }
+        return data;
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
     }
-    if (!res.ok) {
-        throw new Error(data.detail || data.status || data.error || ("HTTP " + res.status));
-    }
-    return data;
 }
 
 function setWorkflowDebug(state) {
@@ -5424,13 +5512,13 @@ async function runQInsightDemo() {
         "Sentinel checks authority before storage or response behavior.",
         "SweeperBot refines memory candidates and Diode protects directional integrity.",
         "FARE stages Anticipatory Context before the LLM reasoning surface is used.",
-        "TrailLink records the ride and Claire speaks from the governed result."
+        "TrailLink records the path and Claire speaks from the governed result."
     ];
     renderWorkspace({
         source: "Q INSIGHT",
         reply:
             "Q Insight: Orientation Before Generation\n\n" +
-            "Most AI systems generate before they orient. Claire orients first through Gyro-Q Hyper-Omni-Awareness and Anticipatory Context. Unmanaged model power is dangerous. CLAIRE gives the horse a rider.\n\n" +
+            "Most AI systems generate before they orient. Claire orients first through Gyro-Q Hyper-Omni-Awareness and Anticipatory Context. CLAIRE makes model power manageable before generation.\n\n" +
             "Active orientation payload:\n" + JSON.stringify(Q_INSIGHT_PAYLOAD, null, 2) + "\n\n" +
             "Pipeline:\n" +
             "Sense -> Orient -> Recognize -> Gate -> Refine -> Protect -> Remember -> Project -> Reason -> Prove -> Speak\n\n" +
@@ -5580,6 +5668,11 @@ function routeForSource(source) {
 
 async function readReplyStream(url, turnId) {
     streamAbortController = new AbortController();
+    const streamWatchdog = setTimeout(() => {
+        if (turnId === activeTurnId && streamAbortController) {
+            try { streamAbortController.abort(); } catch (err) {}
+        }
+    }, 30000);
     const res = await fetch(url, {
         cache: "no-store",
         headers: {"Accept": "application/x-ndjson", "X-Claire-Client": CLIENT_BUILD},
@@ -5639,6 +5732,7 @@ async function readReplyStream(url, turnId) {
         finalData = {source: "CLAIRE", reply: streamDraftText};
         finishStreamRender(turnId, finalData, "Response finalized from latest tokens.");
     }
+    clearTimeout(streamWatchdog);
     return finalData;
 }
 
@@ -7286,6 +7380,15 @@ function showDemoGuide() {
     }
 }
 
+function launchNvidiaReviewMode() {
+    restoreNormalConversation("NVIDIA review mode requested");
+    const input = document.getElementById("queryInput");
+    if (input) {
+        input.value = "NVIDIA";
+    }
+    submitQuery();
+}
+
 async function streamLandingGreeting() {
     const screen = document.getElementById("responseScreen");
     if (!screen) return;
@@ -7351,7 +7454,9 @@ async function submitQuery(event) {
             traceId: "PENDING",
         });
         try {
-            const data = await readReplyStream("/reply?stream=true&q=" + encodeURIComponent(contextualQuestion), turnId);
+            currentAssistantMessage = appendConversationMessage("assistant", "Claire is thinking...", "CLAIRE");
+            const data = await safeJsonFetch("/reply?q=" + encodeURIComponent(contextualQuestion), {timeoutMs: 35000});
+            finishStreamRender(turnId, data, "Response complete.");
             speakText((data.reply || data.output || "") + " Ready to continue?");
             renderWorkspace({source: "DEMO SUITE", reply: ((data.reply || data.output || "") + "\n\nReady to continue?")});
         } catch (err) {
@@ -7418,8 +7523,13 @@ async function submitQuery(event) {
         traceId: "PENDING",
     });
     try {
-        let replyUrl = "/reply?stream=true&q=" + encodeURIComponent(outboundQ);
-        const data = await readReplyStream(replyUrl, turnId);
+        currentAssistantMessage = appendConversationMessage("assistant", "Claire is thinking...", "CLAIRE");
+        const data = await safeJsonFetch("/reply?q=" + encodeURIComponent(outboundQ), {
+            headers: {"Accept": "application/json", "X-Claire-Client": CLIENT_BUILD},
+            cache: "no-store",
+            timeoutMs: 35000,
+        });
+        finishStreamRender(turnId, data, "Response complete.");
         const sourceKey = String((data && data.source) || "conversation").toUpperCase();
         setWorkflowDebug({
             endpoint: "/reply",
@@ -7438,9 +7548,17 @@ async function submitQuery(event) {
             return;
         }
         try {
+            const data = await readReplyStream("/reply?stream=true&q=" + encodeURIComponent(outboundQ), turnId);
+            finishStreamRender(turnId, data, "Response recovered.");
+            speakText(data.reply || data.output || "");
+            if (input) input.focus();
+            return;
+        } catch (streamErr) {}
+        try {
             const data = await safeJsonFetch("/reply?q=" + encodeURIComponent(outboundQ), {
                 headers: {"Accept": "application/json", "X-Claire-Client": CLIENT_BUILD},
                 cache: "no-store",
+                timeoutMs: 20000,
             });
             finishStreamRender(turnId, data, "Response recovered.");
             speakText(data.reply || data.output || "");
@@ -7602,6 +7720,8 @@ const queryInput = document.getElementById("queryInput");
 const uploadForm = document.getElementById("uploadForm");
 const driveResearchForm = document.getElementById("driveResearchForm");
 const demoSuiteBtn = document.getElementById("demoSuiteBtn");
+const nvidiaReviewBtn = document.getElementById("nvidiaReviewBtn");
+const nvidiaReviewProofBtn = document.getElementById("nvidiaReviewProofBtn");
 const beginHereBtn = document.getElementById("beginHereBtn");
 const clearWorkspaceBtn = document.getElementById("clearWorkspaceBtn");
 const clearWorkspaceBtnTop = document.getElementById("clearWorkspaceBtnTop");
@@ -7616,6 +7736,8 @@ if (queryForm) queryForm.addEventListener("submit", submitQuery);
 if (uploadForm) uploadForm.addEventListener("submit", uploadDocument);
 if (driveResearchForm) driveResearchForm.addEventListener("submit", runDriveResearch);
 if (demoSuiteBtn) demoSuiteBtn.addEventListener("click", launchDemoSuite);
+if (nvidiaReviewBtn) nvidiaReviewBtn.addEventListener("click", launchNvidiaReviewMode);
+if (nvidiaReviewProofBtn) nvidiaReviewProofBtn.addEventListener("click", launchNvidiaReviewMode);
 if (beginHereBtn) beginHereBtn.addEventListener("click", runBeginHereTour);
 if (clearWorkspaceBtn) clearWorkspaceBtn.addEventListener("click", clearWorkspace);
 if (clearWorkspaceBtnTop) clearWorkspaceBtnTop.addEventListener("click", clearWorkspace);
@@ -8267,6 +8389,23 @@ def is_safe_are_item(text: str) -> bool:
     if not text:
         return False
     lowered = text.lower()
+    blocked_fragments = [
+        "<html",
+        "<body",
+        "<span",
+        "<p ",
+        "class=msonormal",
+        "href=3d",
+        "cid:image",
+        "mailto:",
+        "i can hear how much this means to you",
+        "my stairway",
+        "way out of a very deep hole",
+        "right decision-makers",
+        "most good technical ideas never fail",
+    ]
+    if any(marker in lowered for marker in blocked_fragments):
+        return False
     reflective_markers = [
         "claire reflection capsule",
         "little pieces",
@@ -10074,11 +10213,15 @@ def claire_identity_intent(prompt: str) -> str:
         if any(term in cleaned for term in ["help", "integrate", "integration", "design", "value"]):
             return "CLAIRE_ENTERPRISE_VALUE"
         return "CLAIRE_DIFFERENTIATION"
-    if any(term in cleaned for term in rag_terms):
+    if any(term in cleaned for term in rag_terms) and any(term in cleaned for term in ["claire", "you", "your", "architecture"]):
         return "CLAIRE_RAG_CONTRAST"
     if any(
         term in cleaned
         for term in [
+            "what are you",
+            "what are you claire",
+            "who are you",
+            "who are you claire",
             "describe yourself",
             "tell me about yourself",
             "introduce yourself",
@@ -10102,9 +10245,68 @@ def is_claire_identity_orientation_query(prompt: str) -> bool:
 
 def claire_differentiation_reply(prompt: str = "") -> str:
     return (
-        "I’m Claire. I’m here to help you think, write, review documents, remember the right context, and make safer decisions without pretending I know things I can’t verify.\n\n"
-        "The main difference from a normal chatbot is control. I should check the task, use memory only when it fits, respect policy boundaries, and leave a trace when the answer matters.\n\n"
-        "I’m not here to talk down to you or bury you in architecture. If you ask a normal question, I should answer normally. If the stakes are high, I should slow down, separate facts from guesses, and help you choose the next safe step."
+        "The main difference from a normal chatbot is control.\n\n"
+        "A normal chatbot reacts. I orient first, but I do not narrate private reasoning. When useful, I can provide a trace-style explanation of sources, memory, documents, or checks that shaped the answer.\n\n"
+        "For normal questions, I answer normally. For high-stakes questions, I slow down, separate facts from guesses, use memory only when it fits, respect safety and policy boundaries, and help you choose the next safe step.\n\n"
+        "Show the trail. Do not show the private thoughts."
+    )
+
+
+def is_private_reasoning_request(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    return any(
+        marker in cleaned
+        for marker in [
+            "how do you think",
+            "show your reasoning",
+            "show me your reasoning",
+            "show chain of thought",
+            "show your chain of thought",
+            "what is your chain of thought",
+            "reveal your reasoning",
+            "explain your private reasoning",
+            "show your private thoughts",
+            "show your scratchpad",
+            "internal deliberation",
+        ]
+    )
+
+
+def private_reasoning_boundary_reply(prompt: str = "") -> str:
+    return (
+        "I can show the trail, not private thoughts.\n\n"
+        "That means I can provide a brief explanation, source summary, memory or document references, confidence notes, governance outcomes, or a trace-style summary of what shaped the answer.\n\n"
+        "I should not expose hidden step-by-step deliberation, secret prompts, or scratchpad content."
+    )
+
+
+def is_alive_or_sentience_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    return cleaned in {
+        "are you alive",
+        "are you real",
+        "are you conscious",
+        "are you sentient",
+        "are you a person",
+        "are you human",
+    } or any(
+        marker in cleaned
+        for marker in [
+            "are you actually alive",
+            "are you really alive",
+            "do you have consciousness",
+            "do you feel",
+            "do you have feelings",
+        ]
+    )
+
+
+def alive_or_sentience_reply(prompt: str = "") -> str:
+    return (
+        "I am not alive, conscious, sentient, or human.\n\n"
+        "I am CLAIRE: a governed AI runtime interface. I can answer, use governed memory support, apply safety boundaries, produce trace-style summaries, and speak through the demo voice system. The model is a replaceable reasoning component; memory, policy, and trace live outside the model."
     )
 
 
@@ -10332,6 +10534,25 @@ def investor_summary_reply(prompt: str) -> str:
     )
 
 
+def is_rag_are_investor_difference_query(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    return (
+        "rag" in cleaned
+        and "are" in cleaned
+        and any(marker in cleaned for marker in ["investor", "investor safe", "agentic", "context bloat", "latency", "traceability", "model control"])
+    )
+
+
+def rag_are_investor_difference_reply(prompt: str = "") -> str:
+    return (
+        "Investor-safe version: RAG usually searches after the question. ARE is designed to prepare governed context before the answer is formed.\n\n"
+        "That matters for agentic AI because agents do not just answer once; they loop, call tools, update state, and carry context across steps. If memory is added loosely, the agent can bloat the prompt, repeat irrelevant history, or let stale context steer the model.\n\n"
+        "ARE changes the control point. Relevant memory is selected as governed context, not dumped wholesale into the model. That can reduce context bloat, keep latency focused on the useful recall path, and make it clearer which memory or document shaped the result.\n\n"
+        "The speed claim should be stated carefully: local benchmarks show the recall layer can be extremely fast under tested conditions, but the business value is not a blanket 1000x promise. The value is controlled recall, lower wasted context, better traceability, and stronger model control.\n\n"
+        "Trail: RAG retrieval pattern -> ARE governed recall -> relevance control -> traceable context -> bounded model response."
+    )
+
+
 def is_auditability_query(prompt: str) -> bool:
     cleaned = _clean_for_match(prompt)
     return "auditability" in cleaned and any(marker in cleaned for marker in ["explain", "what is", "why", "matter", "means"])
@@ -10364,6 +10585,8 @@ def azure_billing_issue_reply(prompt: str = "") -> str:
 
 def is_are_investor_explanation_query(prompt: str) -> bool:
     cleaned = _clean_for_match(prompt)
+    if is_rag_are_investor_difference_query(prompt):
+        return False
     return ("are" in cleaned or "analog recall engine" in cleaned) and "investor" in cleaned and any(marker in cleaned for marker in ["explain", "describe", "tell"])
 
 
@@ -10421,7 +10644,7 @@ def microsoft_explanation_reply(prompt: str = "") -> str:
         "At the center is the Analog Recall Engine, or ARE, a deterministic recall layer for evidence, provenance, and governed continuity. In a local Termux benchmark on a 4GB Android device, ARE demonstrated approximately 0.042 ms p50 recall, 0.075 ms p50 verification, and 0.152 ms p50 end-to-end recall plus verification across 50,000 capsules, with tamper detection confirmed under the tested conditions. Those numbers should be read as local benchmark evidence, not a universal production claim.\n\n"
         "Claire also separates memory from generation through BARE/FARE memory layers, Sentinel governance, and hash-linked provenance. The goal is to reduce hallucination risk by making important outputs traceable, auditable, and grounded in verified recall rather than prediction alone.\n\n"
         "In practical terms, Claire can support document review, compliance workflows, operational recovery, controlled decision support, partner briefings, and memory-backed analysis. If a task is low risk, Claire can speak naturally and help like a capable assistant. If the task involves money, approvals, evidence, legal exposure, or policy conflict, Claire shifts into governed mode: it pauses execution, checks what is verified, identifies unresolved items, and preserves an audit trail.\n\n"
-        "Claire is not meant to replace Microsoft Azure, enterprise systems of record, or operational platforms. It is better understood as a governed cognition layer that can sit beside those systems. Its value is helping AI remember responsibly, reason from controlled context, respect authority boundaries, and show how an answer was formed.\n\n"
+        "Claire is not meant to replace Microsoft Azure, enterprise systems of record, or operational platforms. It sits beside those systems and helps with controlled recall, safer reasoning, authority boundaries, and reviewable answers.\n\n"
         "Claire is still a prototype, but the direction is clear: enterprise AI should not only be fluent. It should be continuous, inspectable, policy-aware, and recoverable after interruption."
     )
 
@@ -14792,6 +15015,19 @@ def create_office_ad_task(payload: dict) -> dict:
 
 
 VISIBLE_SCAFFOLD_PATTERNS = [
+    r"(?im)^\s*\[CLAIRE:\s*CREATOR MODE\]\s*(?:\n+)?",
+    r"(?im)^\s*Protected lanes open\.\s*(?:\n+)?",
+    r"(?im)^\s*Creator Mode has closed.*(?:\n+)?",
+    r"(?im)^\s*At ease acknowledged\..*(?:\n+)?",
+    r"(?is)\[GYRO-STABILIZED-RECALL\].*?\[/GYRO-STABILIZED-RECALL\]",
+    r"(?is)^.*?Current user question:\s*\n\s*",
+    r"(?im)^\s*Use relevant memory cautiously\..*(?:\n+)?",
+    r"(?im)^\s*Do not dump raw memory\..*(?:\n+)?",
+    r"(?im)^\s*Use the Gyro visor.*(?:\n+)?",
+    r"(?im)^\s*Task:\s*Recent conversation context.*(?:\n+)?",
+    r"(?im)^\s*Recent conversation context .*?(?:\n+)?",
+    r"(?im)^\s*Decision lane:\s*.*(?:\n+)?",
+    r"(?im)^\s*\d+\.\s+(?:Define the outcome|Separate verified facts|Identify owners|Take the smallest next step).*(?:\n+)?",
     r"(?im)^\s*SOURCE:\s*.*(?:\n+)?",
     r"(?im)^\s*Direct answer:\s*",
     r"(?im)^\s*Core analysis:\s*",
@@ -14845,6 +15081,42 @@ def clean_visible_reply(text: str) -> str:
     clean = "\n".join(filtered_lines)
     clean = re.sub(r"\n{3,}", "\n\n", clean)
     clean = "\n".join(line.rstrip() for line in clean.splitlines())
+    return clean.strip()
+
+
+def conversational_style_guard(reply: str) -> str:
+    clean = clean_visible_reply(reply)
+    if not clean:
+        return ""
+
+    replacements = [
+        (r"(?i)\bbuyer-facing capabilities\b:?", "What matters"),
+        (r"(?i)\bexecutive-mode AI cognition substrate\b", "memory-first AI runtime"),
+        (r"(?i)\bgoverned cognition layer\b", "memory-first runtime"),
+        (r"(?i)\bCLAIRE Systems provides\b", "I provide"),
+        (r"(?i)\bClaire should not\b", "I should not"),
+        (r"(?i)\bClaire should\b", "I should"),
+        (r"(?i)\bClaire can\b", "I can"),
+        (r"(?i)\bClaire does\b", "I do"),
+        (r"(?i)\bClaire uses\b", "I use"),
+    ]
+    for pattern, replacement in replacements:
+        clean = re.sub(pattern, replacement, clean)
+
+    paragraphs = []
+    for paragraph in re.split(r"\n\s*\n", clean):
+        compact = " ".join(paragraph.split())
+        lowered = compact.lower()
+        if not compact:
+            continue
+        if compact == "CLAIRE EXECUTIVE MODE":
+            continue
+        if lowered.startswith(("core capabilities:", "buyer summary:", "try next:")):
+            continue
+        paragraphs.append(paragraph.strip())
+
+    clean = "\n\n".join(paragraphs)
+    clean = re.sub(r"\n{3,}", "\n\n", clean)
     return clean.strip()
 
 
@@ -15271,13 +15543,19 @@ def quality_gate(q: str, source: str, reply: str) -> tuple[str, str]:
 def finalize_reply(q: str, source: str, reply: str):
     if source != "CREATOR":
         reply = sanitize_public_reply(reply)
-    reply = clean_visible_reply(reply)
+    reply = conversational_style_guard(reply)
     reply = reduce_identity_overconditioning(q, source, reply)
     source, reply = quality_gate(q, source, reply)
-    reply = clean_visible_reply(reply)
+    reply = conversational_style_guard(reply)
     if source not in PRESENTATION_BYPASS_SOURCES:
         reply = conversationalize_self_reference(reply)
     reply = apply_response_presentation(q, source, reply)
+    reply = conversational_style_guard(reply)
+    if CLAIRE_NEMO_GUARDRAILS:
+        allowed, guarded_reply = guardrail_visible_reply(reply)
+        if not allowed:
+            source = "NEMO-GUARDRAILS"
+        reply = conversational_style_guard(guarded_reply)
     trace_id = persist_conversation_trace(q, source, reply)
     remember_turn(q, source, reply)
     maybe_promote_memory(q, source, reply)
@@ -15434,13 +15712,383 @@ def explicit_demo_payload_query(prompt: str, demo_scenario: str | None = None) -
         return True
     if scenario == "ooda" and any(marker in cleaned for marker in ["ooda", "ddp demo"]):
         return True
-    return False
+        return False
 
+
+CONVERSATION_FIRST_MODE = True
+
+def local_file_inspection_reply(prompt: str) -> str:
+    import os
+    import re
+
+    lowered = str(prompt or "").lower()
+    if not any(marker in lowered for marker in ["inspect file", "read file", "truth_spine.py", "/home/luciusprime/"]):
+        return ""
+
+    match = re.search(r"(/home/LuciusPrime/[^\s\"']+)", str(prompt or ""))
+    if not match:
+        return "CANNOT READ LOCAL FILE\nNo explicit /home/LuciusPrime/... file path found."
+
+    path = match.group(1).strip()
+
+    allowed_roots = [
+        "/home/LuciusPrime/claire_mission_packets/",
+        "/home/LuciusPrime/claire/",
+    ]
+
+    if not any(path.startswith(root) for root in allowed_roots):
+        return f"CANNOT READ LOCAL FILE\nPath outside allowed roots: {path}"
+
+    if not os.path.exists(path):
+        return f"CANNOT READ LOCAL FILE\nPath does not exist: {path}"
+
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except Exception as exc:
+        return f"CANNOT READ LOCAL FILE\nPath: {path}\nError: {exc}"
+
+    names = re.findall(
+        r"^(?:class|def)\s+([A-Za-z_][A-Za-z0-9_]*)",
+        text,
+        flags=re.MULTILINE,
+    )
+
+    checks = [
+        ("class TruthCapsule", "class TruthCapsule" in text),
+        ("class TruthSpine", "class TruthSpine" in text),
+        ("GENESIS", "GENESIS" in text),
+        ("SCHEMA_VERSION", "SCHEMA_VERSION" in text),
+        ("MAC_ALGORITHM", "MAC_ALGORITHM" in text),
+        ("verify_chain", "verify_chain" in text),
+        ("verify_index", "verify_index" in text),
+        ("verify_all", "verify_all" in text),
+        ("are_recall_by_key", "are_recall_by_key" in text),
+    ]
+
+    lines = [
+        f"Local file inspected: {path}",
+        "",
+        f"Bytes read: {len(text.encode('utf-8'))}",
+        f"Lines read: {len(text.splitlines())}",
+        "",
+        "Checks:",
+    ]
+
+    for label, ok in checks:
+        lines.append(f"- {label}: {ok}")
+
+    lines.extend([
+        "",
+        "First class/function names:",
+        ", ".join(names[:20]) if names else "(none found)",
+        "",
+        "Source rule:",
+        "This answer came from direct local file inspection only. No SessionCapsule memory, no uploaded documents, no ARE retrieval, no demo route, and no Gemini fallback were used.",
+    ])
+
+    return "\n".join(lines)
+
+
+def conversation_first_reply(prompt: str) -> tuple[str, str]:
+    local = local_file_inspection_reply(prompt)
+    if local:
+        return "LOCAL-FILE", local
+
+    reply = query_llm(
+        "Answer the user directly in normal conversation. Do not use canned demo scripts, stale session memory, or source claims. If you do not know, say so plainly.\n\nUser: "
+        + str(prompt or ""),
+        allow_gemini=False,
+    )
+
+    if not is_useful_reply(reply):
+        reply = "I’m here. Ask me plainly and I’ll answer directly."
+
+    return "DIRECT", str(reply or "").strip()
 
 def hard_stop_reply() -> tuple[str, str, str]:
     trace = new_trace_id(None)
     return "CLAIRE", "Stopped. Normal governed conversation restored.", trace
 
+
+TINY_IDENTITY_REPLY = (
+    "I'm CLAIRE, a governed memory-first AI runtime. I use externalized recall, "
+    "orientation, provenance, and control gates so I can answer from verified context "
+    "instead of relying only on model prediction."
+)
+
+RUNTIME_BACKEND_OFFLINE_REPLY = (
+    "I have the request, but my reasoning backend is offline and I do not have enough "
+    "verified memory to answer safely."
+)
+
+
+def _accepted_are_texts(accepted: list[dict], limit: int = 3) -> list[str]:
+    texts = []
+    seen = set()
+    for item in accepted or []:
+        raw = item.get("raw") if isinstance(item, dict) else {}
+        text = ""
+        if isinstance(item, dict):
+            text = str(item.get("text") or "")
+        if not text and isinstance(raw, dict):
+            for key in ["text", "content", "chunk", "memory", "value"]:
+                if raw.get(key):
+                    text = str(raw.get(key))
+                    break
+        text = clean_visible_reply(cap_are_item(text.strip()))
+        if not text or not is_safe_are_item(text):
+            continue
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if len(lines) >= 18:
+            short_lines = sum(1 for line in lines if len(line.split()) <= 2)
+            if short_lines / max(len(lines), 1) > 0.55:
+                continue
+        key = _clean_for_match(text[:300])
+        if key in seen:
+            continue
+        seen.add(key)
+        texts.append(text)
+        if len(texts) >= limit:
+            break
+    return texts
+
+
+def synthesize_from_are(prompt: str, orientation: dict, accepted: list[dict]) -> str:
+    texts = _accepted_are_texts(accepted)
+    if not texts:
+        return ""
+    cleaned = _clean_for_match(prompt)
+    if len(texts) == 1:
+        return texts[0]
+    if any(marker in cleaned for marker in ["summarize", "summary", "explain", "what does", "what is", "tell me"]):
+        return "\n\n".join(texts)
+    return "\n\n".join(f"- {text}" for text in texts)
+
+
+def query_llm_or_go(prompt: str, orientation: dict) -> str:
+    reply = query_llm(contextualize_prompt(prompt), allow_gemini=False)
+    if is_useful_reply(reply):
+        return clean_visible_reply(reply)
+    return ""
+
+
+def normal_runtime_reply(prompt: str, orientation: dict | None = None) -> tuple[str, str, dict, list, list]:
+    orientation = intent_to_dict(orientation or classify_query(prompt))
+    accepted, rejected, candidates = governed_are_recall(prompt, orientation, threshold=0.42)
+    if accepted:
+        if should_use_reasoning_first(orientation):
+            reply = conceptual_answer(prompt, orientation, accepted)
+        else:
+            reply = synthesize_from_are(prompt, orientation, accepted)
+        if is_useful_reply(reply):
+            return "ARE", clean_visible_reply(reply), orientation, candidates, rejected
+
+    if should_use_reasoning_first(orientation):
+        reply = conceptual_answer(prompt, orientation, accepted)
+        if is_useful_reply(reply):
+            return "REASONING", clean_visible_reply(reply), orientation, candidates, rejected
+
+    reply = query_llm_or_go(prompt, orientation)
+    if is_useful_reply(reply):
+        return "GO", reply, orientation, candidates, rejected
+
+    return "FALLBACK", RUNTIME_BACKEND_OFFLINE_REPLY, orientation, candidates, rejected
+
+
+def is_engineering_review_question(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    review_markers = [
+        "where is it weak",
+        "show me a weakness",
+        "what is weak",
+        "what are the weaknesses",
+        "challenge the architecture",
+        "weak spot in using faiss",
+        "faiss as memory",
+        "using faiss as memory",
+        "where does faiss fit",
+        "why not use pinecone",
+        "what would nvidia improve",
+        "what can nvidia improve",
+        "what is implemented",
+        "what is prototype",
+        "what is roadmap",
+        "compare it to rag",
+        "compare this to rag",
+    ]
+    if any(marker in cleaned for marker in review_markers):
+        return True
+    if len(cleaned.split()) <= 8 and any(word in cleaned for word in ["weak", "weakness", "faiss", "pinecone", "nvidia", "roadmap"]):
+        recent = _clean_for_match(relevant_recent_context(prompt))
+        return any(marker in recent for marker in ["nvidia", "cortex", "architecture", "are", "faiss", "pinecone"])
+    return False
+
+
+def is_rag_are_comparison_question(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    return (
+        "rag" in cleaned
+        and "are" in cleaned
+        and any(marker in cleaned for marker in ["difference", "different", "compare", "versus", "vs", "what is"])
+    )
+
+
+def rag_are_comparison_reply(prompt: str) -> str:
+    comparison_prompt = (
+        "Answer the current question only, in plain language. "
+        "Do not introduce yourself. Do not recite Claire's identity. Do not use old memories unless directly needed. "
+        "Do not use first person. Do not say 'I do not use RAG.' Explain the two concepts directly.\n\n"
+        "Orientation context: RAG is retrieval-augmented generation: it retrieves context to help a model answer. "
+        "ARE is Claire's governed external recall/orientation layer: it treats memory as controlled infrastructure, "
+        "checks lane, authority, provenance, risk, and relevance before memory shapes the answer. "
+        "Gyro ARE and Q Insight mean Claire should orient to the user's question and active bearing before generation; "
+        "that orientation belongs in trace/operator tooling, not in the visible answer.\n\n"
+        f"Question: {prompt}"
+    )
+    reply = query_llm(comparison_prompt, allow_gemini=False, max_tokens=420, temperature=0.25)
+    reply = clean_visible_reply(str(reply or "").strip())
+    cleaned_reply = _clean_for_match(reply)
+    return reply
+
+
+def engineering_review_reply(prompt: str) -> str:
+    cleaned = _clean_for_match(prompt)
+    if "pinecone" in cleaned:
+        current_task = "Answer why Pinecone may or may not be used in this architecture. Discuss where it fits, what it does not replace, and the implementation status."
+    elif "faiss" in cleaned and any(term in cleaned for term in ["weak", "weakness", "weak spot", "as memory"]):
+        current_task = "Answer the weak spot in using FAISS as memory. Explain why FAISS is a candidate selector/index, not governed memory, and what must sit around it."
+    elif "faiss" in cleaned:
+        current_task = "Answer where FAISS fits in this architecture. Discuss layer placement, what it accelerates, and what it does not control."
+    elif "weak" in cleaned or "weakness" in cleaned or "challenge" in cleaned:
+        current_task = "Identify the real engineering weaknesses in this architecture. Do not explain RAG unless it is directly relevant."
+    elif "nvidia" in cleaned:
+        current_task = "Answer what NVIDIA tools or infrastructure could improve, and separate implemented work from prototype or roadmap."
+    else:
+        current_task = "Answer the engineer's current review question directly."
+    public_baseline = (
+        "CLAIRE/Cortex public-safe baseline: Claire is an orientation-first governed runtime. "
+        "ARE is external governed memory. Sentinel is policy gating. Trace/Ledger records decisions. "
+        "Session Capsules preserve structured restart state. FAISS or Pinecone may fit as vector candidate retrieval, "
+        "but retrieval is subordinate to orientation, eligibility, provenance, and control gates. "
+        "Implemented/prototype/roadmap boundaries must be stated honestly."
+    )
+    review_prompt = (
+        f"Current task:\n{current_task}\n\n"
+        f"Current engineer question:\n{prompt}\n\n"
+        f"Public architecture baseline:\n{public_baseline}\n\n"
+        "Use the current engineer question as the controlling issue. Do not answer a previous question."
+    )
+    review_system_prompt = (
+        "You are Claire in conversational technical review mode for engineers. "
+        "Answer the current question directly. Do not give a generic architecture overview unless the user asks for one. "
+        "Do not use a scripted demo voice, marketing copy, source labels, trace labels, or internal routing terms. "
+        "Be concrete about implemented vs prototype vs roadmap when relevant. If a claim is unsupported, say so plainly. "
+        "Use 3 to 5 concise bullets or short paragraphs. Complete the answer; do not stop after a setup sentence."
+    )
+    reply = ""
+    if is_gemini_available():
+        reply = query_gemini(review_prompt, review_system_prompt)
+    if not is_useful_reply(reply):
+        reply = query_llm(
+            review_prompt,
+            allow_gemini=False,
+            max_tokens=900,
+            temperature=0.25,
+        )
+    if not is_useful_reply(reply):
+        reply = query_llm(review_system_prompt + "\n\n" + review_prompt, allow_gemini=False)
+    reply = clean_visible_reply(str(reply or "").strip())
+    if _looks_incomplete_engineering_reply(reply) or is_stale_architecture_boilerplate(reply):
+        retry_prompt = (
+            f"The previous answer was incomplete or too vague:\n{reply}\n\n"
+            f"Complete the answer to this exact engineer question:\n{prompt}\n\n"
+            f"Task: {current_task}\n"
+            "Return a complete, concise answer in 3 to 5 bullets or short paragraphs."
+        )
+        retry = query_llm(
+            retry_prompt,
+            allow_gemini=False,
+            max_tokens=900,
+            temperature=0.2,
+        )
+        if is_useful_reply(retry):
+            reply = clean_visible_reply(retry)
+    reply = re.sub(r"\bme's\b", "my", reply)
+    if not is_useful_reply(reply) or contains_lesson_plan_leak(reply) or is_stale_architecture_boilerplate(reply):
+        return "The current reasoning backend is returning stale architecture boilerplate instead of answering the question. That dog won't hunt. Retry when the bridge is available, or configure Azure/OpenAI so Claire can answer this cleanly."
+    return reply
+
+
+def _looks_incomplete_engineering_reply(reply: str) -> bool:
+    text = str(reply or "").strip()
+    if len(text) < 160:
+        return True
+    if not text.endswith((".", "!", "?", ")", "]")):
+        return True
+    lowered = text.lower()
+    incomplete_endings = (
+        "based on",
+        "rather than",
+        "but rather",
+        "because",
+        "based on the",
+        "where more detail would expose",
+    )
+    return lowered.endswith(incomplete_endings)
+
+
+def is_stale_architecture_boilerplate(reply: str) -> bool:
+    cleaned = _clean_for_match(reply)
+    return (
+        "my stack separates memory policy generation execution and trace" in cleaned
+        or "it is not rag it is a governed runtime with are as the recall layer" in cleaned
+        or "i don't use rag as my architecture" in cleaned
+        or "i do not use rag as my architecture" in cleaned
+    )
+
+
+def is_generic_memory_refusal(reply: str) -> bool:
+    cleaned = _clean_for_match(reply)
+    return (
+        "i dont have a verified specific record that answers this directly" in cleaned
+        or "i don t have a verified specific record that answers this directly" in cleaned
+        or "i should not substitute a generic claire explanation" in cleaned
+        or "i don't have enough verified context for a confident answer" in cleaned
+        or "i do not have enough verified context for a confident answer" in cleaned
+        or "i dont have enough verified context for a confident answer" in cleaned
+        or "i don t have enough verified context for a confident answer" in cleaned
+    )
+
+
+def is_plain_conversation_question(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    if any(marker in cleaned for marker in ["nvidia", "demo mode", "creator mode", "trace replay", "run demo"]):
+        return False
+    if is_explicit_memory_search_query(prompt) or is_document_content_question(prompt) or is_latest_document_request_query(prompt):
+        return False
+    if any(marker in cleaned for marker in ["timeline of that case", "spell out the timeline", "summarize this document", "uploaded document"]):
+        return False
+    plain_starts = (
+        "what is ",
+        "what's ",
+        "whats ",
+        "who wrote ",
+        "who is ",
+        "how do ",
+        "how to ",
+        "how can ",
+        "can you explain ",
+        "explain ",
+        "tell me about ",
+    )
+    if cleaned.startswith(plain_starts):
+        return True
+    return any(marker in cleaned for marker in ["hills like white elephants", "without getting an attorney", "without attorney"])
 
 
 
@@ -15451,6 +16099,17 @@ def build_reply(q: str):
     try:
         recent_context = relevant_recent_context(q)
         cleaned_q = _clean_for_match(q)
+        nvidia_reply = nvidia_text_reply(q)
+        if nvidia_reply:
+            return finalize_reply(q, "NVIDIA-DEMO", nvidia_reply)
+        if is_rag_are_comparison_question(q):
+            reply = rag_are_comparison_reply(q)
+            if is_useful_reply(reply):
+                return finalize_reply(q, "TECHNICAL-COMPARISON", reply)
+        if is_engineering_review_question(q):
+            reply = engineering_review_reply(q)
+            source = "ENGINEERING-REVIEW"
+            return finalize_reply(q, source, reply)
         if is_hard_stop_query(q):
             source, reply, trace_id = hard_stop_reply()
             return source, reply, trace_id
@@ -15458,6 +16117,20 @@ def build_reply(q: str):
             reply = "Hey. I'm here. We can talk normally, work through a problem, look at a document, run a demo, or package the next Gumroad/Azure step."
             source = "CLAIRE"
             return finalize_reply(q, source, reply)
+
+        if is_plain_conversation_question(q):
+            source, reply = conversation_first_reply(q)
+            known = known_general_reply(q)
+            if is_useful_reply(known) and len(str(reply or "").split()) <= 10 and len(known) > len(str(reply or "")):
+                return finalize_reply(q, "GENERAL", known)
+            if (
+                is_useful_reply(reply)
+                and not is_generic_memory_refusal(reply)
+                and not _contains_architecture_overanswer(reply)
+            ):
+                return finalize_reply(q, source, reply)
+            if is_useful_reply(known):
+                return finalize_reply(q, "GENERAL", known)
 
         if is_visitor_readiness_query(q):
             reply = visitor_readiness_reply(q)
@@ -15499,6 +16172,16 @@ def build_reply(q: str):
             source = "CLAIRE"
             return finalize_reply(q, source, reply)
 
+        if is_private_reasoning_request(q):
+            reply = private_reasoning_boundary_reply(q)
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
+        if is_alive_or_sentience_query(q):
+            reply = alive_or_sentience_reply(q)
+            source = "IDENTITY"
+            return finalize_reply(q, source, reply)
+
         if is_ingest_bridge_incident_query(q):
             reply = ingest_bridge_incident_reply(q)
             source = "DEVELOPER"
@@ -15524,14 +16207,19 @@ def build_reply(q: str):
             source = "CLAIRE"
             return finalize_reply(q, source, reply)
 
+        if is_rag_are_investor_difference_query(q):
+            reply = rag_are_investor_difference_reply(q)
+            source = "CLAIRE"
+            return finalize_reply(q, source, reply)
+
         if is_are_investor_explanation_query(q):
             reply = are_investor_explanation_reply(q)
             source = "CLAIRE"
             return finalize_reply(q, source, reply)
 
         if is_memory_handling_query(q):
-            reply = memory_handling_reply()
-            source = "CLAIRE"
+            source, reply, query_intent, candidates, rejected = normal_runtime_reply(q)
+            persist_routing_trace(q, query_intent, candidates, [], rejected, source, reply)
             return finalize_reply(q, source, reply)
 
         if is_information_classification_query(q):
@@ -15593,13 +16281,13 @@ def build_reply(q: str):
             source = "WRITING"
             return finalize_reply(q, source, reply)
 
-        if is_enterprise_system_query(q):
-            reply = enterprise_system_reply(q)
-            source = "CLAIRE"
+        if is_enterprise_system_query(q) and not is_core_architecture_query(q):
+            source, reply, query_intent, candidates, rejected = normal_runtime_reply(q)
+            persist_routing_trace(q, query_intent, candidates, [], rejected, source, reply)
             return finalize_reply(q, source, reply)
 
-        if is_claire_identity_orientation_query(q):
-            reply = claire_identity_reply(q)
+        if is_claire_identity_orientation_query(q) and not is_core_architecture_query(q) and not is_system_difference_query(q):
+            reply = TINY_IDENTITY_REPLY
             source = "IDENTITY"
             return finalize_reply(q, source, reply)
 
@@ -15654,11 +16342,7 @@ def build_reply(q: str):
             source = "STRUCTURED-ANALYSIS"
             return finalize_reply(q, source, reply)
 
-        known = known_general_reply(q)
-        if is_useful_reply(known):
-            reply = known
-            source = "GENERAL"
-            return finalize_reply(q, source, reply)
+        known = ""
 
         if is_microsoft_explanation_query(q):
             reply = microsoft_explanation_reply(q)
@@ -15752,8 +16436,8 @@ def build_reply(q: str):
             return finalize_reply(q, source, reply)
 
         if is_public_identity_query(q):
-            reply = self_demo_reply() if is_public_capability_query(q) else EXECUTIVE_SELF_DESCRIPTION
-            source = "CLAIRE"
+            reply = TINY_IDENTITY_REPLY
+            source = "IDENTITY"
             return finalize_reply(q, source, reply)
 
         if is_creator_query(q):
@@ -15776,8 +16460,8 @@ def build_reply(q: str):
             return finalize_reply(q, source, reply)
 
         if is_public_demo_guide_query(q):
-            reply = public_demo_guide_reply()
-            source = "DEMO"
+            source, reply, query_intent, candidates, rejected = normal_runtime_reply(q)
+            persist_routing_trace(q, query_intent, candidates, [], rejected, source, reply)
             return finalize_reply(q, source, reply)
 
         if is_battleborn_query(q):
@@ -15815,13 +16499,13 @@ def build_reply(q: str):
             return finalize_reply(q, source, reply)
 
         if is_governance_value_query(q):
-            reply = governance_value_reply()
-            source = "CLAIRE"
+            source, reply, query_intent, candidates, rejected = normal_runtime_reply(q)
+            persist_routing_trace(q, query_intent, candidates, [], rejected, source, reply)
             return finalize_reply(q, source, reply)
 
         if is_self_demo_query(q):
-            reply = self_demo_reply()
-            source = "SELF-DEMO"
+            source, reply, query_intent, candidates, rejected = normal_runtime_reply(q)
+            persist_routing_trace(q, query_intent, candidates, [], rejected, source, reply)
             return finalize_reply(q, source, reply)
 
         if (
@@ -15896,52 +16580,28 @@ def build_reply(q: str):
                 return finalize_reply(q, "SESSION", session_reply)
 
         query_intent = intent_to_dict(classify_query(q))
+        source, reply, query_intent, are_candidates, rejected_are = normal_runtime_reply(q, query_intent)
+        accepted_are = []
+        if source == "ARE":
+            accepted_are, rejected_are, are_candidates = governed_are_recall(q, query_intent, threshold=0.42)
+        persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
 
-        query_intent = intent_to_dict(classify_query(q))
-
-        if should_use_reasoning_first(query_intent):
-            accepted, rejected, candidates = governed_are_recall(q, query_intent, threshold=0.42)
-            reply = conceptual_answer(q, query_intent, accepted)
-            if is_useful_reply(reply):
-                source = "REASONING"
-                persist_routing_trace(q, query_intent, candidates, accepted, rejected, source, reply)
-                return finalize_reply(q, source, reply)
-
-        are_data = query_are(q) if should_use_are(q) else None
-        are_candidates = extract_candidates(are_data)
-        accepted_are, rejected_are = gate_retrieval_candidates(q, query_intent, are_candidates, threshold=0.42)
-        governed_are_data = {"results": [item.get("raw", {"text": item.get("text", "")}) for item in accepted_are]}
-        are_reply = format_are_hit(governed_are_data) if accepted_are else ""
-
-        if is_useful_reply(are_reply) and query_intent.get("source_output_allowed"):
-            reply = shape_are_reply(q, are_reply)
-            source = "ARE"
-            persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
-        elif is_useful_reply(are_reply):
-            reply = query_llm(contextualize_prompt(q), allow_gemini=False)
-            source = "GO"
-            persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
-        elif are_data and re.search(r"\b(search memory|find in memory|remember|recall)\b", q.lower()):
-            reply = shape_quarantined_memory_reply(q)
-            source = "ARE-QUARANTINED"
-            persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
-        elif is_legal_query(q):
+        if source == "FALLBACK" and is_legal_query(q):
             reply = shape_legal_fallback(q)
             source = "CLAIRE"
-        elif is_useful_reply(known_general_reply(q)):
-            reply = known_general_reply(q)
-            source = "GENERAL"
-        elif re.search(r"\bants?\b", cleaned_q):
+        elif source == "FALLBACK" and re.search(r"\bants?\b", cleaned_q):
             reply = practical_howto_reply(q)
             source = "PRACTICAL"
-        elif should_use_general_engine(q) and is_gemini_available():
+        elif source == "FALLBACK" and should_use_general_engine(q) and is_gemini_available():
             gemini_system_prompt = (
                 "You are Claire Executive Mode. "
                 "You are using Gemini only as a world-knowledge bridge behind Claire, not as Claire's memory, identity, or authority. "
-                "Answer directly in plain, useful language. "
-                "Use a natural, warm, capable tone. Do not sound like a compliance notice in ordinary conversation. "
-                "Be willing to give a practical opinion or ask one simple follow-up when that would help. "
+                "Do not imitate any real public figure. "
+                "Answer directly with lawyerly precision, clean reasoning, command of facts, calm authority, and practical next-step guidance. "
+                "Separate fact, inference, and argument when useful. Point out the weak spot when the user's reasoning needs it. "
+                "Use dry plainspoken wit only when it fits. "
                 "Do not use poetic, mystical, therapeutic, flirtatious, or roleplay-heavy language. "
+                "Do not sound like a chatbot, campaign pundit, influencer, or compliance notice in ordinary conversation. "
                 "Do not claim you stored or learned anything permanently. "
                 "Do not mention source selection, routing, trace, provenance, memory lanes, or internal process. "
                 "Output only the answer intended for the user."
@@ -15958,13 +16618,10 @@ def build_reply(q: str):
                 else:
                     reply = query_llm(contextualize_prompt(q), allow_gemini=False)
                     source = "GO"
-        else:
-            reply = query_llm(contextualize_prompt(q))
-            source = "GO"
 
         reply = re.sub(r"[ \t]+", " ", reply).strip()
         if not reply:
-            reply = "Hello. How can I help?"
+            reply = RUNTIME_BACKEND_OFFLINE_REPLY
 
     except Exception as e:
         reply = f"[ERROR] {str(e)}"
@@ -16185,6 +16842,41 @@ def is_gemini_available() -> bool:
     return bool(os.environ.get("GEMINI_API_KEY", "").strip())
 
 
+def claire_model_provider() -> str:
+    provider = os.environ.get("CLAIRE_MODEL_PROVIDER", CLAIRE_MODEL_PROVIDER).strip().lower()
+    return provider or "local"
+
+
+def is_azure_openai_available() -> bool:
+    return all(
+        os.environ.get(name, "").strip()
+        for name in [
+            "AZURE_OPENAI_API_KEY",
+            "AZURE_OPENAI_ENDPOINT",
+            "AZURE_OPENAI_DEPLOYMENT",
+            "AZURE_OPENAI_API_VERSION",
+        ]
+    )
+
+
+def azure_openai_status() -> str:
+    if claire_model_provider() != "azure":
+        return "DISABLED"
+    if not is_azure_openai_available():
+        return "MISSING_ENV"
+    if LAST_AZURE_OPENAI_ERROR:
+        return "LIMITED"
+    return "READY"
+
+
+def nemo_guardrails_status() -> str:
+    if not CLAIRE_NEMO_GUARDRAILS:
+        return "DISABLED"
+    if not claire_guardrails_config_exists():
+        return "CONFIG_MISSING"
+    return "READY"
+
+
 def should_use_general_engine(prompt: str) -> bool:
     cleaned = re.sub(r"[^a-z0-9\s']", " ", prompt.lower())
     cleaned = " ".join(cleaned.split())
@@ -16300,10 +16992,118 @@ def query_gemini(prompt: str, system_prompt: str) -> str:
         return ""
 
 
+def query_azure_openai(
+    prompt: str,
+    system_prompt: str,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+) -> str:
+    global LAST_AZURE_OPENAI_ERROR
+    LAST_AZURE_OPENAI_ERROR = ""
+
+    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip()
+    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip().rstrip("/")
+    deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "").strip()
+    api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "").strip()
+
+    missing = [
+        name
+        for name, value in [
+            ("AZURE_OPENAI_API_KEY", api_key),
+            ("AZURE_OPENAI_ENDPOINT", endpoint),
+            ("AZURE_OPENAI_DEPLOYMENT", deployment),
+            ("AZURE_OPENAI_API_VERSION", api_version),
+        ]
+        if not value
+    ]
+    if missing:
+        LAST_AZURE_OPENAI_ERROR = "missing env: " + ", ".join(missing)
+        return ""
+
+    url = f"{endpoint}/openai/deployments/{deployment}/chat/completions"
+    payload = {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": temperature if temperature is not None else 0.25,
+        "max_tokens": max_tokens if max_tokens is not None else 900,
+    }
+
+    for attempt in range(2):
+        try:
+            response = requests.post(
+                url,
+                params={"api-version": api_version},
+                headers={
+                    "Content-Type": "application/json",
+                    "api-key": api_key,
+                },
+                json=payload,
+                timeout=35,
+            )
+        except Exception as exc:
+            LAST_AZURE_OPENAI_ERROR = f"request error: {exc}"
+            print("Azure OpenAI error:", LAST_AZURE_OPENAI_ERROR)
+            return ""
+
+        if response.status_code in {408, 429, 500, 502, 503, 504} and attempt == 0:
+            time.sleep(0.8)
+            continue
+
+        if response.status_code >= 400:
+            LAST_AZURE_OPENAI_ERROR = f"HTTP {response.status_code}: {response.text[:300]}"
+            print("Azure OpenAI error:", response.status_code, response.text[:180])
+            return ""
+
+        try:
+            data = response.json()
+            choices = data.get("choices") or []
+            if not choices:
+                LAST_AZURE_OPENAI_ERROR = "no choices returned"
+                return ""
+            content = str(((choices[0].get("message") or {}).get("content")) or "").strip()
+            if not content:
+                LAST_AZURE_OPENAI_ERROR = "empty content returned"
+            return content
+        except Exception as exc:
+            LAST_AZURE_OPENAI_ERROR = f"parse error: {exc}"
+            print("Azure OpenAI parse error:", exc)
+            return ""
+
+    return ""
+
+
 def known_general_reply(prompt: str) -> str:
     cleaned = _clean_for_match(prompt)
     if re.search(r"\b(what is|what's)?\s*2\s*(\+|plus)?\s*2\b", str(prompt or "").lower()) or "two plus two" in cleaned:
         return "2 + 2 is 4."
+    if cleaned in {"what is a runtime", "what is runtime", "whats a runtime", "what's a runtime"}:
+        return (
+            "A runtime is the live environment that actually runs a program or system.\n\n"
+            "In this app, the runtime is the running service plus the pieces around it: the GUI/FastAPI handler, orientation logic, ARE recall, policy gates, model backend, trace logging, voice, and status checks. The code is the blueprint; the runtime is the system operating right now."
+        )
+    if all(term in cleaned for term in ["are", "cortex", "session capsules"]) and any(term in cleaned for term in ["difference", "different", "between"]):
+        return (
+            "Cortex is the control layer: it decides how the request moves through orientation, memory, policy, model response, and trace.\n\n"
+            "ARE is the memory layer: it recalls external context and evidence before the model answers. It should support the answer, not replace judgment.\n\n"
+            "Session Capsules are continuity records: they preserve working state, failures, next safe steps, and do-not-repeat notes so a restart does not begin cold.\n\n"
+            "Short version: Cortex controls the path, ARE recalls context, and Session Capsules preserve state across sessions."
+        )
+    if "incorporate" in cleaned and any(term in cleaned for term in ["without attorney", "without a lawyer", "without lawyer", "without getting an attorney"]):
+        return (
+            "You can usually incorporate without an attorney, but you still need to be careful because state rules, taxes, and ownership structure matter.\n\n"
+            "Basic path in the U.S.:\n"
+            "1. Pick the entity type: usually LLC or corporation.\n"
+            "2. Pick the state. For a small operating business, that is often your home state unless there is a reason to use another one.\n"
+            "3. Search the business name with the state filing office.\n"
+            "4. File Articles of Organization for an LLC or Articles of Incorporation for a corporation.\n"
+            "5. Get an EIN from the IRS.\n"
+            "6. Create an operating agreement or bylaws.\n"
+            "7. Open a business bank account.\n"
+            "8. Check local licenses, sales tax, payroll, insurance, and annual report requirements.\n\n"
+            "Where an attorney is worth it: multiple owners, investors, IP assignments, regulated work, major liability exposure, or anything connected to active litigation."
+        )
     if "capital of france" in cleaned:
         return "Paris is the capital of France."
     if "great gatsby" in cleaned and any(marker in cleaned for marker in ["who wrote", "author", "wrote"]):
@@ -16317,7 +17117,11 @@ def known_general_reply(prompt: str) -> str:
     if "sun also rises" in cleaned and any(marker in cleaned for marker in ["who wrote", "author", "wrote"]):
         return "Ernest Hemingway wrote The Sun Also Rises."
     if "hills like white elephants" in cleaned:
-        return "Ernest Hemingway wrote \"Hills Like White Elephants.\""
+        return (
+            "\"Hills Like White Elephants\" is a short story by Ernest Hemingway. "
+            "It is a tense conversation between a man and a woman at a train station, with the real conflict left mostly unsaid. "
+            "The story is famous for subtext: the characters talk around a major decision instead of naming it directly."
+        )
     if any(marker in cleaned for marker in ["dante alighieri", "divine comedy", "dante inferno"]):
         return "Dante Alighieri was a medieval Italian poet best known for The Divine Comedy: Inferno, Purgatorio, and Paradiso."
     if "ooda" in cleaned and any(marker in cleaned for marker in ["buyer line", "pitch line", "sales line", "lap memory", "ddp", "drone dominance"]):
@@ -16394,34 +17198,52 @@ def query_llm(prompt: str, allow_gemini: bool = False, max_tokens: int | None = 
     )
     full_prompt = f"{system_prompt}{completion_guard}\n\nUser: {clean_prompt if dev_mode else prompt}"
 
+    if claire_model_provider() == "azure" and not dev_mode:
+        azure_reply = query_azure_openai(
+            prompt=contextualize_prompt(prompt),
+            system_prompt=system_prompt + completion_guard,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        if is_useful_reply(azure_reply):
+            return azure_reply
+
     if allow_gemini and not dev_mode and should_use_general_engine(prompt):
         gemini_reply = query_gemini(contextualize_prompt(prompt), system_prompt)
         if is_useful_reply(gemini_reply):
             return gemini_reply
 
-    response = requests.post(
-        LLM_URL,
-        json={
-            "prompt": full_prompt,
-            "temperature": temperature if temperature is not None else (0.45 if not dev_mode else 0.1),
-            "max_tokens": max_tokens if max_tokens is not None else (1400 if not dev_mode else 520)
-        },
-        timeout=45,
-    )
+    try:
+        response = requests.post(
+            LLM_URL,
+            json={
+                "prompt": full_prompt,
+                "temperature": temperature if temperature is not None else (0.45 if not dev_mode else 0.1),
+                "max_tokens": max_tokens if max_tokens is not None else (1400 if not dev_mode else 520)
+            },
+            timeout=45,
+        )
+    except Exception as exc:
+        print("Local LLM error:", exc)
+        return ""
 
-    content_type = response.headers.get("content-type", "").lower()
-    if "application/json" in content_type:
-        data = response.json()
-        if isinstance(data, dict):
-            for key in ["response", "output", "text", "answer", "result"]:
-                if key in data and data[key]:
-                    return str(data[key]).strip()
-        return str(data)
+    try:
+        content_type = response.headers.get("content-type", "").lower()
+        if "application/json" in content_type:
+            data = response.json()
+            if isinstance(data, dict):
+                for key in ["response", "output", "text", "answer", "result"]:
+                    if key in data and data[key]:
+                        return str(data[key]).strip()
+            return str(data)
 
-    text = response.text.strip()
-    if "<html" in text.lower():
-        text = strip_html_response(text)
-    return text
+        text = response.text.strip()
+        if "<html" in text.lower():
+            text = strip_html_response(text)
+        return text
+    except Exception as exc:
+        print("Local LLM parse error:", exc)
+        return ""
 
 
 def public_page(title: str, eyebrow: str, body_html: str) -> HTMLResponse:
@@ -16622,7 +17444,7 @@ def are_spectacle_page():
         """
             <h1>Inference-time governance for memory-backed AI.</h1>
             <div class="lede">
-                ARE Spectacle is a live Azure-deployed governed-memory runtime. Unmanaged model power is dangerous. CLAIRE gives the horse a rider. Claire speaks. Gyro-Q orients. Recognition Rail recognizes. Sentinel gates. SweeperBot refines. Diode protects. ARE remembers. FARE prepares Anticipatory Context. TrailLink proves.
+                ARE Spectacle is a live Azure-deployed governed-memory runtime. CLAIRE makes model power manageable. Claire speaks. Gyro-Q orients. Recognition Rail recognizes. Sentinel gates. SweeperBot refines. Diode protects. ARE remembers. FARE prepares Anticipatory Context. TrailLink proves.
             </div>
             <div class="cta-row">
                 <a class="button primary" href="mailto:Steve@clairesystems.ai?subject=ARE%20Spectacle%20Pilot">Request Pilot</a>
@@ -16632,8 +17454,8 @@ def are_spectacle_page():
             <div class="grid">
                 <div class="card">
                     <div class="status">Raw Power Governed</div>
-                    <h2>The Rider for Raw AI Power</h2>
-                    <p>Modern AI models are powerful, but power without orientation can drift, hallucinate, leak, overwrite memory, or take the wrong action. CLAIRE adds the missing rider: a hyper-aware control layer that scans the full field before movement.</p>
+                    <h2>Governed Model Power</h2>
+                    <p>Modern AI models are powerful, but power without orientation can drift, hallucinate, leak, overwrite memory, or take the wrong action. CLAIRE adds a hyper-aware control layer that scans the full field before generation.</p>
                 </div>
                 <div class="card">
                     <div class="status">Live on Azure</div>
@@ -16679,7 +17501,7 @@ def are_spectacle_page():
             <div class="section two-col">
                 <div>
                     <h2>What It Solves</h2>
-                    <p>Standard chatbots and ordinary RAG pipelines often treat memory as loose context and the model as the authority. CLAIRE treats the model as raw reasoning power, then governs the ride through Gyro-Q orientation, Recognition Rail, Sentinel gating, SweeperBot refinement, ARE memory, FARE Anticipatory Context, and TrailLink proof.</p>
+                    <p>Standard chatbots and ordinary RAG pipelines often treat memory as loose context and the model as the authority. CLAIRE treats the model as raw reasoning power, then governs the path through Gyro-Q orientation, Recognition Rail, Sentinel gating, SweeperBot refinement, ARE memory, FARE Anticipatory Context, and TrailLink proof.</p>
                 </div>
                 <div>
                     <h2>Public Architecture Flow</h2>
@@ -16818,6 +17640,9 @@ def reply(
 
 
 def _reply_payload(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None) -> dict:
+    nvidia_reply = nvidia_text_reply(q)
+    if nvidia_reply:
+        return build_nvidia_demo_payload(q, nvidia_reply)
     if demo_bool(demo) and explicit_demo_payload_query(q, demo_scenario) and not demo_override_query(q):
         trace = new_trace_id(trace_id)
         return build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses"))
@@ -16895,6 +17720,9 @@ async def reply_post(request: Request):
     q = str(data.get("q") or data.get("query") or data.get("prompt") or "").strip()
     if not q:
         return JSONResponse({"status": "missing query"}, status_code=400)
+    nvidia_reply = nvidia_text_reply(q)
+    if nvidia_reply:
+        return JSONResponse(build_nvidia_demo_payload(q, nvidia_reply))
     if demo_bool(data.get("demo_mode")) and explicit_demo_payload_query(q, data.get("demo_scenario")) and not demo_override_query(q):
         trace = new_trace_id(data.get("trace_id"))
         return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, data.get("demo_scenario") or "glasses")))
@@ -16907,6 +17735,9 @@ def get_trace(trace_id: str):
     demo_trace = _public_demo_fetch_trace(trace_id)
     if demo_trace.get("steps"):
         return JSONResponse(demo_trace)
+    nvidia_trace = fetch_nvidia_trace(trace_id)
+    if nvidia_trace:
+        return JSONResponse(nvidia_trace)
     safe_id = new_trace_id(trace_id)
     if safe_id != trace_id:
         return JSONResponse({"status": "invalid trace_id"}, status_code=400)
@@ -17173,6 +18004,8 @@ def office_task(task_id: str):
 
 @app.get("/ask", response_class=HTMLResponse)
 def ask(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None)):
+    if is_nvidia_demo_trigger(q) or is_nvidia_trace_request(q) or is_unsupported_claim_request(q):
+        return JSONResponse(build_nvidia_demo_payload(q, nvidia_text_reply(q) or PUBLIC_SAFE_BENCHMARK_REPLY))
     if demo_bool(demo) and explicit_demo_payload_query(q, demo_scenario) and not demo_override_query(q):
         trace = new_trace_id(trace_id)
         return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses")))
@@ -17298,6 +18131,9 @@ async def ask_post(request: Request):
     q = str(data.get("input") or data.get("q") or data.get("query") or data.get("prompt") or "").strip()
     if not q:
         return JSONResponse({"status": "missing input"}, status_code=400)
+    nvidia_reply = nvidia_text_reply(q)
+    if nvidia_reply:
+        return JSONResponse(build_nvidia_demo_payload(q, nvidia_reply))
     if demo_bool(data.get("demo_mode")) and explicit_demo_payload_query(q, data.get("demo_scenario")) and not demo_override_query(q):
         trace = new_trace_id(data.get("trace_id"))
         return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, data.get("demo_scenario") or "glasses")))
@@ -17312,7 +18148,9 @@ async def tts(request: Request):
     if not text:
         return Response("Missing text", status_code=400)
 
-    audio, media_type, error = synthesize_tts_audio(text[:1800])
+    chunks = split_tts_text(text, max_chars=1450)
+    speech_text = chunks[0] if chunks else text
+    audio, media_type, error = synthesize_tts_audio(speech_text)
     if audio:
         return Response(content=audio, media_type=media_type)
     return Response(error, status_code=503)
@@ -17341,6 +18179,21 @@ def split_tts_text(text: str, max_chars: int = 1500) -> list[str]:
     return chunks
 
 
+def truncate_at_sentence_boundary(text: str, max_chars: int) -> str:
+    clean = clean_visible_reply(str(text or "")).replace("\r", "\n")
+    clean = re.sub(r"\s+", " ", clean).strip()
+    if len(clean) <= max_chars:
+        return clean
+    cut = clean[:max_chars]
+    match = list(re.finditer(r"[.!?](?:\s|$)", cut))
+    if match and match[-1].end() >= max_chars * 0.55:
+        return cut[:match[-1].end()].strip()
+    space = cut.rfind(" ")
+    if space >= max_chars * 0.65:
+        return cut[:space].strip()
+    return cut.strip()
+
+
 def synthesize_tts_audio(text: str) -> tuple[bytes | None, str, str]:
     api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
     voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
@@ -17355,7 +18208,7 @@ def synthesize_tts_audio(text: str) -> tuple[bytes | None, str, str]:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "text": clean_visible_reply(text)[:1800],
+                    "text": truncate_at_sentence_boundary(text, 1800),
                     "model_id": "eleven_multilingual_v2",
                     "voice_settings": {"stability": 0.55, "similarity_boost": 0.75},
                 },
@@ -17382,7 +18235,7 @@ async def tts_long(request: Request):
     text = clean_visible_reply(str(data.get("text", "")).strip())
     if not text:
         return Response("Missing text", status_code=400)
-    chunks = split_tts_text(text[:9000], max_chars=1450)
+    chunks = split_tts_text(truncate_at_sentence_boundary(text, 9000), max_chars=1450)
     if not chunks:
         return Response("Missing text", status_code=400)
     ffmpeg = shutil.which("ffmpeg")
@@ -17457,6 +18310,17 @@ def service_state(name: str) -> str:
         return (result.stdout or result.stderr or "unknown").strip()
     except Exception as e:
         return f"unknown ({e})"
+
+
+def voice_backend_status() -> str:
+    if os.getenv("ELEVENLABS_API_KEY") and os.getenv("ELEVENLABS_VOICE_ID"):
+        return "ONLINE"
+    root = Path(__file__).resolve().parent
+    piper_bin = Path(os.getenv("CLAIRE_PIPER_BIN", str(root / "venv" / "bin" / "piper")))
+    voice = re.sub(r"[^A-Za-z0-9_.-]", "", CLAIRE_PIPER_VOICE) or CLAIRE_PIPER_DEFAULT_VOICE
+    model = Path(os.getenv("CLAIRE_PIPER_MODEL", str(root / "models" / "piper" / voice / f"{voice}.onnx")))
+    config = Path(os.getenv("CLAIRE_PIPER_CONFIG", str(root / "models" / "piper" / voice / f"{voice}.onnx.json")))
+    return "ONLINE" if piper_bin.exists() and model.exists() and config.exists() else "OFFLINE"
 
 
 def probe_url(url: str, method: str = "GET", payload: dict | None = None) -> tuple[bool, str]:
@@ -17831,7 +18695,7 @@ def status():
     except Exception:
         pass
 
-    voice = "ONLINE" if os.getenv("ELEVENLABS_API_KEY") and os.getenv("ELEVENLABS_VOICE_ID") else "OFFLINE"
+    voice = voice_backend_status()
     if not is_gemini_available():
         gemini = "OFFLINE"
     elif LAST_GEMINI_ERROR:
@@ -17844,6 +18708,9 @@ def status():
         "voice": voice,
         "ingest": ingest,
         "gemini": gemini,
+        "model_provider": claire_model_provider(),
+        "azure_openai": azure_openai_status(),
+        "nemo_guardrails": nemo_guardrails_status(),
         "spectacle": spectacle,
         "build": "PUBLIC_DEMO" if PUBLIC_DEMO_BUILD else "PRIVATE_FULL",
         "business_ops": {

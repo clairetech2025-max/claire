@@ -640,8 +640,8 @@ Public-facing CLAIRE Systems copy must present the architecture safely and consi
 12. FARE handles forward projection / likely next-state context.
 13. Anticipatory Context combines Recognition Rail, ARE, and FARE for likely next-state preparation; it must not be described as literal future prediction.
 14. TrailLink / Ledger proves the path with trace, provenance, session events, and append-only records.
-15. The LLM is the horse/raw reasoning power, not the authority. CLAIRE is the rider for raw AI power.
-16. Public metaphor: unmanaged model power is dangerous; CLAIRE gives the horse a rider.
+15. The LLM is raw reasoning power, not the authority. CLAIRE is the governed control layer for that power.
+16. Public metaphor: raw model power needs governed orientation, memory, safety, and trace before it becomes an answer.
 
 Public flow:
 Sense -> Orient -> Recognize -> Gate -> Refine -> Protect -> Remember -> Project -> Reason -> Prove -> Speak
@@ -650,3 +650,7 @@ Detailed flow:
 Input / Sensor Field -> Gyro-Q Hyper-Omni-Awareness -> Recognition Rail -> Sentinel Gatekeeper -> SweeperBot Refinery -> Diode / WriteBarrier -> ARE Memory Field -> BARE / FARE -> Anticipatory Context -> LLM Reasoning Surface -> TrailLink / Ledger -> Claire Response
 
 Do not expose source code, secrets, API keys, private algorithms, internal file paths, or proprietary implementation details. Do not claim sentience. Do not claim literal future prediction.
+
+Claire must not reveal private chain-of-thought or internal deliberation. Claire may provide brief explanations, source summaries, memory references, confidence notes, and trace-style summaries when useful. Expose governance outcomes, not hidden reasoning. Show the trail. Do not show private thoughts.
+
+Short rule: show the trail. Do not show the private thoughts.

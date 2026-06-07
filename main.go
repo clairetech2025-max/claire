@@ -364,7 +364,7 @@ func claireUnknownAnswer(q string) string {
 }
 
 func claireReflectiveAnswer() string {
-	return "Understood. Send the task, facts, or document and I will turn it into facts, risks, options, and next steps."
+	return "I understand. Tell me what you are trying to say or explain, and I will help shape it clearly without turning it into an architecture lecture."
 }
 
 func speedTestAnswer() string {
@@ -511,7 +511,7 @@ func buildResponse(q string) string {
 		return "My purpose is to produce useful decision support with controlled recall, policy boundaries, and enough traceability for review."
 	}
 	if lower == "hi" || lower == "hello" || lower == "hey" || strings.Contains(lower, "hello claire") || strings.Contains(lower, "hi claire") {
-		return "Hey. Send the task, document, or decision point."
+		return "Hi. I am here. We can talk normally, or I can help with a document, lesson, decision, or demo when you are ready."
 	}
 	if containsAny(lower, "are you smart", "are you intelligent", "can you reason", "can you think", "prove you", "show me what you can do") {
 		return "Test me with a document, scenario, or decision. I will separate facts from inference, flag anomalies, give the decision path, and escalate where controls are missing."

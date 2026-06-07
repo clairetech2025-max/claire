@@ -93,13 +93,21 @@ def _fingerprint(payload):
     return hashlib.sha256(clean.encode("utf-8")).hexdigest()[:16]
 
 
+def _public_payload(record: dict):
+    return {
+        k: v
+        for k, v in record.items()
+        if k not in {"_score", "verified", "verify_hash", "_verify_hash"} and not str(k).startswith("_")
+    }
+
+
 def _prepare_record(payload):
     record = dict(payload)
+    record["_verify_hash"] = _fingerprint(_public_payload(record))
     flat = _flatten_record(record).strip()
     record["_flat"] = flat
     record["_flat_lower"] = flat.lower()
     record["_tokens"] = sorted(_tokens(flat))
-    record["_verify_hash"] = _fingerprint(record)
     return record
 
 
@@ -197,7 +205,7 @@ def are_recall(query: str, top_k: int = 5):
 
 
 def verify(record: dict):
-    payload = {k: v for k, v in record.items() if k not in {"_score", "verified", "verify_hash", "_verify_hash"}}
+    payload = _public_payload(record)
     expected = _fingerprint(payload)
     return {
         **payload,

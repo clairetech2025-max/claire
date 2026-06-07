@@ -26,6 +26,33 @@ Repo evidence shows ARE server components and query lanes. Drive benchmark evide
 
 Trace IDs and replay endpoints appear in the repo. Public claims should remain conservative until trace persistence, replay, and exact request lifecycle are verified against the active deployed service.
 
+## What Session Capsule Proof Shows
+
+Unique room name: `PROJECT_LANTERN_RELAY`
+
+Origin: Claire-origin continuity concept invented by Lucius Prime with Codex build assistance.
+
+The proof document describes a local Session Capsule Protocol prototype. The reported prototype creates structured capsules, validates required continuity fields, saves JSON and Markdown artifacts, indexes saved capsules, recalls the best capsule for an operational query, and preserves failures, restore points, next safe steps, and do-not-repeat notes.
+
+Reported test evidence:
+
+- `13 passed in 0.15s`
+- capsule creation
+- spoken handoff preservation
+- validation
+- JSON persistence
+- Markdown persistence
+- indexing
+- recall
+- do-not-repeat preservation
+- full round trip
+
+Public-safe wording:
+
+> Claire's Project Lantern Relay prototype demonstrates structured session handoff, local persistence, recall, and do-not-repeat preservation under tested local conditions.
+
+Do not claim this is live production continuity until the prototype is integrated into this repo and verified against the active Claire service.
+
 ## What Uploaded Benchmark Evidence Shows
 
 Drive-supplied PDFs report:
@@ -69,6 +96,7 @@ Do not describe it as production bill-pay unless production controls, compliance
 | Claire detects tampering | Drive tamper test passed | test script and output artifact | "The uploaded benchmark shows mutation detection in the tested capsule model." |
 | Claire is faster than cloud RAG calls | Local recall benchmark suggests speed advantage | direct RAG comparison test | "Claire is designed for low-latency deterministic recall; benchmark evidence should be displayed where available." |
 | Claire has traceability | trace UI/routes/log references | replay test | "Claire exposes decision traces and proof surfaces." |
+| Claire can preserve operational continuity | Project Lantern Relay / Session Capsule proof document | integrate prototype into repo and run tests locally | "Claire's Project Lantern Relay prototype demonstrates structured session handoff and restart-state recall under tested local conditions." |
 
 ## Benchmark Evidence Still Needed
 
@@ -80,6 +108,8 @@ Do not describe it as production bill-pay unless production controls, compliance
 - direct RAG comparison
 - Azure/server benchmark
 - verification of HMAC implementation in active repo
+- Session Capsule prototype folder or imported test artifacts
+- cold-start vs capsule-restart demo output
 
 ## Implementation Evidence Codex Should Verify
 
@@ -90,4 +120,5 @@ Do not describe it as production bill-pay unless production controls, compliance
 - BARE/GYRO/FARE routing
 - benchmark scripts
 - Diode/HMAC implementation
+- Session Capsule creation, validation, persistence, indexing, and recall
 - public proof/status surfaces

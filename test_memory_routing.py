@@ -721,8 +721,9 @@ Relevant internal context was found.
 
     def test_public_identity_query_returns_executive_intro(self):
         source, reply, _trace = build_reply("Who are you, Claire?")
-        self.assertEqual(source, "CLAIRE")
-        self.assertEqual(reply, EXECUTIVE_SELF_DESCRIPTION)
+        self.assertEqual(source, "IDENTITY")
+        self.assertIn("normal chatbot is control", reply)
+        self.assertIn("trace-style explanation", reply)
 
     def test_visible_replies_use_first_person_not_third_person_claire(self):
         reply = conversationalize_self_reference(
@@ -757,10 +758,8 @@ Relevant internal context was found.
         source, reply, _trace = build_reply("What makes you different from a normal chatbot?")
         self.assertEqual(source, "IDENTITY")
         self.assertEqual(reply, system_difference_reply())
-        self.assertIn("I’m Claire", reply)
-        self.assertIn("I’m here to help", reply)
         self.assertIn("normal chatbot is control", reply)
-        self.assertIn("not here to talk down to you", reply)
+        self.assertIn("private reasoning", reply)
         self.assertLessEqual(reply.count("I am"), 1)
         self.assertLessEqual(len(reply.split()), 120)
         self.assertNotIn("Buyer-facing capabilities", reply)
@@ -779,9 +778,8 @@ Relevant internal context was found.
                 self.assertTrue(is_claire_identity_orientation_query(prompt))
                 source, reply, _trace = build_reply(prompt)
                 self.assertEqual(source, "IDENTITY")
-                self.assertIn("I’m Claire", reply)
                 self.assertIn("normal chatbot is control", reply)
-                self.assertIn("not here to talk down to you", reply)
+                self.assertIn("private reasoning", reply)
                 self.assertLessEqual(reply.count("I am"), 1)
                 self.assertLessEqual(len(reply.split()), 120)
                 self.assertNotIn("I am an AI assistant designed to integrate across your Salesforce environment", reply)
@@ -793,7 +791,7 @@ Relevant internal context was found.
             "Can you tell me about your architecture?": ["ARE", "Orientation-before-generation", "policy-before-execution", "Trace/provenance", "Modular integration"],
             "What makes you different from RAG?": ["ordinary RAG", "Claire orients first", "ARE performs governed recall", "policy-before-execution"],
             "How can your design help Salesforce?": ["Salesforce remains the CRM", "governed cognitive infrastructure", "ARE-backed persistent recall", "policy-before-execution"],
-            "Are you a chatbot?": ["I’m Claire", "normal chatbot is control", "not here to talk down to you"],
+            "Are you a chatbot?": ["normal chatbot is control", "trace-style explanation", "private reasoning"],
         }
         for prompt, required in cases.items():
             with self.subTest(prompt=prompt):
@@ -803,6 +801,18 @@ Relevant internal context was found.
                     self.assertIn(item, reply)
                 self.assertNotIn("I summarize data and automate tasks", reply)
                 self.assertNotIn("I sit on top of Sales Cloud", reply)
+
+    def test_private_reasoning_requests_show_trail_not_private_thoughts(self):
+        for prompt in ["How do you think?", "Show your reasoning."]:
+            with self.subTest(prompt=prompt):
+                source, reply, _trace = build_reply(prompt)
+                self.assertEqual(source, "CLAIRE")
+                self.assertIn("show the trail", reply.lower())
+                self.assertIn("trace-style summary", reply)
+                self.assertIn("governance outcomes", reply)
+                self.assertNotIn("chain-of-thought", reply.lower())
+                self.assertNotIn("secret prompts:", reply.lower())
+                self.assertNotIn("scratchpad:", reply.lower())
 
     def test_mid_sentence_diagnostic_has_complete_answer(self):
         prompt = "Why do you keep stopping in the middle of thoughts?"
@@ -1250,7 +1260,7 @@ Relevant internal context was found.
     def test_describe_yourself_routes_to_identity_not_generic_llm(self):
         source, reply, _trace = build_reply("I would like you to describe yourself")
         self.assertEqual(source, "IDENTITY")
-        self.assertIn("not here to talk down to you", reply)
+        self.assertIn("private reasoning", reply)
         self.assertNotIn("navigate complex", reply)
 
     def test_continue_repairs_incomplete_identity_fragment(self):
@@ -1263,7 +1273,7 @@ Relevant internal context was found.
             source, reply, _trace = build_reply("continue")
         self.assertEqual(source, "SESSION")
         self.assertIn("normal chatbot is control", reply)
-        self.assertIn("not here to talk down to you", reply)
+        self.assertIn("private reasoning", reply)
         self.assertNotIn("navigate complex", reply)
 
     def test_ingest_bridge_incident_does_not_use_lesson_plan_memory(self):

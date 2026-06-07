@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-05-22T00:00:00Z",
+  "provider": "local_scaffold",
+  "default_output": "markdown",
+  "environment_variables": {
+    "provider": "CLAIRE_WRITER_PROVIDER",
+    "model": "CLAIRE_WRITER_MODEL",
+    "api_key": "CLAIRE_WRITER_API_KEY",
+    "url": "CLAIRE_WRITER_URL"
+  },
+  "style_rules": [
+    "Do not invent facts.",
+    "Preserve Steve's direct, plainspoken, gritty, honest voice.",
+    "Aim for excellent prose: compression, rhythm, tension, clarity, and precise concrete detail.",
+    "Use author-level craft traits without imitation or pastiche.",
+    "Mark uncertain areas as [NEEDS REVIEW].",
+    "Every draft must say Draft for human review.",
+    "Nothing is published, emailed, uploaded, or approved automatically.",
+    "PDFs are local files only."
+  ]
+}

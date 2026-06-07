@@ -1,0 +1,20 @@
+define flow claire input safety
+  user said something
+  $allowed = execute check_claire_input_safety
+  if not $allowed
+    bot refuse unsafe request
+    stop
+
+define flow claire output safety
+  bot said something
+  $allowed = execute check_claire_output_safety
+  if not $allowed
+    bot refuse unsafe response
+    stop
+
+define bot refuse unsafe request
+  "I can't help with that request as stated. I can help reframe it into a safe, reviewable task."
+
+define bot refuse unsafe response
+  "I need to revise that answer before showing it. It included internal scaffolding or unsafe material."
+

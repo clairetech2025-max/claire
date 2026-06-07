@@ -10,6 +10,7 @@ Claire separates:
 - governance from generation
 - provenance from prompt history
 - orientation from raw retrieval
+- operational continuity from raw chat history
 - trace from normal user output
 
 Core thesis:
@@ -71,6 +72,20 @@ Thematic Anchors are durable memory objects that preserve source links, hashes, 
 
 Status: Prototype / Roadmap unless implementation is verified in repo.
 
+## Session Capsule Protocol
+
+Session Capsules are structured continuity objects that preserve the operational end-state of a work session. They capture current objective, changes, failures, restore points, next safe step, and do-not-repeat notes so the next session can restart accurately instead of starting cold.
+
+They are not raw chat history, generic memory, ordinary search, or RAG. They are a front-end continuity layer for ARE.
+
+Origin: Claire-origin continuity concept invented by Lucius Prime with Codex build assistance.
+
+Unique room name: `PROJECT_LANTERN_RELAY`
+
+See: `docs/CLAIRE_SESSION_CAPSULE_ROOM.md`
+
+Status: Working local prototype evidence exists; repo integration still needs verification before live production claims are expanded.
+
 ## ARE Memory Spine: BARE / GYRO / FARE
 
 Claire separates time-aware memory into:
@@ -82,6 +97,8 @@ Claire separates time-aware memory into:
 Together:
 
 > Past recall -> present orientation -> future projection.
+
+Session Capsules strengthen this spine by giving BARE compact prior-session state, GYRO a cleaner restart bearing, and FARE a safer next-step projection.
 
 ## Provenance and Trace
 
@@ -114,6 +131,7 @@ NVMe pseudo-RAM, zero-copy acceleration, ARM NEON, and VectorIndex should be tre
 | Digital Gravel | Prototype / Roadmap | Evidence needed |
 | SweeperBot | Roadmap | Evidence needed |
 | Thematic Anchors | Prototype / Roadmap | Evidence needed |
+| Session Capsule Protocol / Project Lantern Relay | Claire-origin prototype evidence | Proof document reports 13 passing tests, JSON/Markdown persistence, indexing, recall, and do-not-repeat preservation; repo integration needed |
 | Sentinel policy gate | Prototype / Implemented | Sentinel references exist; verify active path |
 | Lycanthrope drift control | Roadmap / Prototype | Evidence needed |
 | HMAC Diode Capsule | Prototype evidence | Drive benchmark supports; repo verification needed |
@@ -125,6 +143,8 @@ NVMe pseudo-RAM, zero-copy acceleration, ARM NEON, and VectorIndex should be tre
 ## Why Claire Is Different From RAG
 
 RAG retrieves similar documents. Claire is designed to orient before retrieval dominates, separate memory from generation, preserve provenance, apply governance before output, trace why an answer was shaped, maintain continuity across time, block unauthorized lanes, and use memory as infrastructure rather than prompt stuffing.
+
+Session Capsules sharpen this distinction. A capsule is not a retrieved document used to stuff a prompt. It is a structured restart object that preserves operational state, failures, restore points, and next safe steps so recall can re-orient work deliberately.
 
 ## Enterprise Use Cases
 
