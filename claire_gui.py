@@ -49,6 +49,7 @@ try:
     from lane_router import extract_candidates
     from relevance_gate import compact_candidate, gate_retrieval_candidates
     from answer_planner import conceptual_answer, final_answer_mode, should_use_reasoning_first
+    from claire_runtime_router import route_chat_message
 except Exception as e:
     print("memory routing import error:", e)
 
@@ -82,6 +83,14 @@ except Exception as e:
 
     def should_use_reasoning_first(intent: dict):
         return False
+
+    def route_chat_message(q: str, provider_generate, are_recall=None, document_recall=None, useful_reply=None):
+        class _FallbackRoute:
+            source = "GO"
+            reply = provider_generate(q)
+            trace_payload = {"type": "phase_one_route_unavailable", "steps": []}
+            writeback_policy = {}
+        return _FallbackRoute()
 
 
 def load_keys_env():
@@ -6135,6 +6144,28 @@ def _live_posture(governance: dict) -> dict:
     return {"posture": "normal", "freeze_writes": False, "scope": governance.get("scope", "full")}
 
 
+def persist_phase_one_trace(prompt: str, route_result, reply: str) -> str:
+    trace_id = new_trace_id()
+    try:
+        payload = getattr(route_result, "trace_payload", {}) or {}
+        record = {
+            "trace_id": trace_id,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "type": "phase_one_chat_route",
+            "input": str(prompt or "")[:1600],
+            "source": getattr(route_result, "source", "GO"),
+            "route": payload,
+            "writeback_policy": getattr(route_result, "writeback_policy", {}) or {},
+            "reply_preview": str(reply or "")[:700],
+        }
+        os.makedirs(os.path.dirname(TRACE_LOG), exist_ok=True)
+        with open(TRACE_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print("phase one trace write error:", e)
+    return trace_id
+
+
 def persist_conversation_trace(prompt: str, source: str, reply: str) -> str:
     trace_id = new_trace_id()
     try:
@@ -11648,6 +11679,21 @@ def finalize_reply(q: str, source: str, reply: str):
     return source, reply, trace_id
 
 
+def finalize_phase_one_reply(q: str, route_result):
+    source = getattr(route_result, "source", "GO")
+    reply = getattr(route_result, "reply", "")
+    if source != "CREATOR":
+        reply = sanitize_public_reply(reply)
+    reply = clean_visible_reply(reply)
+    if source not in {"DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
+        reply = conversationalize_self_reference(reply)
+    trace_id = persist_phase_one_trace(q, route_result, reply)
+    policy = getattr(route_result, "writeback_policy", {}) or {}
+    if (policy.get("session_turn") or {}).get("allowed", False):
+        remember_turn(q, source, reply)
+    return source, reply, trace_id
+
+
 def is_casual_checkin_query(prompt: str) -> bool:
     cleaned = _clean_for_match(prompt)
     if cleaned in {
@@ -11679,335 +11725,18 @@ def casual_checkin_reply(prompt: str) -> str:
 
 
 def build_reply(q: str):
-    source = "GO"
-    reply = ""
-
     try:
-        recent_context = relevant_recent_context(q)
-        cleaned_q = _clean_for_match(q)
-        if cleaned_q in {"hi", "hello", "hey", "yo", "hello claire", "hi claire"}:
-            reply = "Hey. I'm here. We can talk normally, work through a problem, look at a document, run a demo, or package the next Gumroad/Azure step."
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_casual_checkin_query(q):
-            reply = casual_checkin_reply(q)
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if any(marker in cleaned_q for marker in [
-            "help me figure out what to do next",
-            "what should i do next",
-            "what do i do next",
-            "help me think",
-            "talk this through",
-            "i need help deciding",
-        ]):
-            reply = (
-                "Yes. Let's make it simple.\n\n"
-                "Tell me the situation in one messy paragraph. I will pull out: what matters, what is stuck, what options you have, what I would do first, and what can wait. "
-                "If this is about Claire, Gumroad, Azure, documents, or demos, I can start from the system state we already have."
-            )
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_courtlistener_open_query(q):
-            reply = courtlistener_open_reply(q)
-            source = "COURTLISTENER"
-            return finalize_reply(q, source, reply)
-
-        if is_courtlistener_status_query(q):
-            reply = courtlistener_status_reply()
-            source = "COURTLISTENER"
-            return finalize_reply(q, source, reply)
-
-        if is_courtlistener_retrieval_query(q):
-            reply = courtlistener_retrieval_reply(q)
-            source = "COURTLISTENER"
-            return finalize_reply(q, source, reply)
-
-        if is_writing_task(q):
-            reply = writing_reply(q)
-            source = "WRITING"
-            return finalize_reply(q, source, reply)
-
-        if is_spectacle_governance_demo_query(q):
-            reply = spectacle_demo_reply(q)
-            source = "SPECTACLE"
-            return finalize_reply(q, source, reply)
-
-        if is_memory_handling_query(q):
-            reply = memory_handling_reply()
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_partner_intro_query(q):
-            reply = partner_meeting_intro(last_uploaded_filename())
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if is_partner_problem_query(q):
-            reply = partner_problem_reply()
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if is_partner_demo_flow_query(q):
-            reply = partner_demo_flow_reply(last_uploaded_filename())
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if is_partner_close_query(q):
-            reply = partner_close_reply()
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if is_partner_difference_query(q):
-            reply = partner_difference_reply(q)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if is_partner_speed_query(q):
-            reply = partner_speed_reply(q)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if is_core_architecture_query(q):
-            reply = core_architecture_reply(q)
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_reconstruct_prior_discussion_query(q):
-            reply = reconstruct_prior_discussion_reply(q)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if is_enterprise_system_query(q):
-            reply = enterprise_system_reply(q)
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_informatica_stack_brief_query(q):
-            reply = informatica_stack_brief_reply()
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_public_identity_query(q):
-            reply = self_demo_reply() if is_public_capability_query(q) else EXECUTIVE_SELF_DESCRIPTION
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_creator_query(q):
-            if not CREATOR_MODE_ENABLED:
-                reply = restricted_admin_reply("creator/private lanes")
-                source = "SECURE"
-                return finalize_reply(q, source, reply)
-            reply = creator_reply(q)
-            source = "CREATOR"
-            return finalize_reply(q, source, reply)
-
-        if is_state_parks_case_query(q):
-            reply = restricted_admin_reply("State Parks Case Room and protected legal/evidence memory")
-            source = "SECURE"
-            return finalize_reply(q, source, reply)
-
-        if is_crypto_mode_query(q):
-            reply = restricted_admin_reply("Crypto Mode, Kraken keys, and trading governance")
-            source = "SECURE"
-            return finalize_reply(q, source, reply)
-
-        if is_public_demo_guide_query(q):
-            reply = public_demo_guide_reply()
-            source = "DEMO"
-            return finalize_reply(q, source, reply)
-
-        if is_battleborn_query(q):
-            if PUBLIC_DEMO_BUILD:
-                reply = restricted_admin_reply("developer diagnostics")
-                source = "SECURE"
-                return finalize_reply(q, source, reply)
-            reply = battleborn_reply(q)
-            source = "DEV"
-            return finalize_reply(q, source, reply)
-
-        if is_demo_key_query(q):
-            reply = demo_activation_reply(demo_scenario_from_text(q))
-            source = "DEMO"
-            return finalize_reply(q, source, reply)
-
-        if is_archimedes_alias(cleaned_q):
-            reply = render_demo_payload_as_text(build_demo_payload(q, scenario="archimedes"))
-            source = "DEMO"
-            return finalize_reply(q, source, reply)
-
-        if is_demo_session_query(q):
-            reply = demo_session_reply(q)
-            source = "DEMO"
-            return finalize_reply(q, source, reply)
-
-        if is_demonstration_mode_prompt(q):
-            reply = demonstration_mode_reply(q)
-            source = "DEMONSTRATION"
-            return finalize_reply(q, source, reply)
-
-        if is_system_difference_query(q):
-            reply = system_difference_reply()
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_governance_value_query(q):
-            reply = governance_value_reply()
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_self_demo_query(q):
-            reply = self_demo_reply()
-            source = "SELF-DEMO"
-            return finalize_reply(q, source, reply)
-
-        if (
-            recent_context
-            and any(marker in cleaned_q for marker in ["ride", "riding", "horseback", "tomorrow"])
-            and any(marker in _clean_for_match(recent_context) for marker in ["sore", "feet", "hoof", "hooves", "lame"])
-        ):
-            reply = shape_horse_safety_reply(q, recent_context)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if (
-            any(marker in cleaned_q for marker in ["horse", "horses", "hoof", "hooves"])
-            and any(marker in cleaned_q for marker in ["sore", "tender", "lame", "limping", "feet", "foot"])
-        ):
-            reply = shape_horse_observation_reply(q)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if is_self_diagnosis_query(q):
-            reply = restricted_admin_reply("self-diagnosis")
-            source = "RESTRICTED"
-            return finalize_reply(q, source, reply)
-
-        if is_reflection_query(q):
-            reflection = reflection_reply()
-            if is_useful_reply(reflection):
-                return finalize_reply(q, "REFLECTION", reflection)
-
-        if is_scholar_query(q):
-            scholar = scholar_reply(q)
-            if is_useful_reply(scholar):
-                return finalize_reply(q, "SCHOLAR", scholar)
-
-        if is_ingest_status_query(q):
-            reply = ingest_status_reply()
-            source = "INGEST"
-            return finalize_reply(q, source, reply)
-
-        if "drive research" in cleaned_q or "google drive" in cleaned_q:
-            status = drive_lane_status()
-            if status["connected"]:
-                reply = "Drive Research lane is present and credentials are detected. Use the Drive Research box in the GUI with a focused keyword query."
-            elif status["cache_available"]:
-                reply = "Drive Research lane is present with a local cache available. Use the Drive Research box in the GUI to search cached Drive research results."
-            else:
-                reply = "Drive Research lane is present, but Claire's web app still needs Google Drive credentials. Set CLAIRE_GOOGLE_OAUTH_TOKEN_JSON or CLAIRE_GOOGLE_SERVICE_ACCOUNT_JSON on claire-gui.service, or have Codex prepare a local Drive research cache for Claire to search."
-            source = "DRIVE"
-            return finalize_reply(q, source, reply)
-
-        document_requested = (
-            re.search(r"(search memory|find in memory|document|doc|file|upload|uploaded|dropped|summarize|summary|review this|read this|analyze this|analyze the document)", q.lower())
-            or is_recent_upload_query(q)
+        route_result = route_chat_message(
+            q,
+            provider_generate=lambda prompt: query_llm(prompt, allow_gemini=False),
+            are_recall=query_are,
+            document_recall=search_uploaded_documents,
+            useful_reply=is_useful_reply,
         )
-        if document_requested:
-            document_reply = search_uploaded_documents(q)
-            if is_useful_reply(document_reply):
-                if is_session_solution_query(q):
-                    session_reply = session_reasoning_reply(q)
-                    if is_useful_reply(session_reply):
-                        return finalize_reply(q, "SESSION", session_reply)
-                reply = shape_document_reply(q, document_reply)
-                source = "DOCUMENT"
-                return finalize_reply(q, source, reply)
-
-        if is_session_solution_query(q):
-            session_reply = session_reasoning_reply(q)
-            if is_useful_reply(session_reply):
-                return finalize_reply(q, "SESSION", session_reply)
-
-        query_intent = intent_to_dict(classify_query(q))
-
-        query_intent = intent_to_dict(classify_query(q))
-
-        if should_use_reasoning_first(query_intent):
-            accepted, rejected, candidates = governed_are_recall(q, query_intent, threshold=0.42)
-            reply = conceptual_answer(q, query_intent, accepted)
-            if is_useful_reply(reply):
-                source = "REASONING"
-                persist_routing_trace(q, query_intent, candidates, accepted, rejected, source, reply)
-                return finalize_reply(q, source, reply)
-
-        are_data = query_are(q) if should_use_are(q) else None
-        are_candidates = extract_candidates(are_data)
-        accepted_are, rejected_are = gate_retrieval_candidates(q, query_intent, are_candidates, threshold=0.42)
-        governed_are_data = {"results": [item.get("raw", {"text": item.get("text", "")}) for item in accepted_are]}
-        are_reply = format_are_hit(governed_are_data) if accepted_are else ""
-
-        if is_useful_reply(are_reply) and query_intent.get("source_output_allowed"):
-            reply = shape_are_reply(q, are_reply)
-            source = "ARE"
-            persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
-        elif is_useful_reply(are_reply):
-            reply = query_llm(contextualize_prompt(q), allow_gemini=False)
-            source = "GO"
-            persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
-        elif are_data and re.search(r"\b(search memory|find in memory|remember|recall)\b", q.lower()):
-            reply = shape_quarantined_memory_reply(q)
-            source = "ARE-QUARANTINED"
-            persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
-        elif is_legal_query(q):
-            reply = shape_legal_fallback(q)
-            source = "CLAIRE"
-        elif is_useful_reply(known_general_reply(q)):
-            reply = known_general_reply(q)
-            source = "GENERAL"
-        elif re.search(r"\bants?\b", cleaned_q):
-            reply = practical_howto_reply(q)
-            source = "PRACTICAL"
-        elif should_use_general_engine(q) and is_gemini_available():
-            gemini_system_prompt = (
-                "You are Claire Executive Mode. "
-                "You are using Gemini only as a world-knowledge bridge behind Claire, not as Claire's memory, identity, or authority. "
-                "Answer directly in plain, useful language. "
-                "Use a natural, warm, capable tone. Do not sound like a compliance notice in ordinary conversation. "
-                "Be willing to give a practical opinion or ask one simple follow-up when that would help. "
-                "Do not use poetic, mystical, therapeutic, flirtatious, or roleplay-heavy language. "
-                "Do not claim you stored or learned anything permanently. "
-                "Do not mention source selection, routing, trace, provenance, memory lanes, or internal process. "
-                "Output only the answer intended for the user."
-            )
-            gemini_reply = query_gemini(contextualize_prompt(q), gemini_system_prompt)
-            if is_useful_reply(gemini_reply):
-                reply = gemini_reply
-                source = "GEMINI-BRIDGE"
-            else:
-                practical = practical_howto_reply(q)
-                if is_useful_reply(practical):
-                    reply = practical
-                    source = "PRACTICAL-LIMITED"
-                else:
-                    reply = query_llm(contextualize_prompt(q), allow_gemini=False)
-                    source = "GO"
-        else:
-            reply = query_llm(contextualize_prompt(q))
-            source = "GO"
-
-        reply = re.sub(r"[ \t]+", " ", reply).strip()
-        if not reply:
-            reply = "Hello. How can I help?"
-
+        return finalize_phase_one_reply(q, route_result)
     except Exception as e:
         reply = f"[ERROR] {str(e)}"
-
-    return finalize_reply(q, source, reply)
-
+        return finalize_reply(q, "GO", reply)
 
 def strip_html_response(text: str) -> str:
     body_match = re.search(r"<body[^>]*>(.*?)</body>", text, flags=re.I | re.S)
