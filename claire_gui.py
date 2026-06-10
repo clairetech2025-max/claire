@@ -12141,6 +12141,7 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
         if is_useful_reply(gemini_reply):
             return gemini_reply
 
+    provider_timeout = int(os.getenv("CLAIRE_PROVIDER_TIMEOUT_SECONDS", "180"))
     response = requests.post(
         LLM_URL,
         json={
@@ -12148,7 +12149,7 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
             "temperature": 0.45 if not dev_mode else 0.1,
             "max_tokens": 560 if not dev_mode else 260
         },
-        timeout=45,
+        timeout=provider_timeout,
     )
 
     content_type = response.headers.get("content-type", "").lower()
