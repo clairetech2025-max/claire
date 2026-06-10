@@ -998,6 +998,8 @@ DRIVE_OAUTH_TOKEN_JSON = os.environ.get("CLAIRE_GOOGLE_OAUTH_TOKEN_JSON", "").st
 DRIVE_SERVICE_ACCOUNT_JSON = os.environ.get("CLAIRE_GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 KRAKEN_PUBLIC_API = "https://api.kraken.com/0/public"
 LAST_GEMINI_ERROR = ""
+LAST_TTS_STATUS = "UNKNOWN"
+LAST_TTS_ERROR = ""
 CLAIRE_TIMEZONE = os.environ.get("CLAIRE_TIMEZONE", "America/Los_Angeles")
 EXECUTIVE_SELF_DESCRIPTION = "I'm Claire. I can talk normally, help you think things through, work with documents, run demos, and keep the important parts traceable when it matters."
 EXECUTIVE_SYSTEM_PROMPT = """You are Claire Executive Mode.
@@ -3799,6 +3801,40 @@ function splitSpeechText(text) {
     return chunks.slice(0, 6);
 }
 
+function playBrowserSpeechChunk(text, index, total, runId) {
+    return new Promise((resolve, reject) => {
+        if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+            reject(new Error("browser speech synthesis unavailable"));
+            return;
+        }
+        try {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 0.98;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            utterance.onstart = () => {
+                if (runId !== voiceRunId) return;
+                setVoiceState("SPEAKING");
+                setVoiceMessage(total > 1 ? `BROWSER VOICE ${index}/${total}` : "BROWSER VOICE");
+                activeWave();
+            };
+            utterance.onend = () => {
+                idleWave();
+                resolve();
+            };
+            utterance.onerror = event => {
+                idleWave();
+                reject(new Error((event && event.error) || "browser speech failed"));
+            };
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utterance);
+        } catch (err) {
+            idleWave();
+            reject(err);
+        }
+    });
+}
+
 async function playSpeechChunk(text, index, total, runId) {
     const res = await fetch("/tts", {
         method: "POST",
@@ -3806,10 +3842,10 @@ async function playSpeechChunk(text, index, total, runId) {
         body: JSON.stringify({text})
     });
     if (!res.ok) {
-        setVoiceMessage("VOICE OFFLINE");
-        setVoiceState("IDLE");
-        idleWave();
-        throw new Error("tts failed");
+        setVoiceMessage("TTS LIMITED: using browser voice");
+        setVoiceState("SPEAKING");
+        await playBrowserSpeechChunk(text, index, total, runId);
+        return;
     }
     const blob = await res.blob();
     if (runId !== voiceRunId) return;
@@ -13023,8 +13059,39 @@ async def ask_post(request: Request):
     return JSONResponse({"query": q, "source": source, "reply": reply_text, "trace_id": trace})
 
 
+def voice_runtime_status() -> tuple[str, str]:
+    if not os.getenv("ELEVENLABS_API_KEY", "").strip() or not os.getenv("ELEVENLABS_VOICE_ID", "").strip():
+        return "OFFLINE", "ElevenLabs API key or voice ID is missing."
+    if LAST_TTS_STATUS in {"LIMITED", "OFFLINE"} and LAST_TTS_ERROR:
+        return LAST_TTS_STATUS, LAST_TTS_ERROR
+    return "READY", "ElevenLabs credentials are present. Voice will be verified on the next TTS request."
+
+
+def filesystem_runtime_status() -> dict:
+    upload_dir = Path(UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    usage = shutil.disk_usage(str(upload_dir))
+    files = [p for p in upload_dir.iterdir() if p.is_file()] if upload_dir.exists() else []
+    free_mb = round(usage.free / 1024 / 1024, 1)
+    status = "READY"
+    if free_mb < 128:
+        status = "CRITICAL"
+    elif free_mb < 512:
+        status = "LIMITED"
+    return {
+        "status": status,
+        "upload_dir": str(upload_dir),
+        "writable": os.access(str(upload_dir), os.W_OK),
+        "file_count": len(files),
+        "free_mb": free_mb,
+        "total_mb": round(usage.total / 1024 / 1024, 1),
+        "max_upload_mb": 12,
+    }
+
+
 @app.post("/tts")
 async def tts(request: Request):
+    global LAST_TTS_STATUS, LAST_TTS_ERROR
     data = await request.json()
     text = clean_visible_reply(str(data.get("text", "")).strip())
     if not text:
@@ -13033,7 +13100,9 @@ async def tts(request: Request):
     api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
     voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
     if not api_key or not voice_id:
-        return Response("ElevenLabs key or voice ID missing", status_code=503)
+        LAST_TTS_STATUS = "OFFLINE"
+        LAST_TTS_ERROR = "ElevenLabs key or voice ID missing."
+        return Response(LAST_TTS_ERROR, status_code=503)
 
     try:
         r = requests.post(
@@ -13051,9 +13120,21 @@ async def tts(request: Request):
             timeout=60,
         )
         if r.status_code >= 400:
-            return Response(r.text[:500], status_code=r.status_code)
+            detail = r.text[:500]
+            try:
+                detail_json = r.json()
+                detail = str((detail_json.get("detail") or {}).get("message") or detail_json.get("message") or detail)[:500]
+            except Exception:
+                pass
+            LAST_TTS_STATUS = "LIMITED" if r.status_code in {401, 402, 429} else "OFFLINE"
+            LAST_TTS_ERROR = detail
+            return Response(detail, status_code=r.status_code)
+        LAST_TTS_STATUS = "READY"
+        LAST_TTS_ERROR = ""
         return Response(content=r.content, media_type="audio/mpeg")
     except Exception as e:
+        LAST_TTS_STATUS = "OFFLINE"
+        LAST_TTS_ERROR = str(e)
         return Response(str(e), status_code=500)
 
 
@@ -13291,13 +13372,30 @@ def diagnostic(target: str = Query(...)):
         )
 
     if target == "voice":
-        ready = bool(os.getenv("ELEVENLABS_API_KEY") and os.getenv("ELEVENLABS_VOICE_ID"))
+        voice_status, voice_detail = voice_runtime_status()
         return JSONResponse(
             {
                 "title": "Claire Voice Link",
-                "status": "ONLINE" if ready else "OFFLINE",
-                "detail": "ElevenLabs API key and voice ID are present." if ready else "ElevenLabs key or voice ID is missing.",
-                "next": "Voice is automatic when the ON/OFF toggle is ON; no extra button press needed.",
+                "status": voice_status,
+                "detail": voice_detail,
+                "next": "Voice visualizer animates when TTS audio is produced; if quota is limited, text chat remains available.",
+            }
+        )
+
+    if target in {"filesystem", "files"}:
+        fs = filesystem_runtime_status()
+        return JSONResponse(
+            {
+                "title": "Claire Filesystem",
+                "status": fs["status"],
+                "detail": (
+                    f"Upload directory: {fs['upload_dir']}\n"
+                    f"Writable: {fs['writable']}\n"
+                    f"Files: {fs['file_count']}\n"
+                    f"Free disk: {fs['free_mb']} MB / {fs['total_mb']} MB\n"
+                    f"Max upload per file: {fs['max_upload_mb']} MB"
+                ),
+                "next": "Free disk is limited; keep uploads small until model/data storage is cleaned up.",
             }
         )
 
@@ -13437,7 +13535,7 @@ def status():
     except Exception:
         pass
 
-    voice = "ONLINE" if os.getenv("ELEVENLABS_API_KEY") and os.getenv("ELEVENLABS_VOICE_ID") else "OFFLINE"
+    voice, _voice_detail = voice_runtime_status()
     if not is_gemini_available():
         gemini = "OFFLINE"
     elif LAST_GEMINI_ERROR:
