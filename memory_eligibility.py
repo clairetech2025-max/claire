@@ -61,6 +61,14 @@ def determine_memory_eligibility(normalized_input: dict[str, Any], lane_result: 
             reason="Project-state question requires verified local evidence.",
         )
 
+    if lane == "LEGAL_RESEARCH":
+        return MemoryEligibility(
+            mode=MemoryMode.SUPPORT,
+            allowed_stores=["are"],
+            allowed_lanes=["legal_case", "legal_theory", "compliance"],
+            reason="Explicit legal question may use eligible legal evidence only.",
+        )
+
     if lane == "ACTION_REQUEST":
         return MemoryEligibility(mode=MemoryMode.OFF, reason="Action requests must not be driven by recalled memory in Phase One.")
 

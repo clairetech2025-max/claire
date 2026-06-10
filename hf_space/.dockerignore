@@ -1,0 +1,28 @@
+# secrets and runtime state
+.env
+*.env
+certs/
+*.pem
+*.key
+*.crt
+*.sqlite
+*.db
+data/
+logs/
+*.log
+
+# model weights
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# local build/cache
+.git/
+__pycache__/
+*.pyc
+.venv/
+venv/
+llama.cpp/build/
+node_modules/
+package-lock.json

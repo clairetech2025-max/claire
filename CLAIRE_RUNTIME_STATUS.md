@@ -28,3 +28,14 @@ The Python route now blocks Python-side pre-classification recall and canned fin
 ## Next Required Approval
 
 Wait for `APPROVED TO COMMIT PHASE ONE` before committing or pushing.
+
+## Hugging Face Portable Demo
+
+- Branch: `codex/huggingface-portable-demo`.
+- Deployment folder: `hf_space/`.
+- Default local provider: `CLAIRE_PROVIDER=llama` using Microsoft Phi-3 Mini GGUF downloaded at build/startup.
+- Public port: `7860` for CLAIRE only; llama-server binds to `127.0.0.1:8081`.
+- Demo ARE history: sanitized JSONL at `hf_space/demo_data/are_mem.jsonl`.
+- Model weights, private evidence, databases, credentials, and runtime memory are excluded.
+- Qwen2.5 GGUF and NVIDIA NIM remain replaceable provider profiles through environment variables.
+

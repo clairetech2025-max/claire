@@ -9,6 +9,7 @@ from typing import Any, Callable
 from intent_classifier import classify_query
 from lane_router import extract_candidates
 from memory_eligibility import MemoryEligibility, MemoryMode, determine_memory_eligibility
+from original_are_bridge import read_original_are_history
 from relevance_gate import compact_candidate, gate_retrieval_candidates
 from write_barrier import writeback_decision
 
@@ -89,7 +90,7 @@ def evaluate_authority(normalized: dict[str, Any], lane_result: dict[str, Any]) 
     }
 
 
-def build_governed_prompt(normalized: dict[str, Any], lane_result: dict[str, Any], authority: dict[str, Any], eligibility: MemoryEligibility, admitted: list[dict[str, Any]]) -> str:
+def build_governed_prompt(normalized: dict[str, Any], lane_result: dict[str, Any], authority: dict[str, Any], eligibility: MemoryEligibility, admitted: list[dict[str, Any]], temporal_history: dict[str, Any] | None = None) -> str:
     lines = [
         "Answer this request directly in Claire's normal voice through the selected language model.",
         "Do not reuse a prepared speech. Do not let background records replace the present question.",
@@ -98,6 +99,9 @@ def build_governed_prompt(normalized: dict[str, Any], lane_result: dict[str, Any
         f"Recall mode: {eligibility.mode.value}",
         f"Authority: {authority.get('authority')}",
     ]
+    lines.extend(_format_temporal_history_for_prompt(temporal_history or {}))
+    if _lane_blocks_legal_memory(lane_result.get("lane")):
+        lines.append("Lane isolation: do not use or mention unrelated legal-case, complaint, animal-control, parks-agency, county, party-name, court-pleading, or personal-history material unless explicitly admitted below.")
     if eligibility.required_evidence and not admitted:
         lines.append("Verified evidence available to this route: none.")
     if admitted:
@@ -117,8 +121,12 @@ def route_chat_message(
     are_recall: Callable[[str], Any] | None = None,
     document_recall: Callable[[str], str] | None = None,
     useful_reply: Callable[[str], bool] | None = None,
+    temporal_history_reader: Callable[[], dict[str, Any]] | None = None,
 ) -> RouteResult:
     trace_steps: list[dict[str, Any]] = []
+
+    temporal_history = (temporal_history_reader or (lambda: read_original_are_history(limit=8)))()
+    trace_steps.append({"stage": "preserved_chronological_experience", "payload": _temporal_history_trace_payload(temporal_history)})
 
     normalized = normalize_input(q)
     trace_steps.append({"stage": "normalization", "payload": {"payload_hash": normalized["payload_hash"]}})
@@ -173,13 +181,15 @@ def route_chat_message(
     admitted = _sentinel_diode_admit(accepted, eligibility)
     trace_steps.append({"stage": "sentinel_diode_admission", "payload": {"admitted": len(admitted)}})
 
-    prompt = build_governed_prompt(normalized, lane_result, authority, eligibility, admitted)
+    prompt = build_governed_prompt(normalized, lane_result, authority, eligibility, admitted, temporal_history)
     trace_steps.append({"stage": "generation_permission", "payload": {"provider": "GO", "admitted_context": len(admitted)}})
 
     reply = provider_generate(prompt)
     if useful_reply and not useful_reply(reply):
         reply = ""
-    validation = validate_output(reply, rejected, quarantined)
+    validation = validate_output(reply, rejected, quarantined, lane_result)
+    if validation.get("status") != "passed":
+        reply = "Provider output blocked: cross-lane or quarantined context contamination detected."
     trace_steps.append({"stage": "output_validation", "payload": validation})
 
     write_policy = {
@@ -196,6 +206,7 @@ def route_chat_message(
         "lane": lane_result["lane"],
         "memory_mode": eligibility.mode.value,
         "authority": authority,
+        "temporal_history": _temporal_history_trace_payload(temporal_history),
         "accepted_candidates": [compact_candidate(item) for item in accepted[:5]],
         "rejected_candidates": [compact_candidate(item) for item in rejected[:8]],
         "quarantined_context": quarantined,
@@ -210,16 +221,84 @@ def route_chat_message(
     )
 
 
-def validate_output(reply: str, rejected: list[dict[str, Any]], quarantined: list[dict[str, Any]]) -> dict[str, Any]:
+def _format_temporal_history_for_prompt(temporal_history: dict[str, Any]) -> list[str]:
+    records = list(temporal_history.get("records") or [])
+    quarantined = list(temporal_history.get("quarantined_records") or [])
+    lines = [
+        "PRESERVED CHRONOLOGICAL EXPERIENCE -- READ ONLY",
+        "These records predate the current interpretation.",
+        "Listed order is evidence. The model may interpret these records, but may not rewrite, reorder, summarize away, or treat absence as support.",
+        "If the preserved chronology does not support a claim, state the absence rather than inventing continuity.",
+    ]
+    if not records:
+        reason = str(temporal_history.get("reason") or "No prior chronological experience supplied.")
+        lines.append(f"State: empty. {reason}")
+    else:
+        for item in records:
+            order = item.get("order")
+            ts = item.get("ts")
+            sha = item.get("sha") or ""
+            text = str(item.get("text") or "")
+            lines.append(f"{order}. ts={ts}; sha={sha}; text:")
+            lines.append(text)
+    if quarantined:
+        lines.append(f"Quarantined malformed chronological records: {len(quarantined)}. Do not use them for generation.")
+    return lines
+
+
+def _temporal_history_trace_payload(temporal_history: dict[str, Any]) -> dict[str, Any]:
+    records = list(temporal_history.get("records") or [])
+    return {
+        "status": temporal_history.get("status", "unknown"),
+        "reason": temporal_history.get("reason", ""),
+        "memory_file": temporal_history.get("memory_file", ""),
+        "record_count": len(records),
+        "quarantined_count": len(temporal_history.get("quarantined_records") or []),
+        "records": [
+            {
+                "order": item.get("order"),
+                "line_number": item.get("line_number"),
+                "ts": item.get("ts"),
+                "sha": item.get("sha"),
+            }
+            for item in records[:8]
+        ],
+    }
+
+
+def _lane_blocks_legal_memory(lane: Any) -> bool:
+    return str(lane or "").upper() in {"CASUAL", "CONCEPTUAL", "ACTION_REQUEST", "DOCUMENT_QA"}
+
+
+def _blocked_cross_lane_terms() -> list[str]:
+    return [
+        "steven roth",
+        "seahorse equestrian",
+        "federal complaint",
+        "paloma",
+        "spca",
+        "california state parks",
+        "monterey county",
+        "sean james",
+        "court pleadings",
+    ]
+
+
+def validate_output(reply: str, rejected: list[dict[str, Any]], quarantined: list[dict[str, Any]], lane_result: dict[str, Any] | None = None) -> dict[str, Any]:
     text = str(reply or "")
     blocked_hits = []
     for item in rejected + quarantined:
         candidate_text = " ".join(str(item.get("text") or "").split())
         if len(candidate_text) >= 80 and candidate_text[:80] in text:
             blocked_hits.append(candidate_text[:80])
+    cross_lane_hits = []
+    if lane_result and _lane_blocks_legal_memory(lane_result.get("lane")):
+        lowered = text.lower()
+        cross_lane_hits = [term for term in _blocked_cross_lane_terms() if term in lowered]
     return {
-        "status": "blocked_context_detected" if blocked_hits else "passed",
+        "status": "blocked_context_detected" if blocked_hits or cross_lane_hits else "passed",
         "blocked_context_hits": blocked_hits,
+        "cross_lane_hits": cross_lane_hits,
     }
 
 
@@ -244,6 +323,11 @@ def _phase_one_lane(cleaned: str, legacy: dict[str, Any]) -> str:
         return "DOCUMENT_QA"
     if any(marker in cleaned for marker in ["current branch", "working tree", "repo", "repository", "what files", "project state"]):
         return "PROJECT_STATE"
+    if legacy.get("detected_intent") == "LEGAL_RESEARCH" or (
+        any(marker in cleaned for marker in ["steve's case", "steves case", "legal case", "case context", "federal complaint"])
+        and any(marker in cleaned for marker in ["legal", "case", "court", "complaint", "filing"])
+    ):
+        return "LEGAL_RESEARCH"
     if any(marker in cleaned for marker in ["publish", "upload", "email", "post", "spend", "restart", "delete", "schedule"]):
         return "ACTION_REQUEST"
     if any(marker in cleaned for marker in ["speak spanish", "hablas espanol", "hablas español", "can you speak", "how are you"]):

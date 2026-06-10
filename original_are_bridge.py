@@ -29,8 +29,8 @@ def resolve_memory_path() -> Path | None:
     return None
 
 
-def read_original_are_history(limit: int = 8) -> dict[str, Any]:
-    memory_path = resolve_memory_path()
+def read_original_are_history(limit: int = 8, memory_path: str | Path | None = None) -> dict[str, Any]:
+    memory_path = Path(memory_path) if memory_path is not None else resolve_memory_path()
     if memory_path is None:
         return {
             "status": "empty",

@@ -48,14 +48,16 @@ type promptRequest struct {
 }
 
 type promptResponse struct {
-	Response string `json:"response"`
-	Source   string `json:"source"`
-	OK       bool   `json:"ok"`
+	Response         string `json:"response"`
+	Source           string `json:"source"`
+	OK               bool   `json:"ok"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type providerResult struct {
-	Response string
-	OK       bool
+	Response         string
+	OK               bool
+	ReasoningContent string
 }
 
 func isQuestion(lower string) bool {
@@ -130,10 +132,23 @@ func buildProviderResponse(q string) providerResult {
 		return providerResult{Response: "GO provider unavailable: empty prompt.", OK: false}
 	}
 
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("CLAIRE_PROVIDER")))
+	if provider == "llama" {
+		llamaURL := strings.TrimSpace(os.Getenv("CLAIRE_LLAMA_URL"))
+		if llamaURL == "" {
+			llamaURL = "http://127.0.0.1:8081/v1/chat/completions"
+		}
+		return callOpenAICompatibleProvider(llamaURL, localModelName(), q, "llama")
+	}
+
+	if strings.TrimSpace(os.Getenv("NVIDIA_API_KEY")) != "" {
+		return callNVIDIAProvider(q)
+	}
+
 	upstream := strings.TrimSpace(os.Getenv("CLAIRE_GO_UPSTREAM_URL"))
 	if upstream == "" {
 		return providerResult{
-			Response: "GO provider unavailable: configure CLAIRE_GO_UPSTREAM_URL for dynamic model generation.",
+			Response: "GO provider unavailable: configure NVIDIA_API_KEY for NVIDIA NIM or CLAIRE_GO_UPSTREAM_URL for another dynamic provider.",
 			OK:       false,
 		}
 	}
@@ -148,6 +163,140 @@ func buildProviderResponse(q string) providerResult {
 	return providerResult{Response: strings.TrimSpace(reply), OK: true}
 }
 
+func localModelName() string {
+	model := strings.TrimSpace(os.Getenv("CLAIRE_LOCAL_MODEL_FILE"))
+	if model != "" {
+		return model
+	}
+	model = strings.TrimSpace(os.Getenv("CLAIRE_LOCAL_MODEL_ID"))
+	if model != "" {
+		return model
+	}
+	return "local-llama"
+}
+
+func callOpenAICompatibleProvider(url, model, prompt, source string) providerResult {
+	payload := map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{
+				"role":    "system",
+				"content": "You are the dynamic language provider inside CLAIRE. Answer only from the provided prompt package. Do not invent history or use unrelated memory.",
+			},
+			{"role": "user", "content": prompt},
+		},
+		"temperature": 0.35,
+		"max_tokens":  900,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: providerTimeout()}
+	resp, err := client.Do(req)
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return providerResult{Response: fmt.Sprintf("GO provider unavailable: %s status %d", source, resp.StatusCode), OK: false}
+	}
+
+	visible, reasoning, err := extractProviderVisibleAndReasoning(raw)
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+	if strings.TrimSpace(visible) == "" {
+		return providerResult{Response: "GO provider unavailable: " + source + " returned empty message content.", OK: false}
+	}
+	return providerResult{Response: strings.TrimSpace(visible), OK: true, ReasoningContent: strings.TrimSpace(reasoning)}
+}
+
+func callNVIDIAProvider(prompt string) providerResult {
+	baseURL := strings.TrimSpace(os.Getenv("NVIDIA_NIM_BASE_URL"))
+	if baseURL == "" {
+		baseURL = "https://integrate.api.nvidia.com/v1/chat/completions"
+	}
+	model := strings.TrimSpace(os.Getenv("NVIDIA_NIM_MODEL"))
+	if model == "" {
+		model = "nvidia/llama-3.1-nemotron-70b-instruct"
+	}
+
+	payload := map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{
+				"role":    "system",
+				"content": "You are the dynamic language provider inside CLAIRE. Answer only from the provided prompt package. Do not invent history or use unrelated memory.",
+			},
+			{"role": "user", "content": prompt},
+		},
+		"temperature": 0.35,
+		"max_tokens":  900,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+
+	req, err := http.NewRequest(http.MethodPost, baseURL, bytes.NewBuffer(body))
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(os.Getenv("NVIDIA_API_KEY")))
+
+	client := &http.Client{Timeout: providerTimeout()}
+	resp, err := client.Do(req)
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return providerResult{Response: fmt.Sprintf("GO provider unavailable: NVIDIA NIM status %d", resp.StatusCode), OK: false}
+	}
+
+	visible, reasoning, err := extractProviderVisibleAndReasoning(raw)
+	if err != nil {
+		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
+	}
+	if strings.TrimSpace(visible) == "" {
+		return providerResult{Response: "GO provider unavailable: NVIDIA NIM returned empty message content.", OK: false}
+	}
+	return providerResult{Response: strings.TrimSpace(visible), OK: true, ReasoningContent: strings.TrimSpace(reasoning)}
+}
+
+func providerTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("CLAIRE_PROVIDER_TIMEOUT_SECONDS"))
+	if raw == "" {
+		return 60 * time.Second
+	}
+	parsed, err := time.ParseDuration(raw + "s")
+	if err != nil || parsed <= 0 {
+		return 60 * time.Second
+	}
+	return parsed
+}
+
 func callDynamicProvider(upstream, prompt string) (string, error) {
 	payload := map[string]any{
 		"prompt":      prompt,
@@ -159,7 +308,7 @@ func callDynamicProvider(upstream, prompt string) (string, error) {
 		return "", err
 	}
 
-	client := &http.Client{Timeout: 45 * time.Second}
+	client := &http.Client{Timeout: providerTimeout()}
 	resp, err := client.Post(upstream, "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		return "", err
@@ -179,6 +328,35 @@ func callDynamicProvider(upstream, prompt string) (string, error) {
 		return "", err
 	}
 	return text, nil
+}
+
+func extractProviderVisibleAndReasoning(raw []byte) (string, string, error) {
+	var generic map[string]any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return "", "", err
+	}
+
+	if choices, ok := generic["choices"].([]any); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]any); ok {
+			if message, ok := choice["message"].(map[string]any); ok {
+				content, _ := message["content"].(string)
+				reasoning := firstString(message, "reasoning_content", "reasoning", "reasoningContent")
+				return strings.TrimSpace(content), strings.TrimSpace(reasoning), nil
+			}
+		}
+	}
+
+	text, err := extractProviderText(raw)
+	return text, "", err
+}
+
+func firstString(data map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if val, ok := data[key].(string); ok && strings.TrimSpace(val) != "" {
+			return val
+		}
+	}
+	return ""
 }
 
 func extractProviderText(raw []byte) (string, error) {
@@ -229,9 +407,10 @@ func askHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		result := buildProviderResponse(q)
 		_ = json.NewEncoder(w).Encode(promptResponse{
-			Response: result.Response,
-			Source:   "go",
-			OK:       result.OK,
+			Response:         result.Response,
+			Source:           "go",
+			OK:               result.OK,
+			ReasoningContent: result.ReasoningContent,
 		})
 		return
 	}
