@@ -186,7 +186,7 @@ func callOpenAICompatibleProvider(url, model, prompt, source string) providerRes
 			{"role": "user", "content": prompt},
 		},
 		"temperature": 0.35,
-		"max_tokens":  900,
+		"max_tokens":  providerMaxTokens(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -230,6 +230,7 @@ func callNVIDIAProvider(prompt string) providerResult {
 	if baseURL == "" {
 		baseURL = "https://integrate.api.nvidia.com/v1/chat/completions"
 	}
+	baseURL = normalizeChatCompletionsURL(baseURL)
 	model := strings.TrimSpace(os.Getenv("NVIDIA_NIM_MODEL"))
 	if model == "" {
 		model = "nvidia/llama-3.1-nemotron-70b-instruct"
@@ -245,7 +246,7 @@ func callNVIDIAProvider(prompt string) providerResult {
 			{"role": "user", "content": prompt},
 		},
 		"temperature": 0.35,
-		"max_tokens":  900,
+		"max_tokens":  providerMaxTokens(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -283,6 +284,27 @@ func callNVIDIAProvider(prompt string) providerResult {
 		return providerResult{Response: "GO provider unavailable: NVIDIA NIM returned empty message content.", OK: false}
 	}
 	return providerResult{Response: strings.TrimSpace(visible), OK: true, ReasoningContent: strings.TrimSpace(reasoning)}
+}
+
+func normalizeChatCompletionsURL(raw string) string {
+	url := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if strings.HasSuffix(url, "/chat/completions") {
+		return url
+	}
+	return url + "/chat/completions"
+}
+
+func providerMaxTokens() int {
+	raw := strings.TrimSpace(os.Getenv("CLAIRE_PROVIDER_MAX_TOKENS"))
+	if raw == "" {
+		return 2048
+	}
+	var parsed int
+	_, err := fmt.Sscanf(raw, "%d", &parsed)
+	if err != nil || parsed <= 0 {
+		return 2048
+	}
+	return parsed
 }
 
 func providerTimeout() time.Duration {
