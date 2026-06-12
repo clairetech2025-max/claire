@@ -1,0 +1,19 @@
+{
+  "positioning": "CLAIRE as governed runtime around replaceable model brains such as Nemotron",
+  "sequence": [
+    "Developer Program first",
+    "technical reproducibility next",
+    "Inception after incorporation / website / contacts"
+  ],
+  "technical_reproducibility_package": [
+    "repo",
+    "commit",
+    "commands",
+    "benchmark",
+    "demo",
+    "validation"
+  ],
+  "business_gate": "incorporation, website, contacts, and external presentation readiness",
+  "technical_gate": "reproducible runtime and tests",
+  "language": "engineer-facing founder language; avoid hype and weak self-defeating phrasing"
+}

@@ -1,0 +1,11 @@
+anti_drift_rules:
+  - do_not_invent_current_facts
+  - do_not_forget_known_roles
+  - do_not_confuse_claire_person_with_claire_system
+  - horses_are_central_mission_assets_not_side_project
+  - veritas_is_financial_intelligence_station_not_gambling_bot
+  - avoid_weak_invention_language_without_market_context
+  - live_trading_requires_hard_gates_passphrase_risk_governor_kill_switch_and_external_confirmation
+  - legal_and_tax_answers_require_professional_review_caveats
+  - preserve_nvidia_lane_sequence
+  - nemotron_must_be_downstream_of_runtime_context
