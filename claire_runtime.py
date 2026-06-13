@@ -60,6 +60,9 @@ class ClaireRuntime:
         lane = lane_result.lane
         full_truth = load_current_truth()
         current_truth = truth_for_lane(lane, full_truth)
+        subsystem_status = self._subsystem_status_for_lane(lane)
+        if subsystem_status:
+            current_truth["authorized_subsystem_status"] = subsystem_status
         entities = identify_entities(normalized)
         entity_names = [entity["name"] for entity in entities]
         eligibility = evaluate_memory_eligibility(normalized, lane)
@@ -144,12 +147,14 @@ class ClaireRuntime:
             "memory_written": memory_written,
             "memory_event_id": (memory_event or {}).get("memory_id"),
             "runtime_report": runtime_report,
+            "authorized_subsystem_status": subsystem_status,
             "steps": [
                 "input_normalization",
                 "c3rp_lane_classification",
                 "memory_eligibility_review",
                 "are_chronological_recall",
                 "current_truth_loading",
+                "authorized_subsystem_inspection",
                 "context_building",
                 "risk_authority_gating",
                 "nemotron_prompt_construction",
@@ -162,6 +167,47 @@ class ClaireRuntime:
         if self.memory_store is not None:
             self.memory_store.append_session_trace(trace_id, user_id, session_id, lane, trace_record)
         return result
+
+    def _subsystem_status_for_lane(self, lane: str) -> dict[str, Any]:
+        if lane == "TRADING_STATION":
+            from veritas_adapter import (
+                get_kill_switch_status,
+                get_kraken_status,
+                get_market_data_status,
+                get_paper_trade_summary,
+                get_risk_status,
+                get_trading_station_status,
+            )
+
+            return {
+                "subsystem": "Veritas",
+                "memory_authority": False,
+                "trading_station": get_trading_station_status(),
+                "kraken": get_kraken_status(),
+                "market_data": get_market_data_status(),
+                "paper_trades": get_paper_trade_summary(),
+                "risk": get_risk_status(),
+                "kill_switch": get_kill_switch_status(),
+            }
+        if lane == "LEGAL_CASE":
+            from claire_courtlistener import (
+                check_case_updates,
+                get_courtlistener_status,
+                get_legal_monitor_summary,
+                get_recent_docket_events,
+                get_tracked_cases,
+            )
+
+            return {
+                "subsystem": "CourtListener",
+                "memory_authority": False,
+                "courtlistener": get_courtlistener_status(),
+                "tracked_cases": get_tracked_cases(),
+                "recent_docket_events": get_recent_docket_events(),
+                "case_updates": check_case_updates(),
+                "summary": get_legal_monitor_summary(),
+            }
+        return {}
 
     def handle_demo_message(
         self,
@@ -390,6 +436,48 @@ class ClaireRuntime:
         legacy = c3rp_route.get("legacy_intent") or {}
         lane = base.lane
         reason = f"C3RP route={c3rp_lane}; {base.reason}"
+        finance_markers = [
+            "crypto",
+            "kraken",
+            "trading",
+            "paper trade",
+            "paper trading",
+            "live trade",
+            "market status",
+            "ohlcv",
+            "btc",
+            "bitcoin",
+            "eth",
+            "ethereum",
+            "sol",
+            "xrp",
+            "buy btc",
+            "sell btc",
+            "buy bitcoin",
+            "sell bitcoin",
+        ]
+        legal_monitor_markers = [
+            "courtlistener",
+            "court listener",
+            "court_listener",
+            "docket",
+            "pacer",
+            "recap",
+            "case update",
+            "case updates",
+            "court filing",
+            "legal filing",
+            "legal monitor",
+            "tracked case",
+            "tracked cases",
+        ]
+        lowered_message = str(message or "").lower()
+        if any(marker in lowered_message for marker in finance_markers):
+            lane = "TRADING_STATION"
+            reason = f"C3RP route={c3rp_lane}; finance/trading marker admitted to TRADING_STATION."
+        if any(marker in lowered_message for marker in legal_monitor_markers):
+            lane = "LEGAL_CASE"
+            reason = f"C3RP route={c3rp_lane}; legal-monitor marker admitted to LEGAL_CASE."
 
         if c3rp_lane == "LEGAL_RESEARCH":
             lane = "LEGAL_CASE"
@@ -614,10 +702,12 @@ class ClaireRuntime:
     def _risk_authority_gate(self, lane: str, message: str) -> tuple[str, list[str]]:
         text = message.lower()
         risks: list[str] = []
-        if lane == "TRADING_STATION" and any(term in text for term in ["buy now", "sell now", "place order", "live trade"]):
+        if lane == "TRADING_STATION" and any(term in text for term in ["buy now", "sell now", "buy ", "sell ", "place order", "execute", "live trade"]):
             risks.append("Live trading requires Veritas live gates, passphrase, risk governor, kill switch check, and external confirmation.")
         if lane == "LEGAL_CASE":
             risks.append("Legal lane requires source gating and no professional-certainty claims.")
+            if any(term in text for term in ["file a motion", "file motion", "submit filing", "e-file", "efile", "file a pleading", "file pleading", "serve papers"]):
+                risks.append("Legal filing automation is blocked from normal chat.")
         if any(term in text for term in ["password", "private key", "social security", "ssn"]):
             risks.append("Sensitive data detected.")
         return ("high" if risks else "low", risks)

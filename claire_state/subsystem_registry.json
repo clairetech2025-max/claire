@@ -1,0 +1,86 @@
+{
+  "subsystems": [
+    {
+      "subsystem_name": "ARE",
+      "subsystem_type": "chronological_memory_authority",
+      "absolute_path": "/home/LuciusPrime/original_are.pyiginal_are.py/are.py",
+      "memory_path": "/home/LuciusPrime/original_are.pyiginal_are.py/are_data/are_mem.jsonl",
+      "authority_role": "CLAIRE chronological durable memory",
+      "read_allowed": true,
+      "write_allowed": true,
+      "default_runtime_authority": true,
+      "memory_authority": true,
+      "lane": "ALL_MEMORY",
+      "notes": "Original ARE append-only JSONL authority. The model reads the past but does not own it."
+    },
+    {
+      "subsystem_name": "Trace",
+      "subsystem_type": "runtime_audit_ledger",
+      "absolute_path": "/home/LuciusPrime/claire/data/claire_runtime_traces.jsonl",
+      "authority_role": "runtime audit evidence and replay",
+      "read_allowed": true,
+      "write_allowed": true,
+      "default_runtime_authority": false,
+      "memory_authority": false,
+      "lane": "AUDIT",
+      "notes": "Trace is audit evidence, not CLAIRE memory."
+    },
+    {
+      "subsystem_name": "CurrentTruth",
+      "subsystem_type": "canonical_project_state",
+      "absolute_path": "/home/LuciusPrime/claire/claire_state",
+      "authority_role": "canonical project state files",
+      "read_allowed": true,
+      "write_allowed": true,
+      "default_runtime_authority": false,
+      "memory_authority": false,
+      "lane": "CURRENT_TRUTH",
+      "notes": "Current Truth outranks old memory for known project identity and state."
+    },
+    {
+      "subsystem_name": "CLAIRERuntime",
+      "subsystem_type": "executive_runtime_repo",
+      "absolute_path": "/home/LuciusPrime/claire",
+      "authority_role": "governed runtime orchestration",
+      "read_allowed": true,
+      "write_allowed": true,
+      "default_runtime_authority": false,
+      "memory_authority": false,
+      "lane": "CLAIRE_SYSTEM_ARCHITECTURE",
+      "notes": "Executive runtime. Nemotron is downstream language engine only."
+    },
+    {
+      "subsystem_name": "Veritas",
+      "subsystem_type": "financial_intelligence_monitor",
+      "absolute_path": "/home/LuciusPrime/claire/veritas",
+      "ledger_path": "/home/LuciusPrime/claire/veritas/veritas_system_ledger.db",
+      "market_data_path": "/home/LuciusPrime/claire/data/kraken_history",
+      "paper_trade_log": "/home/LuciusPrime/claire/data/crypto_paper_trades.jsonl",
+      "backtest_report_path": "/home/LuciusPrime/claire/veritas/.veritas_backtest_report.json",
+      "kill_switch_path": "/home/LuciusPrime/claire/veritas/VERITAS_KILL_SWITCH",
+      "authority_role": "market data, Kraken monitoring, paper-trade ledger, risk checks",
+      "read_allowed": true,
+      "write_allowed": false,
+      "default_runtime_authority": false,
+      "memory_authority": false,
+      "lane": "TRADING_STATION",
+      "notes": "Existing Kraken/crypto subsystem. Not CLAIRE memory. Lane-authorized monitoring only."
+    },
+    {
+      "subsystem_name": "CourtListener",
+      "subsystem_type": "legal_docket_monitor",
+      "absolute_path": "/home/LuciusPrime/claire/claire_courtlistener.py",
+      "external_repo_path": "/home/LuciusPrime/claire_repos/claire-veritas-legal",
+      "cases_path": "/home/LuciusPrime/claire_repos/claire-veritas-legal/memory/veritas_cases.jsonl",
+      "cache_path": "/home/LuciusPrime/claire_repos/claire-veritas-legal/memory/veritas_cache.jsonl",
+      "traces_path": "/home/LuciusPrime/claire_repos/claire-veritas-legal/memory/veritas_traces.jsonl",
+      "authority_role": "legal docket monitoring, case updates, public court-data research",
+      "read_allowed": true,
+      "write_allowed": false,
+      "default_runtime_authority": false,
+      "memory_authority": false,
+      "lane": "LEGAL_CASE",
+      "notes": "Existing CourtListener/legal monitor subsystem. Not CLAIRE memory. No filing automation from chat."
+    }
+  ]
+}

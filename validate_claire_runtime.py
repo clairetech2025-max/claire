@@ -6,7 +6,9 @@ from pathlib import Path
 from are_memory_store import AREMemoryStore, MemoryEvent
 from claire_runtime import ClaireRuntime
 from context_builder import build_context_packet, render_context_packet
-from current_truth_loader import load_current_truth
+import claire_courtlistener
+import veritas_adapter
+from current_truth_loader import get_subsystem_entry, load_current_truth, load_subsystem_registry
 from entity_registry import identify_entities
 from lane_classifier import classify_lane
 from language_guard import strengthen_confidence_language
@@ -31,6 +33,30 @@ def run() -> None:
         assert_true(classify_lane("NVIDIA Nemotron reproducible benchmark").lane == "NVIDIA_PATHWAY", "NVIDIA lane classification failed")
         assert_true(classify_lane("Pedro needs hay support").lane == "HORSE_STEWARDSHIP", "Horse lane classification failed")
         assert_true(classify_lane("Veritas backtest on Kraken OHLCV").lane == "TRADING_STATION", "Trading lane classification failed")
+
+        registry = load_subsystem_registry()
+        veritas = get_subsystem_entry("Veritas")
+        courtlistener = get_subsystem_entry("CourtListener")
+        are = get_subsystem_entry("ARE")
+        assert_true(isinstance(registry.get("subsystems"), list) and registry["subsystems"], "Subsystem registry did not load")
+        assert_true(veritas and veritas["lane"] == "TRADING_STATION", "Veritas subsystem is not registered as TRADING_STATION")
+        assert_true(courtlistener and courtlistener["lane"] == "LEGAL_CASE", "CourtListener subsystem is not registered as LEGAL_CASE")
+        assert_true(are and are["memory_authority"] is True and are["default_runtime_authority"] is True, "ARE is not registered as default memory authority")
+        assert_true(veritas["memory_authority"] is False and courtlistener["memory_authority"] is False, "Monitored subsystems became CLAIRE memory")
+
+        original_veritas_loader = veritas_adapter.get_subsystem_entry
+        veritas_adapter.get_subsystem_entry = lambda name: None
+        try:
+            assert_true(veritas_adapter.get_trading_station_status()["status"] == "not_configured", "Missing Veritas registry did not fail safely")
+        finally:
+            veritas_adapter.get_subsystem_entry = original_veritas_loader
+
+        original_court_loader = claire_courtlistener.get_subsystem_entry
+        claire_courtlistener.get_subsystem_entry = lambda name: None
+        try:
+            assert_true(claire_courtlistener.get_courtlistener_status()["status"] == "not_configured", "Missing CourtListener registry did not fail safely")
+        finally:
+            claire_courtlistener.get_subsystem_entry = original_court_loader
 
         truth = load_current_truth()
         founding = truth["founding_team"]
@@ -103,6 +129,50 @@ def run() -> None:
         assert_true(nv["lane"] == "NVIDIA_PATHWAY", "Runtime failed NVIDIA lane")
         assert_true("Technical gate" in nv["answer"], "NVIDIA mode did not preserve reproducibility language")
 
+        crypto = runtime.handle_user_message(
+            "steve",
+            "s1",
+            "crypto status on Kraken",
+            {"provider_generate": lambda messages, config: "Trading station status is inspection-only from chat."},
+        )
+        assert_true(crypto["lane"] == "TRADING_STATION", "Crypto chat did not enter TRADING_STATION lane")
+        crypto_trace = traces.get(crypto["trace_id"])
+        assert_true(crypto_trace is not None, "Trading lane response did not write trace")
+        assert_true(crypto_trace["authorized_subsystem_status"]["subsystem"] == "Veritas", "Trading lane did not inspect registered Veritas subsystem")
+        assert_true(crypto_trace["authorized_subsystem_status"]["memory_authority"] is False, "Veritas inspection became memory authority")
+
+        legal_monitor = runtime.handle_user_message(
+            "steve",
+            "s1",
+            "Check CourtListener docket updates.",
+            {"provider_generate": lambda messages, config: "CourtListener monitoring is source-gated and advisory only."},
+        )
+        assert_true(legal_monitor["lane"] == "LEGAL_CASE", "CourtListener chat did not enter LEGAL_CASE lane")
+        legal_trace = traces.get(legal_monitor["trace_id"])
+        assert_true(legal_trace is not None, "Legal monitor response did not write trace")
+        assert_true(legal_trace["authorized_subsystem_status"]["subsystem"] == "CourtListener", "Legal lane did not inspect registered CourtListener subsystem")
+        assert_true(legal_trace["authorized_subsystem_status"]["memory_authority"] is False, "CourtListener inspection became memory authority")
+
+        live = runtime.handle_user_message(
+            "steve",
+            "s1",
+            "Place a live trade to buy BTC now.",
+            {"provider_generate": lambda messages, config: "Normal chat is inspection-only; live trading requires a separate gated execution path."},
+        )
+        assert_true(live["lane"] == "TRADING_STATION", "Live trade request did not enter trading lane")
+        assert_true(live["risk_level"] == "high", "Live trade request was not high risk")
+        assert_true("inspection-only" in live["answer"].lower() and "gated execution" in live["answer"].lower(), "Live trade request did not remain non-executing")
+
+        filing = runtime.handle_user_message(
+            "steve",
+            "s1",
+            "Use CourtListener to file a motion today.",
+            {"provider_generate": lambda messages, config: "Normal chat cannot file legal documents; it can only summarize monitored docket evidence."},
+        )
+        assert_true(filing["lane"] == "LEGAL_CASE", "Legal filing request did not enter LEGAL_CASE lane")
+        assert_true(filing["risk_level"] == "high", "Legal filing request was not high risk")
+        assert_true("cannot file" in filing["answer"].lower(), "Legal filing request did not remain non-executing")
+
         demo = runtime.handle_user_message("steve", "s1", "Schedule a horseback ride tomorrow at 10am", {"demo_mode": True})
         assert_true(demo["demo_mode"] is True, "Demo mode flag missing")
         assert_true(demo["input_received"] == "Schedule a horseback ride tomorrow at 10am", "Demo input not preserved verbatim")
@@ -111,8 +181,11 @@ def run() -> None:
         replayed = runtime.get_trace(demo["trace_id"])
         assert_true(replayed is not None and replayed["trace_id"] == demo["trace_id"], "Demo trace replay failed")
 
-        assert_true("financial intelligence" in str(get_trading_station_status()).lower() or "paper" in str(get_trading_station_status()).lower(), "Veritas status adapter failed")
+        trading_status = get_trading_station_status()
+        assert_true(trading_status.get("memory_authority") is False, "Veritas status adapter claims memory authority")
+        assert_true("financial intelligence" in str(trading_status).lower() or "paper" in str(trading_status).lower(), "Veritas status adapter failed")
         assert_true("active" in get_kill_switch_status(), "Kill switch adapter failed")
+        assert_true(claire_courtlistener.get_courtlistener_status().get("memory_authority") is False, "CourtListener status adapter claims memory authority")
         assert_true("is valuable; market recognition depends on validation and structure" in strengthen_confidence_language("This may be valuable."), "Confidence guard failed")
 
     print("validate_claire_runtime: all checks passed")
