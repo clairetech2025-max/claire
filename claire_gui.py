@@ -2539,14 +2539,16 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
 .voice-visual-inline {
     position: fixed;
-    left: 288px;
-    right: 288px;
-    bottom: 8px;
+    left: clamp(190px, 21vw, 318px);
+    right: clamp(190px, 21vw, 318px);
+    top: 58px;
     z-index: 80;
     grid-column: 2 / 3;
     width: auto;
-    margin: -6px 0 0 0;
+    margin: 0;
     pointer-events: none;
+    opacity: 0.96;
+    mix-blend-mode: screen;
 }
 
 .wave-wrap {
@@ -2556,7 +2558,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     --wave-pink-r: 255;
     --wave-pink-g: 54;
     --wave-pink-b: 214;
-    height: 132px;
+    height: 152px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2568,7 +2570,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
 .wave-stage {
     width: 100%;
-    height: 128px;
+    height: 148px;
     overflow: hidden;
     position: relative;
 }
@@ -2679,6 +2681,8 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         grid-column: 1 / -1;
         left: 14px;
         right: 14px;
+        top: auto;
+        bottom: 10px;
     }
 
     .monitor-grid {
@@ -2918,6 +2922,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         left: 8px;
         right: 8px;
         bottom: 6px;
+        top: auto;
     }
 
     .wave-wrap {
@@ -3260,7 +3265,7 @@ Trace ID: NONE</div>
 </div>
 
 <script>
-const CLIENT_BUILD = "claire-gui-voice-visualizer-restored-20260613-002";
+const CLIENT_BUILD = "claire-gui-voice-visualizer-floating-20260614-001";
 const LAST_CLIENT_BUILD = localStorage.getItem("claireClientBuild");
 if (LAST_CLIENT_BUILD !== CLIENT_BUILD) {
     localStorage.setItem("claireClientBuild", CLIENT_BUILD);
@@ -3283,6 +3288,9 @@ let voiceMeterFrame = null;
 let audioSource = null;
 let browserVoiceFrame = null;
 let browserVoicePulse = 0;
+let browserVoiceTextProfile = [];
+let browserVoiceStartedAt = 0;
+let browserVoiceDuration = 1;
 let voiceRunId = 0;
 let recognition = null;
 let micListening = false;
@@ -3714,10 +3722,24 @@ function stopVoiceMeter() {
 }
 
 function browserVoiceKick(strength = 1) {
-    browserVoicePulse = Math.min(1.4, Math.max(browserVoicePulse, strength));
+    browserVoicePulse = Math.min(1.8, Math.max(browserVoicePulse, strength));
 }
 
-function startBrowserVoiceMeter(runId, label) {
+function buildSpeechProfile(text) {
+    const words = String(text || "").match(/[A-Za-z0-9']+|[,.!?;:]/g) || [];
+    const profile = [];
+    words.forEach(token => {
+        const punct = /^[,.!?;:]$/.test(token);
+        const len = token.length;
+        let amp = punct ? 0.08 : Math.min(1, 0.34 + len / 13);
+        if (/^[A-Z0-9]{2,}$/.test(token)) amp += 0.16;
+        if (/[!?]/.test(token)) amp += 0.18;
+        profile.push(Math.min(1.25, amp));
+    });
+    return profile.length ? profile : [0.22, 0.38, 0.24, 0.46, 0.18];
+}
+
+function startBrowserVoiceMeter(runId, label, text = "") {
     const wrap = document.getElementById("waveWrap");
     if (!wrap) return;
     if (idleFrame) {
@@ -3731,6 +3753,9 @@ function startBrowserVoiceMeter(runId, label) {
     activeWave();
     setVoiceState("SPEAKING");
     setVoiceMessage(label || "BROWSER VOICE");
+    browserVoiceTextProfile = buildSpeechProfile(text);
+    browserVoiceStartedAt = performance.now();
+    browserVoiceDuration = Math.max(1200, browserVoiceTextProfile.length * 185);
 
     function meter() {
         if (runId !== voiceRunId || !voiceEnabled) {
@@ -3739,18 +3764,26 @@ function startBrowserVoiceMeter(runId, label) {
             return;
         }
         const t = performance.now() / 1000;
-        browserVoicePulse *= 0.82;
-        const speechBeat = Math.abs(Math.sin(t * 18.0)) * 0.22 + Math.abs(Math.sin(t * 31.0)) * 0.12;
-        const level = Math.min(1, 0.12 + speechBeat + browserVoicePulse);
+        const elapsed = performance.now() - browserVoiceStartedAt;
+        const profileIndex = Math.min(
+            browserVoiceTextProfile.length - 1,
+            Math.max(0, Math.floor((elapsed / browserVoiceDuration) * browserVoiceTextProfile.length))
+        );
+        const wordAmp = browserVoiceTextProfile[profileIndex] || 0.24;
+        browserVoicePulse *= 0.86;
+        const speechBeat =
+            Math.abs(Math.sin(t * 21.0 + profileIndex * 0.9)) * 0.18 +
+            Math.abs(Math.sin(t * 34.0 - profileIndex * 0.42)) * 0.10;
+        const level = Math.min(1, 0.08 + wordAmp * 0.62 + speechBeat + browserVoicePulse * 0.55);
         const samples = [];
         const count = 260;
         for (let i = 0; i < count; i++) {
             const p = i / (count - 1);
-            const envelope = 0.24 + Math.pow(Math.sin(Math.PI * p), 0.55) * 0.76;
+            const envelope = 0.18 + Math.pow(Math.sin(Math.PI * p), 0.48) * 0.82;
             const wave =
-                Math.sin(p * Math.PI * 14 + t * 15.0) * 0.20 +
-                Math.sin(p * Math.PI * 31 - t * 11.0) * 0.08 +
-                Math.sin(p * Math.PI * 51 + t * 7.0) * 0.035;
+                Math.sin(p * Math.PI * (12 + wordAmp * 8) + t * (14.0 + wordAmp * 8)) * 0.24 +
+                Math.sin(p * Math.PI * (29 + wordAmp * 11) - t * 12.5) * 0.10 +
+                Math.sin(p * Math.PI * 53 + t * 7.0 + profileIndex) * 0.04;
             samples.push(wave * envelope * level);
         }
         drawWave(samples, level);
@@ -3881,11 +3914,12 @@ function playBrowserSpeechChunk(text, index, total, runId) {
             utterance.onstart = () => {
                 if (runId !== voiceRunId) return;
                 browserVoiceKick(1.0);
-                startBrowserVoiceMeter(runId, total > 1 ? `BROWSER VOICE ${index}/${total}` : "BROWSER VOICE");
+                startBrowserVoiceMeter(runId, total > 1 ? `BROWSER VOICE ${index}/${total}` : "BROWSER VOICE", text);
             };
             utterance.onboundary = event => {
                 if (runId !== voiceRunId) return;
-                browserVoiceKick(String((event && event.name) || "") === "sentence" ? 1.25 : 0.95);
+                const boundaryName = String((event && event.name) || "");
+                browserVoiceKick(boundaryName === "sentence" ? 1.35 : 1.05);
             };
             utterance.onend = () => {
                 if (browserVoiceFrame) {
