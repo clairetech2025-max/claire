@@ -3265,7 +3265,7 @@ Trace ID: NONE</div>
 </div>
 
 <script>
-const CLIENT_BUILD = "claire-gui-voice-visualizer-floating-20260614-001";
+const CLIENT_BUILD = "claire-gui-voice-visualizer-ribbon-20260614-001";
 const LAST_CLIENT_BUILD = localStorage.getItem("claireClientBuild");
 if (LAST_CLIENT_BUILD !== CLIENT_BUILD) {
     localStorage.setItem("claireClientBuild", CLIENT_BUILD);
@@ -3284,6 +3284,7 @@ let currentAudio = null;
 let audioContext = null;
 let analyser = null;
 let analyserData = null;
+let analyserFreqData = null;
 let voiceMeterFrame = null;
 let audioSource = null;
 let browserVoiceFrame = null;
@@ -3291,6 +3292,8 @@ let browserVoicePulse = 0;
 let browserVoiceTextProfile = [];
 let browserVoiceStartedAt = 0;
 let browserVoiceDuration = 1;
+let browserVoiceLastBoundaryAt = 0;
+let browserVoiceTempoMs = 190;
 let voiceRunId = 0;
 let recognition = null;
 let micListening = false;
@@ -3401,7 +3404,7 @@ function resizeVoiceCanvas() {
     canvas.height = Math.max(1, Math.floor(rect.height * ratio));
 }
 
-function drawWave(samples, intensity = 0.25) {
+function drawWave(samples, intensity = 0.25, tempo = 1, detail = 0.35) {
     const canvas = document.getElementById("voiceCanvas");
     if (!canvas) return;
     resizeVoiceCanvas();
@@ -3412,6 +3415,10 @@ function drawWave(samples, intensity = 0.25) {
     const color = moodColors[currentMood] || moodColors.calm;
     const pink = [255, 54, 214];
     const violet = [145, 83, 255];
+    const t = performance.now() / 1000;
+    const safeIntensity = Math.max(0, Math.min(1, intensity));
+    const safeTempo = Math.max(0.45, Math.min(2.4, tempo || 1));
+    const safeDetail = Math.max(0, Math.min(1, detail || 0));
     ctx.clearRect(0, 0, w, h);
 
     const gradient = ctx.createLinearGradient(0, 0, w, 0);
@@ -3423,38 +3430,61 @@ function drawWave(samples, intensity = 0.25) {
     gradient.addColorStop(0.82, `rgba(${color[0]},${color[1]},${color[2]},0.72)`);
     gradient.addColorStop(1, `rgba(${pink[0]},${pink[1]},${pink[2]},0.02)`);
 
-    ctx.shadowBlur = 18 + intensity * 34;
+    const n = samples.length;
+    const amp = h * (0.18 + safeIntensity * 0.31);
+    const centerLift = Math.sin(t * safeTempo * 5.0) * h * 0.012 * safeIntensity;
+
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowBlur = 18 + safeIntensity * 38;
     ctx.shadowColor = `rgba(${pink[0]},${pink[1]},${pink[2]},0.82)`;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = Math.max(2, h * 0.016);
-    ctx.strokeStyle = gradient;
-    ctx.beginPath();
 
-    const n = samples.length;
-    for (let i = 0; i < n; i++) {
-        const x = (i / (n - 1)) * w;
-        const y = mid + samples[i] * h * 0.46;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+    for (let layer = 0; layer < 3; layer++) {
+        const layerAlpha = [0.92, 0.54, 0.26][layer];
+        const layerOffset = (layer - 1) * h * 0.095 * (0.4 + safeIntensity);
+        const layerScale = [1.0, 0.62, 0.38][layer];
+        ctx.lineWidth = Math.max(1.4, h * [0.018, 0.011, 0.007][layer]);
+        ctx.strokeStyle = layer === 0 ? gradient : `rgba(${color[0]},${color[1]},${color[2]},${layerAlpha})`;
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const p = i / (n - 1);
+            const x = p * w;
+            const shimmer = Math.sin(p * Math.PI * (18 + layer * 6) - t * safeTempo * (3.2 + layer)) * safeDetail * 0.035;
+            const y = mid + centerLift + layerOffset + (samples[i] + shimmer) * amp * layerScale;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
     }
-    ctx.stroke();
 
-    ctx.shadowBlur = 10 + intensity * 22;
-    ctx.lineWidth = Math.max(1, h * 0.008);
-    ctx.strokeStyle = `rgba(255,54,214,${0.34 + intensity * 0.34})`;
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-        const x = (i / (n - 1)) * w;
-        const y = mid - samples[i] * h * 0.38;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+    ctx.shadowBlur = 12 + safeIntensity * 24;
+    ctx.lineWidth = Math.max(1, h * 0.009);
+    ctx.strokeStyle = `rgba(255,255,255,${0.18 + safeIntensity * 0.42})`;
+    for (const sign of [-1, 1]) {
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const p = i / (n - 1);
+            const x = p * w;
+            const ripple = Math.sin(p * Math.PI * 42 + t * safeTempo * 6.5) * 0.025 * safeIntensity;
+            const y = mid + sign * (Math.abs(samples[i] + ripple) * amp * 0.74 + h * 0.018);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
     }
-    ctx.stroke();
 
+    const beatAlpha = 0.08 + safeIntensity * 0.22;
+    const beatWidth = Math.max(2, w * (0.09 + safeIntensity * 0.08));
+    const beatX = (0.5 + Math.sin(t * safeTempo * 2.2) * 0.18) * w;
+    const beam = ctx.createLinearGradient(beatX - beatWidth, 0, beatX + beatWidth, 0);
+    beam.addColorStop(0, "rgba(255,255,255,0)");
+    beam.addColorStop(0.5, `rgba(255,255,255,${beatAlpha})`);
+    beam.addColorStop(1, "rgba(255,255,255,0)");
     ctx.shadowBlur = 0;
-    ctx.fillStyle = `rgba(255,54,214,${0.04 + intensity * 0.09})`;
-    ctx.fillRect(0, mid - 1, w, 2);
+    ctx.fillStyle = beam;
+    ctx.fillRect(Math.max(0, beatX - beatWidth), mid - h * 0.34, beatWidth * 2, h * 0.68);
+    ctx.globalCompositeOperation = "source-over";
 }
 
 function drawIdleCanvas() {
@@ -3470,7 +3500,7 @@ function drawIdleCanvas() {
             Math.sin(p * Math.PI * 21 - t * 0.55) * 0.018;
         samples.push(wave * envelope);
     }
-    drawWave(samples, 0.08);
+    drawWave(samples, 0.08, 0.55, 0.12);
     idleFrame = requestAnimationFrame(drawIdleCanvas);
 }
 
@@ -3714,6 +3744,7 @@ function stopVoiceMeter() {
         try { analyser.disconnect(); } catch (err) {}
         analyser = null;
     }
+    analyserFreqData = null;
     if (idleFrame) {
         cancelAnimationFrame(idleFrame);
         idleFrame = null;
@@ -3723,6 +3754,18 @@ function stopVoiceMeter() {
 
 function browserVoiceKick(strength = 1) {
     browserVoicePulse = Math.min(1.8, Math.max(browserVoicePulse, strength));
+}
+
+function noteBrowserVoiceBoundary(strength = 1) {
+    const now = performance.now();
+    if (browserVoiceLastBoundaryAt) {
+        const delta = now - browserVoiceLastBoundaryAt;
+        if (delta > 45 && delta < 900) {
+            browserVoiceTempoMs = browserVoiceTempoMs * 0.7 + delta * 0.3;
+        }
+    }
+    browserVoiceLastBoundaryAt = now;
+    browserVoiceKick(strength);
 }
 
 function buildSpeechProfile(text) {
@@ -3755,6 +3798,8 @@ function startBrowserVoiceMeter(runId, label, text = "") {
     setVoiceMessage(label || "BROWSER VOICE");
     browserVoiceTextProfile = buildSpeechProfile(text);
     browserVoiceStartedAt = performance.now();
+    browserVoiceLastBoundaryAt = browserVoiceStartedAt;
+    browserVoiceTempoMs = 190;
     browserVoiceDuration = Math.max(1200, browserVoiceTextProfile.length * 185);
 
     function meter() {
@@ -3774,6 +3819,7 @@ function startBrowserVoiceMeter(runId, label, text = "") {
         const speechBeat =
             Math.abs(Math.sin(t * 21.0 + profileIndex * 0.9)) * 0.18 +
             Math.abs(Math.sin(t * 34.0 - profileIndex * 0.42)) * 0.10;
+        const tempo = Math.max(0.58, Math.min(2.2, 210 / Math.max(95, browserVoiceTempoMs)));
         const level = Math.min(1, 0.08 + wordAmp * 0.62 + speechBeat + browserVoicePulse * 0.55);
         const samples = [];
         const count = 260;
@@ -3786,7 +3832,7 @@ function startBrowserVoiceMeter(runId, label, text = "") {
                 Math.sin(p * Math.PI * 53 + t * 7.0 + profileIndex) * 0.04;
             samples.push(wave * envelope * level);
         }
-        drawWave(samples, level);
+        drawWave(samples, level, tempo, wordAmp);
         wrap.classList.toggle("speaking", level > 0.015);
         browserVoiceFrame = requestAnimationFrame(meter);
     }
@@ -3813,9 +3859,10 @@ function startVoiceMeter(audio) {
         if (audioContext.state === "suspended") audioContext.resume();
 
         analyser = audioContext.createAnalyser();
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.45;
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.32;
         analyserData = new Uint8Array(analyser.fftSize);
+        analyserFreqData = new Uint8Array(analyser.frequencyBinCount);
         audioSource = audioContext.createMediaElementSource(audio);
         audioSource.connect(analyser);
         analyser.connect(audioContext.destination);
@@ -3826,6 +3873,7 @@ function startVoiceMeter(audio) {
 
     function meter() {
         analyser.getByteTimeDomainData(analyserData);
+        analyser.getByteFrequencyData(analyserFreqData);
         let sum = 0;
         for (let i = 0; i < analyserData.length; i++) {
             const centered = (analyserData[i] - 128) / 128;
@@ -3834,6 +3882,17 @@ function startVoiceMeter(audio) {
         const rms = Math.sqrt(sum / analyserData.length);
         const level = Math.min(1, Math.max(0, rms * 9.5));
         const sensitive = Math.pow(level, 0.55);
+        let high = 0;
+        let low = 0;
+        const split = Math.max(1, Math.floor(analyserFreqData.length * 0.18));
+        for (let i = 0; i < analyserFreqData.length; i++) {
+            if (i < split) low += analyserFreqData[i];
+            else high += analyserFreqData[i];
+        }
+        low = low / split / 255;
+        high = high / Math.max(1, analyserFreqData.length - split) / 255;
+        const tempo = Math.max(0.65, Math.min(2.4, 0.72 + sensitive * 1.22 + high * 0.9));
+        const detail = Math.max(0.14, Math.min(1, high * 1.8 + low * 0.35));
         const samples = [];
         const count = 260;
         for (let i = 0; i < count; i++) {
@@ -3841,9 +3900,9 @@ function startVoiceMeter(audio) {
             const centered = (analyserData[idx] - 128) / 128;
             const p = i / (count - 1);
             const envelope = 0.24 + Math.pow(Math.sin(Math.PI * p), 0.55) * 0.76;
-            samples.push(centered * envelope * (0.52 + sensitive * 0.85));
+            samples.push(centered * envelope * (0.62 + sensitive * 1.05));
         }
-        drawWave(samples, sensitive);
+        drawWave(samples, sensitive, tempo, detail);
 
         wrap.classList.toggle("speaking", sensitive > 0.015);
         voiceMeterFrame = requestAnimationFrame(meter);
@@ -3919,7 +3978,7 @@ function playBrowserSpeechChunk(text, index, total, runId) {
             utterance.onboundary = event => {
                 if (runId !== voiceRunId) return;
                 const boundaryName = String((event && event.name) || "");
-                browserVoiceKick(boundaryName === "sentence" ? 1.35 : 1.05);
+                noteBrowserVoiceBoundary(boundaryName === "sentence" ? 1.42 : 1.08);
             };
             utterance.onend = () => {
                 if (browserVoiceFrame) {
