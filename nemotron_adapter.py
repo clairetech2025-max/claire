@@ -101,7 +101,28 @@ def _deterministic_stub(messages: list[dict[str, str]]) -> str:
             return "I can review trading-system status and risk posture, but I cannot place or execute live trades from normal chat."
         return "I can summarize Veritas/Kraken status as inspection-only information. No live trading action is executed from normal chat."
     if lane == "NVIDIA_PATHWAY":
-        return "Technical gate: verify current NVIDIA/Nemotron status, benchmark evidence, and next integration requirement before making a claim."
+        return _nvidia_runtime_fallback()
     if lane == "LEGAL_CASE":
         return "I can summarize legal-monitor status or source-backed research, but this is not legal advice and no filing action is performed from chat."
     return "I can help with that. Tell me the goal, constraints, and what outcome you want, and I will give a direct next step."
+
+
+def _nvidia_runtime_fallback() -> str:
+    runtime_steps = [
+        "classifies the lane",
+        "checks current truth",
+        "recalls relevant memory through ARE",
+        "builds a structured context packet",
+        "applies risk and authority rules",
+        "calls the downstream model",
+    ]
+    evidence = ["repository URL", "commit SHA", "startup commands", "benchmark or demo evidence", "validation output"]
+    return (
+        "CLAIRE is a governed AI runtime, not a stateless chatbot. Before the model answers, ClaireRuntime "
+        + ", ".join(runtime_steps[:-1])
+        + f", and {runtime_steps[-1]}. ARE is the chronological memory authority. Nemotron is downstream "
+        "of orientation and context-building. Sentinel validates before final output, and Trace records the path. "
+        "For NVIDIA engineers, reproducibility depends on "
+        + ", ".join(evidence[:-1])
+        + f", and {evidence[-1]}."
+    )

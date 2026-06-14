@@ -187,7 +187,7 @@ class ClaireRuntime:
 
     INTERNAL_LINE_PATTERNS = [
         re.compile(r"^\s*CLAIRE processed the message through the governed runtime before Nemotron\.?.*$", re.I),
-        re.compile(r"^\s*(Lane|Risk|Risk level|Answer basis|Current request|Memory eligibility|Trace|Trace ID|Sentinel|Authority gates|Runtime|Context packet|Subsystem attachment notes)\s*[:=].*$", re.I),
+        re.compile(r"^\s*(Lane|Risk|Risk level|Answer basis|Current request|Memory eligibility|Trace|Trace ID|Sentinel|Authority gates|Runtime|Context packet|Subsystem attachment notes|Technical gate)\s*[:=].*$", re.I),
     ]
     SENSITIVE_PATTERNS = [
         re.compile(r"\bBATTLEBORN[_-][A-Z0-9_\-]+\b", re.I),

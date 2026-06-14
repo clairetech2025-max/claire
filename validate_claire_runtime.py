@@ -127,7 +127,11 @@ def run() -> None:
 
         nv = runtime.handle_user_message("steve", "s1", "NVIDIA pathway status and next gate?")
         assert_true(nv["lane"] == "NVIDIA_PATHWAY", "Runtime failed NVIDIA lane")
-        assert_true("Technical gate" in nv["answer"], "NVIDIA mode did not preserve reproducibility language")
+        assert_true("Technical gate:" not in nv["answer"], "NVIDIA mode leaked internal gate label")
+        assert_true("governed AI runtime" in nv["answer"], "NVIDIA mode did not explain CLAIRE as runtime")
+        assert_true("ARE" in nv["answer"] and "Nemotron" in nv["answer"], "NVIDIA mode missed ARE/Nemotron relationship")
+        assert_true("Sentinel" in nv["answer"] and "Trace" in nv["answer"], "NVIDIA mode missed validation/trace")
+        assert_true("commit SHA" in nv["answer"] and "validation output" in nv["answer"], "NVIDIA mode missed reproducibility language")
 
         crypto = runtime.handle_user_message(
             "steve",
