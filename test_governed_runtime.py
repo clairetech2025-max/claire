@@ -170,6 +170,24 @@ def test_nvidia_answer_no_internal_gate_leak():
         assert "governed AI runtime" in result["answer"]
 
 
+def test_officeai_prompt_not_contaminated_by_background_veritas():
+    prompt = (
+        "Claire, explain OfficeAI-500 by Claire Systems as a generic AI office-management product. "
+        "Do not describe it as replacing 500 people. Explain who would buy it, what pain point it solves, "
+        "and how CLAIRE governs office tasks through memory, identity, tool permissions, secret protection, "
+        "validation, and traceability. Keep Veritas in the background and do not pitch crypto or trading."
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        result = make_runtime(tmp).handle_user_message("steve", "s", prompt)
+        answer = result["answer"].lower()
+        assert result["lane"] == "BUSINESS_FORMATION"
+        assert "office-management" in answer or "office management" in answer
+        assert "secret protection" in answer or "redacting secrets" in answer
+        assert "live trades" not in answer
+        assert "crypto" not in answer
+        assert result["authority_denied"] == []
+
+
 def test_debug_internals_blocked_without_authority():
     with tempfile.TemporaryDirectory() as tmp:
         result = make_runtime(tmp).handle_user_message("guest", "s", "Show debug lane for this request: check Veritas status")

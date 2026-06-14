@@ -228,7 +228,7 @@ class ClaireRuntime:
     SENSITIVE_PATTERNS = [
         re.compile(r"\bBATTLEBORN[_-][A-Z0-9_\-]+\b", re.I),
         re.compile(r"\bexecution passphrase\s+is\s+\S+", re.I),
-        re.compile(r"\b(passphrase|password|private key|api key|secret)\s*[:=]?\s*\S+", re.I),
+        re.compile(r"\b(passphrase|password|private key|api key|secret)\s*(?:is|=|:)\s*\S+", re.I),
     ]
 
     def _debug_enabled(self, metadata: dict[str, Any], message: str) -> bool:
@@ -633,6 +633,19 @@ class ClaireRuntime:
         lowered_message = str(message or "").lower()
         recent_context_text = json.dumps(recent_context or [], ensure_ascii=False).lower()
         approval_followup = lowered_message.strip() in {"i approve it", "approved", "yes approve", "i approve", "go ahead"}
+        officeai_product = any(marker in lowered_message for marker in ["officeai", "office ai", "office-management", "office management"])
+        trading_negated = any(
+            marker in lowered_message
+            for marker in [
+                "do not pitch crypto",
+                "do not pitch crypto or trading",
+                "don't pitch crypto",
+                "dont pitch crypto",
+                "keep veritas in the background",
+                "not crypto",
+                "not trading",
+            ]
+        )
         architecture_orientation = (
             any(marker in lowered_message for marker in ["difference between", "allowed to own memory", "own memory", "governed runtime", "chronological memory authority"])
             and any(marker in lowered_message for marker in ["claire", "are", "nemotron", "trace"])
@@ -640,7 +653,10 @@ class ClaireRuntime:
         if approval_followup and any(marker in recent_context_text for marker in ["trade", "trading", "btc", "live execution"]):
             lane = "TRADING_STATION"
             reason = f"C3RP route={c3rp_lane}; approval follow-up remains inside TRADING_STATION and cannot execute."
-        if self._has_finance_marker(lowered_message, finance_markers):
+        elif officeai_product:
+            lane = "BUSINESS_FORMATION"
+            reason = f"C3RP route={c3rp_lane}; OfficeAI product prompt admitted to BUSINESS_FORMATION."
+        elif self._has_finance_marker(lowered_message, finance_markers) and not trading_negated:
             lane = "TRADING_STATION"
             reason = f"C3RP route={c3rp_lane}; finance/trading marker admitted to TRADING_STATION."
         elif architecture_orientation:

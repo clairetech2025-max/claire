@@ -90,13 +90,28 @@ def _deterministic_stub(messages: list[dict[str, str]]) -> str:
             break
 
     lowered = user_message.lower()
+    officeai_product = any(term in lowered for term in ["officeai", "office ai", "office-management", "office management"])
+    trading_negated = any(
+        term in lowered
+        for term in [
+            "do not pitch crypto",
+            "do not pitch crypto or trading",
+            "don't pitch crypto",
+            "dont pitch crypto",
+            "keep veritas in the background",
+            "not crypto",
+            "not trading",
+        ]
+    )
+    if officeai_product:
+        return _officeai_fallback()
     if lane == "HORSE_STEWARDSHIP" or "hoof" in lowered or "horse" in lowered:
         return (
             "For an exact impression of a horse hoof, look for an equine hoof impression kit or dental-grade alginate/silicone impression material used with a rigid backing tray. "
             "Clean and dry the hoof, keep the horse calm on level ground, avoid deep packing around sensitive tissue, and have a farrier or veterinarian help if the hoof is injured, sore, or irregular. "
             "For a durable display or fitting reference, make the soft impression first, then cast it with plaster, resin, or another stable casting compound."
         )
-    if lane == "TRADING_STATION" or any(term in lowered for term in ["crypto", "kraken", "veritas", "btc", "trade"]):
+    if lane == "TRADING_STATION" or (any(term in lowered for term in ["crypto", "kraken", "veritas", "btc", "trade"]) and not trading_negated):
         if any(term in lowered for term in ["live trade", "place", "buy", "sell", "execute"]):
             return "I can review trading-system status and risk posture, but I cannot place or execute live trades from normal chat."
         return "I can summarize Veritas/Kraken status as inspection-only information. No live trading action is executed from normal chat."
@@ -125,4 +140,13 @@ def _nvidia_runtime_fallback() -> str:
         "For NVIDIA engineers, reproducibility depends on "
         + ", ".join(evidence[:-1])
         + f", and {evidence[-1]}."
+    )
+
+
+def _officeai_fallback() -> str:
+    return (
+        "OfficeAI-500 by Claire Systems is a generic AI office-management product for teams that need governed help with routine administrative work. "
+        "Likely buyers are small businesses, clinics, field-service operators, professional offices, and internal operations teams that lose time to inbox triage, document follow-up, scheduling support, task tracking, customer-response drafting, and handoff confusion. "
+        "The pain point is not headcount replacement; it is fragmented office work with weak memory, unclear authority, and little auditability. "
+        "CLAIRE governs those tasks by identifying the user and session, limiting recall to authorized memory scopes, exposing only permitted tools, redacting secrets before model or trace paths, validating the response before release, and recording trace evidence so office actions remain reviewable."
     )
