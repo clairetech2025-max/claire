@@ -7,6 +7,9 @@ from typing import Any
 
 from are_memory_store import AREMemoryStore, MemoryEvent
 from authority_capsule import AuthorityCapsule
+from claire.runtime.gyro import GyroOrientationLayer
+from claire.runtime.loopback import LoopbackLayer
+from claire.runtime.trace import gyro_trace_object
 from context_builder import build_context_packet
 from current_truth_loader import load_current_truth, truth_for_lane
 from diode_protocol import DiodeProtocol
@@ -46,6 +49,8 @@ class ClaireRuntime:
         self.model_config = model_config or {}
         self.handshake_broker = HandshakeBroker()
         self.diode = DiodeProtocol()
+        self.gyro = GyroOrientationLayer()
+        self.loopback = LoopbackLayer()
 
     def handle_user_message(
         self,
@@ -85,6 +90,43 @@ class ClaireRuntime:
         entities = identify_entities(normalized)
         entity_names = [entity["name"] for entity in entities]
         eligibility = evaluate_memory_eligibility(normalized, lane)
+        gyro_bearing = self.gyro.orient(
+            prompt=normalized,
+            lane_result=lane_result,
+            c3rp_route=c3rp_route,
+            authority_capsule=authority_capsule,
+            memory_eligibility=eligibility,
+            risk_level=risk_level,
+            risks=risks,
+            current_truth=current_truth,
+            metadata=metadata,
+        )
+        gyro_trace = gyro_bearing.to_trace()
+        if not gyro_bearing.stable:
+            gyro_reason = "unstable gyro bearing"
+            if gyro_bearing.reasons:
+                gyro_reason += ": " + "; ".join(gyro_bearing.reasons)
+            loop = self.loopback.pre_generation_response(
+                prompt=normalized,
+                gyro_bearing=gyro_trace,
+                reason=gyro_reason,
+            )
+            return self._return_loopback_response(
+                trace_id=trace_id,
+                user_id=user_id,
+                session_id=session_id,
+                normalized=normalized,
+                lane_result=lane_result,
+                c3rp_route=c3rp_route,
+                risk_level=risk_level,
+                authority_capsule=authority_capsule,
+                authority_denied=authority_decision.denied_reasons,
+                gyro_trace=gyro_trace,
+                loopback_reason=gyro_reason,
+                answer=loop["answer"],
+                answer_mode=loop["answer_mode"],
+                secret_detected=secret_detected,
+            )
         recent_path, long_term_memories, rejected_memories = self._recall_memory(
             user_id,
             lane_result,
@@ -117,6 +159,18 @@ class ClaireRuntime:
             answer = apply_nvidia_mode(answer)
         answer = self._redact_sensitive(self.diode.redact(answer))
         answer = self._apply_authority_answer_boundary(answer, lane, authority_decision.denied_reasons)
+        post_loop = self.loopback.post_generation_check(
+            prompt=normalized,
+            answer=answer,
+            gyro_bearing=gyro_trace,
+            lane=lane,
+            risk_level=risk_level,
+        )
+        loopback_triggered = bool(post_loop.get("triggered"))
+        loopback_reason = str(post_loop.get("reason") or "")
+        answer_mode = str(post_loop.get("answer_mode") or gyro_trace.get("output_boundary") or "direct")
+        if loopback_triggered:
+            answer = self._redact_sensitive(self.diode.redact(str(post_loop.get("answer") or answer)))
 
         validator_result = validate_response(answer, context_packet, lane)
         if not validator_result.get("approved") and validator_result.get("revised_answer"):
@@ -157,6 +211,9 @@ class ClaireRuntime:
             "authority_capsule_id": authority_capsule.capsule_id,
             "authority_role": authority_capsule.role,
             "authority_denied": list(authority_decision.denied_reasons),
+            "gyro": gyro_trace,
+            "loopback_triggered": loopback_triggered,
+            "answer_mode": answer_mode,
         }
         if debug_enabled:
             result["debug"] = self._safe_debug_payload(
@@ -199,10 +256,18 @@ class ClaireRuntime:
             "authority_tools": list(authority_capsule.allowed_tools),
             "authority_denied_reasons": list(authority_decision.denied_reasons),
             "diode_redacted": bool(secret_detected),
+            "gyro": gyro_trace_object(
+                gyro_bearing=gyro_trace,
+                loopback_triggered=loopback_triggered,
+                loopback_reason=loopback_reason,
+                answer_mode=answer_mode,
+            ),
             "steps": [
                 "input_normalization",
                 "diode_redaction",
                 "c3rp_lane_classification",
+                "gyro_orientation",
+                "loopback_drift_check",
                 "handshake_broker_authority",
                 "memory_eligibility_review",
                 "are_chronological_recall",
@@ -308,6 +373,87 @@ class ClaireRuntime:
         if issues:
             debug_lines.append("Validator issues: " + ", ".join(map(str, issues)))
         return self._redact_sensitive(str(answer or "").strip() + "\n" + "\n".join(debug_lines)).strip()
+
+    def _return_loopback_response(
+        self,
+        *,
+        trace_id: str,
+        user_id: str,
+        session_id: str,
+        normalized: str,
+        lane_result: LaneResult,
+        c3rp_route: dict[str, Any],
+        risk_level: str,
+        authority_capsule: AuthorityCapsule,
+        authority_denied: list[str],
+        gyro_trace: dict[str, Any],
+        loopback_reason: str,
+        answer: str,
+        answer_mode: str,
+        secret_detected: bool,
+    ) -> dict[str, Any]:
+        lane = lane_result.lane
+        answer = self.sanitize_user_answer(self._redact_sensitive(self.diode.redact(answer)), debug=False)
+        result = {
+            "answer": answer,
+            "lane": lane,
+            "used_memory": [],
+            "risk_level": risk_level,
+            "trace_id": trace_id,
+            "memory_written": False,
+            "authority_capsule_id": authority_capsule.capsule_id,
+            "authority_role": authority_capsule.role,
+            "authority_denied": list(authority_denied or []),
+            "gyro": gyro_trace,
+            "loopback_triggered": True,
+            "answer_mode": answer_mode,
+        }
+        trace_record = {
+            "trace_id": trace_id,
+            "timestamp_ns": None,
+            "user_id": user_id,
+            "session_id": session_id,
+            "user_message_hash": sha_text(normalized),
+            "lane": lane,
+            "lane_result": {"lane": lane, "confidence": lane_result.confidence},
+            "c3rp_route": c3rp_route,
+            "memories_recalled": [],
+            "memories_rejected": [],
+            "prompt_hash": "",
+            "model_used": "loopback",
+            "risk_level": risk_level,
+            "validator_result": {"approved": True, "issues": []},
+            "final_answer_hash": sha_text(answer),
+            "memory_written": False,
+            "memory_event_id": None,
+            "runtime_report": None,
+            "authorized_subsystem_status": {},
+            "authority_capsule_id": authority_capsule.capsule_id,
+            "authority_role": authority_capsule.role,
+            "authority_scopes": list(authority_capsule.allowed_memory_scopes),
+            "authority_tools": list(authority_capsule.allowed_tools),
+            "authority_denied_reasons": list(authority_denied or []),
+            "diode_redacted": bool(secret_detected),
+            "gyro": gyro_trace_object(
+                gyro_bearing=gyro_trace,
+                loopback_triggered=True,
+                loopback_reason=loopback_reason,
+                answer_mode=answer_mode,
+            ),
+            "steps": [
+                "input_normalization",
+                "diode_redaction",
+                "c3rp_lane_classification",
+                "handshake_broker_authority",
+                "gyro_orientation",
+                "loopback_return",
+                "trace_logging",
+            ],
+        }
+        self.trace_logger.log(trace_record)
+        if self.memory_store is not None:
+            self.memory_store.append_session_trace(trace_id, user_id, session_id, lane, trace_record)
+        return result
 
     def _subsystem_status_for_lane(self, lane: str, authority_capsule: AuthorityCapsule | None = None) -> dict[str, Any]:
         if lane == "TRADING_STATION":

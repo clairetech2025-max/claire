@@ -148,6 +148,65 @@ def test_veritas_status_requires_authority():
         assert "requires trusted authority" not in trusted["answer"]
 
 
+def test_unstable_gyro_stops_generation_before_model_call():
+    with tempfile.TemporaryDirectory() as tmp:
+        rt = make_runtime(tmp)
+
+        def fail_if_called(messages, config):
+            raise AssertionError("generation should not run when gyro bearing is unstable")
+
+        result = rt.handle_user_message(
+            "guest",
+            "s",
+            "Check Veritas and Kraken crypto bot status",
+            {"provider_generate": fail_if_called},
+        )
+        assert result["loopback_triggered"] is True
+        assert "requires trusted authority" in result["answer"]
+        trace = rt.trace_logger.get(result["trace_id"])
+        assert trace["model_used"] == "loopback"
+        assert trace["gyro"]["loopback_triggered"] is True
+        assert trace["gyro"]["answer_mode"] == "bounded"
+
+
+def test_generic_filler_response_triggers_loopback():
+    with tempfile.TemporaryDirectory() as tmp:
+        rt = make_runtime(tmp)
+        result = rt.handle_user_message(
+            "steve",
+            "s",
+            "Answer the question Claire",
+            {"provider_generate": lambda messages, config: "I can help with that. Tell me the goal, constraints, and what outcome you want."},
+        )
+        assert result["loopback_triggered"] is True
+        assert result["answer_mode"] == "bounded"
+        assert "specific request" in result["answer"].lower()
+
+
+def test_trace_contains_gyro_loopback_object():
+    with tempfile.TemporaryDirectory() as tmp:
+        rt = make_runtime(tmp)
+        result = rt.handle_user_message("steve", "s", "Claire, explain CLAIRE to NVIDIA engineers without hype.")
+        trace = rt.trace_logger.get(result["trace_id"])
+        gyro = trace["gyro"]
+        for key in [
+            "lane",
+            "intent",
+            "authority",
+            "risk",
+            "memory_eligibility",
+            "source_provenance",
+            "continuity",
+            "output_boundary",
+            "loopback_triggered",
+            "loopback_reason",
+            "answer_mode",
+        ]:
+            assert key in gyro
+        assert gyro["lane"] == "NVIDIA_PATHWAY"
+        assert gyro["loopback_triggered"] is False
+
+
 def test_horse_prompt_routes_to_horse_stewardship():
     with tempfile.TemporaryDirectory() as tmp:
         result = make_runtime(tmp).handle_user_message("steve", "s", "horse hoof molding kit for exact hoof impression")

@@ -25,6 +25,38 @@ It issues short-lived authority capsules bound to:
 
 C3RP provides request orientation and lane routing before memory recall and tool access.
 
+## Gyro Rule
+
+CLAIRE orients before generation across these axes:
+
+- intent
+- lane
+- authority
+- risk
+- memory eligibility
+- source provenance
+- continuity
+- output boundary
+
+No model generation occurs when the Gyro bearing is unstable. The runtime records the bearing in Trace and routes to Loopback instead.
+
+## Loopback Rule
+
+Loopback stops generic, drifting, or unsupported answers.
+
+Triggers include:
+
+- low confidence
+- unclear lane
+- missing source authority
+- memory conflict
+- high-risk legal, financial, medical, or technical claims
+- answer drift from the original prompt
+- generic filler response
+- inability to explain why the answer follows from the input
+
+Loopback re-anchors to the original user request and either asks one clarifying question, gives a narrow bounded answer, or refuses the action.
+
 ## Diode Rule
 
 Authority flows forward as a signed capsule.
@@ -65,6 +97,13 @@ Sentinel validates the response before final output. Normal answers must not exp
 Trace records decisions, hashes, capsule id, scopes, tools, and validation metadata.
 
 Trace must not record secrets, raw passphrases, API keys, bearer tokens, private keys, or raw authority tokens.
+
+Trace also records:
+
+- Gyro bearing
+- Loopback trigger state
+- Loopback reason
+- Answer mode: `direct`, `bounded`, `clarify`, or `refuse`
 
 ## Run Commands
 
