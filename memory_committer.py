@@ -53,5 +53,19 @@ def commit_if_needed(store: AREMemoryStore, user_id: str, session_id: str, messa
         importance_score=float(getattr(eligibility, "importance_score", 0.5)),
         related_entities=entities,
         write_reason=reason,
+        memory_scope=_scope_for_lane(lane),
     )
     return True, store.append_memory_event(event)
+
+
+def _scope_for_lane(lane: str) -> str:
+    lane = str(lane or "").upper()
+    if lane == "LEGAL_CASE":
+        return "LEGAL_SENSITIVE"
+    if lane == "TRADING_STATION":
+        return "TRADING_SENSITIVE"
+    if lane == "HORSE_STEWARDSHIP":
+        return "HORSE_STEWARDSHIP"
+    if lane in {"BUSINESS_FORMATION", "CLAIRE_SYSTEM_ARCHITECTURE", "NVIDIA_PATHWAY"}:
+        return "COMPANY_INTERNAL"
+    return "PUBLIC"

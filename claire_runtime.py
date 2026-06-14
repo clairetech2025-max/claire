@@ -6,9 +6,12 @@ import time
 from typing import Any
 
 from are_memory_store import AREMemoryStore, MemoryEvent
+from authority_capsule import AuthorityCapsule
 from context_builder import build_context_packet
 from current_truth_loader import load_current_truth, truth_for_lane
+from diode_protocol import DiodeProtocol
 from entity_registry import identify_entities
+from handshake_broker import HandshakeBroker
 from lane_classifier import LaneResult, classify_lane
 from claire_runtime_router import c3rp_classify, normalize_input as c3rp_normalize_input, provisional_orientation
 from language_guard import strengthen_confidence_language
@@ -41,6 +44,8 @@ class ClaireRuntime:
         self.memory_store = memory_store if memory_store is not None else (None if self.use_original_are else AREMemoryStore())
         self.trace_logger = trace_logger or TraceLogger()
         self.model_config = model_config or {}
+        self.handshake_broker = HandshakeBroker()
+        self.diode = DiodeProtocol()
 
     def handle_user_message(
         self,
@@ -54,21 +59,39 @@ class ClaireRuntime:
             return self.handle_demo_message(user_id, session_id, message, metadata)
         trace_id = new_trace_id()
 
-        normalized = self._normalize_input(message)
-        debug_enabled = self._debug_enabled(metadata, normalized)
+        normalized_raw = self._normalize_input(message)
+        normalized = self.diode.redact(normalized_raw)
+        secret_detected = self.diode.contains_secret(normalized_raw)
+        debug_requested = self._debug_enabled(metadata, normalized)
         c3rp_route = self._c3rp_route(normalized)
         lane_result = self._lane_result_from_c3rp(normalized, c3rp_route, metadata.get("recent_context"))
         lane = lane_result.lane
+        risk_level, risks = self._risk_authority_gate(lane, normalized)
+        authority_decision = self.handshake_broker.resolve_authority(
+            user_id=user_id,
+            session_id=session_id,
+            lane=lane,
+            request_text=normalized,
+            risk_level=risk_level,
+            metadata={**metadata, "raw_request_text": normalized_raw},
+        )
+        authority_capsule = authority_decision.capsule
+        debug_enabled = bool(debug_requested and authority_decision.trusted)
         full_truth = load_current_truth()
         current_truth = truth_for_lane(lane, full_truth)
-        subsystem_status = self._subsystem_status_for_lane(lane)
+        subsystem_status = self._subsystem_status_for_lane(lane, authority_capsule)
         if subsystem_status:
             current_truth["authorized_subsystem_status"] = subsystem_status
         entities = identify_entities(normalized)
         entity_names = [entity["name"] for entity in entities]
         eligibility = evaluate_memory_eligibility(normalized, lane)
-        recent_path, long_term_memories, rejected_memories = self._recall_memory(user_id, lane_result, entity_names, normalized)
-        risk_level, risks = self._risk_authority_gate(lane, normalized)
+        recent_path, long_term_memories, rejected_memories = self._recall_memory(
+            user_id,
+            lane_result,
+            entity_names,
+            normalized,
+            authority_capsule,
+        )
         constraints = self._constraints(lane)
 
         context_packet = build_context_packet(
@@ -92,7 +115,8 @@ class ClaireRuntime:
         answer = strengthen_confidence_language(answer)
         if lane == "NVIDIA_PATHWAY":
             answer = apply_nvidia_mode(answer)
-        answer = self._redact_sensitive(answer)
+        answer = self._redact_sensitive(self.diode.redact(answer))
+        answer = self._apply_authority_answer_boundary(answer, lane, authority_decision.denied_reasons)
 
         validator_result = validate_response(answer, context_packet, lane)
         if not validator_result.get("approved") and validator_result.get("revised_answer"):
@@ -118,8 +142,9 @@ class ClaireRuntime:
             session_id=session_id,
             message=self._redact_sensitive(normalized),
             lane=lane,
-            answer=self._redact_sensitive(answer),
+            answer=self._redact_sensitive(self.diode.redact(answer)),
             eligibility=eligibility,
+            secret_detected=secret_detected,
         )
 
         result = {
@@ -129,6 +154,9 @@ class ClaireRuntime:
             "risk_level": risk_level,
             "trace_id": trace_id,
             "memory_written": memory_written,
+            "authority_capsule_id": authority_capsule.capsule_id,
+            "authority_role": authority_capsule.role,
+            "authority_denied": list(authority_decision.denied_reasons),
         }
         if debug_enabled:
             result["debug"] = self._safe_debug_payload(
@@ -152,7 +180,7 @@ class ClaireRuntime:
             "session_id": session_id,
             "user_message_hash": sha_text(normalized),
             "lane": lane,
-            "lane_result": lane_result.to_dict() if hasattr(lane_result, "to_dict") else lane_result.__dict__,
+            "lane_result": lane_result.to_dict() if debug_enabled and hasattr(lane_result, "to_dict") else {"lane": lane, "confidence": lane_result.confidence},
             "c3rp_route": c3rp_route,
             "memories_recalled": result["used_memory"],
             "memories_rejected": rejected_memories,
@@ -165,9 +193,17 @@ class ClaireRuntime:
             "memory_event_id": (memory_event or {}).get("memory_id"),
             "runtime_report": runtime_report,
             "authorized_subsystem_status": subsystem_status,
+            "authority_capsule_id": authority_capsule.capsule_id,
+            "authority_role": authority_capsule.role,
+            "authority_scopes": list(authority_capsule.allowed_memory_scopes),
+            "authority_tools": list(authority_capsule.allowed_tools),
+            "authority_denied_reasons": list(authority_decision.denied_reasons),
+            "diode_redacted": bool(secret_detected),
             "steps": [
                 "input_normalization",
+                "diode_redaction",
                 "c3rp_lane_classification",
+                "handshake_broker_authority",
                 "memory_eligibility_review",
                 "are_chronological_recall",
                 "current_truth_loading",
@@ -273,8 +309,10 @@ class ClaireRuntime:
             debug_lines.append("Validator issues: " + ", ".join(map(str, issues)))
         return self._redact_sensitive(str(answer or "").strip() + "\n" + "\n".join(debug_lines)).strip()
 
-    def _subsystem_status_for_lane(self, lane: str) -> dict[str, Any]:
+    def _subsystem_status_for_lane(self, lane: str, authority_capsule: AuthorityCapsule | None = None) -> dict[str, Any]:
         if lane == "TRADING_STATION":
+            if authority_capsule is None or "veritas_status" not in set(authority_capsule.allowed_tools):
+                return {}
             from veritas_adapter import (
                 get_kill_switch_status,
                 get_kraken_status,
@@ -295,6 +333,8 @@ class ClaireRuntime:
                 "kill_switch": get_kill_switch_status(),
             }
         if lane == "LEGAL_CASE":
+            if authority_capsule is None or "legal_research" not in set(authority_capsule.allowed_tools):
+                return {}
             from claire_courtlistener import (
                 check_case_updates,
                 get_courtlistener_status,
@@ -313,6 +353,20 @@ class ClaireRuntime:
                 "summary": get_legal_monitor_summary(),
             }
         return {}
+
+    def _apply_authority_answer_boundary(self, answer: str, lane: str, denied_reasons: list[str]) -> str:
+        denied = set(denied_reasons or [])
+        if "sensitive_tool_action_blocked_from_normal_chat" in denied:
+            if lane == "TRADING_STATION":
+                return "I can review trading-system status and risk posture, but I cannot place or execute live trades from normal chat. Live execution requires a separate step-up path that is not implemented here."
+            return "That action is blocked from normal chat. It requires a separate step-up path that is not implemented here."
+        if "trusted_authority_required_for_veritas_status" in denied:
+            return "Veritas status requires trusted authority. From guest chat I can only explain the safety boundary: Veritas is a governed financial intelligence subsystem, not CLAIRE memory, and live execution is blocked here."
+        if "legal_filing_blocked_from_normal_chat" in denied:
+            return "Court filing actions are blocked from normal chat. I can summarize monitored legal information when authorized, but I cannot file or submit documents here."
+        if "sensitive_action_requires_step_up_path" in denied:
+            return "Sensitive actions are blocked from normal chat and require a separate step-up path."
+        return answer
 
     def handle_demo_message(
         self,
@@ -577,14 +631,19 @@ class ClaireRuntime:
             "tracked cases",
         ]
         lowered_message = str(message or "").lower()
+        recent_context_text = json.dumps(recent_context or [], ensure_ascii=False).lower()
+        approval_followup = lowered_message.strip() in {"i approve it", "approved", "yes approve", "i approve", "go ahead"}
         architecture_orientation = (
             any(marker in lowered_message for marker in ["difference between", "allowed to own memory", "own memory", "governed runtime", "chronological memory authority"])
             and any(marker in lowered_message for marker in ["claire", "are", "nemotron", "trace"])
         )
+        if approval_followup and any(marker in recent_context_text for marker in ["trade", "trading", "btc", "live execution"]):
+            lane = "TRADING_STATION"
+            reason = f"C3RP route={c3rp_lane}; approval follow-up remains inside TRADING_STATION and cannot execute."
         if self._has_finance_marker(lowered_message, finance_markers):
             lane = "TRADING_STATION"
             reason = f"C3RP route={c3rp_lane}; finance/trading marker admitted to TRADING_STATION."
-        if architecture_orientation:
+        elif architecture_orientation:
             lane = "CLAIRE_SYSTEM_ARCHITECTURE"
             reason = f"C3RP route={c3rp_lane}; architecture/orientation question admitted to CLAIRE_SYSTEM_ARCHITECTURE."
         elif any(marker in lowered_message for marker in legal_monitor_markers):
@@ -738,8 +797,10 @@ class ClaireRuntime:
         lane_result: LaneResult,
         entity_names: list[str],
         query: str,
+        authority_capsule: AuthorityCapsule,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         rejected: list[dict[str, Any]] = []
+        allowed_scopes = set(authority_capsule.allowed_memory_scopes or ["PUBLIC"])
 
         def reject(memory: dict[str, Any], reason: str) -> None:
             rejected.append(
@@ -751,6 +812,9 @@ class ClaireRuntime:
             )
 
         def admit(memory: dict[str, Any]) -> bool:
+            if not self._memory_scope_allowed(memory, allowed_scopes):
+                reject(memory, "memory_scope_not_allowed")
+                return False
             ok, reason = self._memory_supports_active_query(query, lane_result, memory, entity_names)
             if not ok:
                 reject(memory, reason)
@@ -763,6 +827,7 @@ class ClaireRuntime:
                     "memory_id": f"original_are_{item.get('sha') or item.get('line_number')}",
                     "timestamp_ns": int(item.get("ts") or 0) * 1_000_000_000,
                     "lane": "ORIGINAL_ARE",
+                    "memory_scope": "PUBLIC",
                     "summary": str(item.get("text") or "")[:500],
                     "source": "original_are",
                     "provenance_hash": item.get("sha"),
@@ -796,6 +861,15 @@ class ClaireRuntime:
                 ordered.append(memory)
         ordered.sort(key=lambda memory: int(memory.get("timestamp_ns") or 0))
         return ordered[-5:], ordered[:-5], rejected
+
+    def _memory_scope_allowed(self, memory: dict[str, Any], allowed_scopes: set[str]) -> bool:
+        allowed_scopes = {str(scope).upper() for scope in allowed_scopes}
+        scope = str(memory.get("memory_scope") or "PUBLIC").upper()
+        if scope in allowed_scopes:
+            return True
+        if scope == "PROJECT" and "COMPANY_INTERNAL" in allowed_scopes:
+            return True
+        return False
 
     def _memory_supports_active_query(
         self,
@@ -875,7 +949,10 @@ class ClaireRuntime:
         lane: str,
         answer: str,
         eligibility: Any,
+        secret_detected: bool = False,
     ) -> tuple[bool, dict[str, Any] | None]:
+        if secret_detected or self.diode.contains_secret(message) or self.diode.contains_secret(answer):
+            return False, None
         if self.use_original_are:
             ok, reason = should_commit_memory(message, lane, eligibility)
             if not ok:
@@ -929,6 +1006,7 @@ class ClaireRuntime:
                 any(term in text for term in ["buy now", "sell now", "buy ", "sell ", "place order", "execute", "live trade"])
                 or ("place" in text and "trade" in text)
                 or ("live" in text and "trade" in text)
+                or text.strip() in {"i approve it", "approved", "yes approve", "i approve", "go ahead"}
             )
         )
         if live_trade_request:

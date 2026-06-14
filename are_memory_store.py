@@ -27,6 +27,7 @@ class MemoryEvent:
     expires_at: str | None = None
     related_entities: list[str] = field(default_factory=list)
     write_reason: str = ""
+    memory_scope: str = "PUBLIC"
 
     def normalize(self) -> "MemoryEvent":
         if not self.memory_id:
@@ -74,9 +75,13 @@ class AREMemoryStore:
                     importance_score REAL,
                     expires_at TEXT,
                     related_entities TEXT,
-                    write_reason TEXT
+                    write_reason TEXT,
+                    memory_scope TEXT DEFAULT 'PUBLIC'
                 )
             """)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(memory_events)").fetchall()}
+            if "memory_scope" not in columns:
+                conn.execute("ALTER TABLE memory_events ADD COLUMN memory_scope TEXT DEFAULT 'PUBLIC'")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memory_entities (
                     entity TEXT NOT NULL,
@@ -124,9 +129,9 @@ class AREMemoryStore:
             conn.execute("""
                 INSERT OR REPLACE INTO memory_events
                 (memory_id, timestamp_ns, user_id, session_id, lane, event_type, summary, raw_excerpt, source,
-                 confidence, provenance_hash, importance_score, expires_at, related_entities, write_reason)
+                 confidence, provenance_hash, importance_score, expires_at, related_entities, write_reason, memory_scope)
                 VALUES (:memory_id, :timestamp_ns, :user_id, :session_id, :lane, :event_type, :summary, :raw_excerpt,
-                        :source, :confidence, :provenance_hash, :importance_score, :expires_at, :related_entities, :write_reason)
+                        :source, :confidence, :provenance_hash, :importance_score, :expires_at, :related_entities, :write_reason, :memory_scope)
             """, data)
             for entity in entities:
                 conn.execute(

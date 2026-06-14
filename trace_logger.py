@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from diode_protocol import DiodeProtocol
+
 TRACE_PATH = Path("data/claire_runtime_traces.jsonl")
 TRACE_DB_PATH = Path("claire_state/claire_runtime_traces.db")
 
@@ -53,7 +55,9 @@ class TraceLogger:
             """)
 
     def log(self, record: dict[str, Any]) -> dict[str, Any]:
-        record = dict(record)
+        record = json.loads(DiodeProtocol.redact(json.dumps(dict(record), ensure_ascii=False)))
+        if not DiodeProtocol.assert_trace_safe(record):
+            raise ValueError("trace payload contains secret-like content")
         record.setdefault("trace_id", new_trace_id())
         record.setdefault("timestamp_ns", time.time_ns())
         if record["timestamp_ns"] is None:

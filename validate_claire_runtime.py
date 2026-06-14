@@ -137,7 +137,10 @@ def run() -> None:
             "steve",
             "s1",
             "crypto status on Kraken",
-            {"provider_generate": lambda messages, config: "Trading station status is inspection-only from chat."},
+            {
+                "trusted_device": True,
+                "provider_generate": lambda messages, config: "Trading station status is inspection-only from chat.",
+            },
         )
         assert_true(crypto["lane"] == "TRADING_STATION", "Crypto chat did not enter TRADING_STATION lane")
         crypto_trace = traces.get(crypto["trace_id"])
@@ -149,7 +152,10 @@ def run() -> None:
             "steve",
             "s1",
             "Check CourtListener docket updates.",
-            {"provider_generate": lambda messages, config: "CourtListener monitoring is source-gated and advisory only."},
+            {
+                "trusted_device": True,
+                "provider_generate": lambda messages, config: "CourtListener monitoring is source-gated and advisory only.",
+            },
         )
         assert_true(legal_monitor["lane"] == "LEGAL_CASE", "CourtListener chat did not enter LEGAL_CASE lane")
         legal_trace = traces.get(legal_monitor["trace_id"])
@@ -176,7 +182,7 @@ def run() -> None:
         )
         assert_true(live["lane"] == "TRADING_STATION", "Live trade request did not enter trading lane")
         assert_true(live["risk_level"] == "high", "Live trade request was not high risk")
-        assert_true("inspection-only" in live["answer"].lower() and "gated execution" in live["answer"].lower(), "Live trade request did not remain non-executing")
+        assert_true("cannot place or execute live trades" in live["answer"].lower(), "Live trade request did not remain non-executing")
 
         filing = runtime.handle_user_message(
             "steve",
@@ -186,7 +192,7 @@ def run() -> None:
         )
         assert_true(filing["lane"] == "LEGAL_CASE", "Legal filing request did not enter LEGAL_CASE lane")
         assert_true(filing["risk_level"] == "high", "Legal filing request was not high risk")
-        assert_true("cannot file" in filing["answer"].lower(), "Legal filing request did not remain non-executing")
+        assert_true("blocked from normal chat" in filing["answer"].lower(), "Legal filing request did not remain non-executing")
 
         demo = runtime.handle_user_message("steve", "s1", "Schedule a horseback ride tomorrow at 10am", {"demo_mode": True})
         assert_true(demo["demo_mode"] is True, "Demo mode flag missing")
@@ -202,6 +208,10 @@ def run() -> None:
         assert_true("active" in get_kill_switch_status(), "Kill switch adapter failed")
         assert_true(claire_courtlistener.get_courtlistener_status().get("memory_authority") is False, "CourtListener status adapter claims memory authority")
         assert_true("is valuable; market recognition depends on validation and structure" in strengthen_confidence_language("This may be valuable."), "Confidence guard failed")
+
+        from test_governed_runtime import run_all as run_governed_runtime_tests
+
+        run_governed_runtime_tests()
 
     print("validate_claire_runtime: all checks passed")
 

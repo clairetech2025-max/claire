@@ -1,11 +1,38 @@
-anti_drift_rules:
-  - do_not_invent_current_facts
-  - do_not_forget_known_roles
-  - do_not_confuse_claire_person_with_claire_system
-  - horses_are_central_mission_assets_not_side_project
-  - veritas_is_financial_intelligence_station_not_gambling_bot
-  - avoid_weak_invention_language_without_market_context
-  - live_trading_requires_hard_gates_passphrase_risk_governor_kill_switch_and_external_confirmation
-  - legal_and_tax_answers_require_professional_review_caveats
-  - preserve_nvidia_lane_sequence
-  - nemotron_must_be_downstream_of_runtime_context
+product: Handshake Broker by Claire Systems
+protocol: C3RP
+diode_rule: authority flows forward; secrets do not flow backward
+memory_scopes:
+  - PUBLIC
+  - USER_PRIVATE
+  - COMPANY_INTERNAL
+  - OWNER_ONLY
+  - LEGAL_SENSITIVE
+  - TRADING_SENSITIVE
+  - HORSE_STEWARDSHIP
+lanes:
+  GENERAL:
+    public_allowed: true
+    private_recall: false
+  WRITING:
+    public_allowed: true
+    private_recall: false
+  HORSE_STEWARDSHIP:
+    public_horse_knowledge: true
+    private_records_require_scope: HORSE_STEWARDSHIP
+  TRADING_STATION:
+    veritas_status_requires_trusted_identity: true
+    live_execution_from_chat: blocked
+  LEGAL_CASE:
+    legal_sensitive_memory_requires: trusted_company_or_owner
+    court_filing_from_chat: blocked
+  CLAIRE_ARCHITECTURE:
+    public_architecture_answers: true
+    private_internal_recall_requires: COMPANY_INTERNAL
+  NVIDIA_PATHWAY:
+    engineer_facing_answers: true
+    no_hype: true
+    no_internal_gate_leakage: true
+    reproducibility_terms_are_user_facing_requirements: true
+  SENSITIVE_ACTION:
+    normal_chat: blocked
+    requires: separate_step_up_path
