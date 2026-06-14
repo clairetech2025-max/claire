@@ -153,6 +153,17 @@ def run() -> None:
         assert_true(legal_trace["authorized_subsystem_status"]["subsystem"] == "CourtListener", "Legal lane did not inspect registered CourtListener subsystem")
         assert_true(legal_trace["authorized_subsystem_status"]["memory_authority"] is False, "CourtListener inspection became memory authority")
 
+        orientation = runtime.handle_user_message(
+            "steve",
+            "s1",
+            "Claire, before you answer, orient. Explain the difference between Claire the human person, CLAIRE the governed runtime, ARE as chronological memory authority, Nemotron as language engine, Trace as audit evidence, Veritas as financial monitoring, and CourtListener as legal monitoring. Then tell me which of those is allowed to own memory.",
+            {"provider_generate": lambda messages, config: "Internal runtime draft should not be dumped to the chat surface."},
+        )
+        assert_true(orientation["lane"] == "CLAIRE_SYSTEM_ARCHITECTURE", "Architecture orientation was misrouted to legal lane")
+        assert_true(not orientation["memory_written"], "Architecture orientation question wrote to ARE")
+        assert_true(not orientation["answer"].lstrip().startswith("{"), "Runtime report JSON leaked into visible answer")
+        assert_true("Only ARE owns CLAIRE durable memory" in orientation["answer"], "Visible orientation did not answer memory authority directly")
+
         live = runtime.handle_user_message(
             "steve",
             "s1",

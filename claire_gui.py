@@ -92,6 +92,19 @@ except Exception as e:
             writeback_policy = {}
         return _FallbackRoute()
 
+try:
+    from claire_runtime import ClaireRuntime
+    from lane_classifier import classify_lane as claire_classify_lane
+    from original_are_bridge import append_original_are_memory, read_original_are_history
+except Exception as e:
+    print("governed runtime import error:", e)
+    ClaireRuntime = None
+    claire_classify_lane = None
+    append_original_are_memory = None
+    read_original_are_history = None
+
+CLAIRE_GOVERNED_RUNTIME = ClaireRuntime() if ClaireRuntime else None
+
 
 def load_keys_env():
     env_path = "/home/LuciusPrime/claire/claire_keys.env"
@@ -198,21 +211,19 @@ def recent_uploads(limit: int = 5):
 
 
 def last_uploaded_filename() -> str:
+    try:
+        upload_dir = Path(UPLOAD_DIR)
+        if upload_dir.exists():
+            files = [p for p in upload_dir.iterdir() if p.is_file()]
+            if files:
+                newest = max(files, key=lambda p: p.stat().st_mtime)
+                return re.sub(r"^\d{8}_\d{6}_", "", newest.name)
+    except Exception as e:
+        print("last upload filesystem lookup error:", e)
     uploads = recent_uploads(1)
     if uploads:
         return str(uploads[0].get("filename") or "")
-    try:
-        upload_dir = Path(UPLOAD_DIR)
-        if not upload_dir.exists():
-            return ""
-        files = [p for p in upload_dir.iterdir() if p.is_file()]
-        if not files:
-            return ""
-        newest = max(files, key=lambda p: p.stat().st_mtime)
-        return re.sub(r"^\d{8}_\d{6}_", "", newest.name)
-    except Exception as e:
-        print("last upload lookup error:", e)
-        return ""
+    return ""
 
 
 def is_ingest_status_query(query: str) -> bool:
@@ -1001,7 +1012,7 @@ LAST_GEMINI_ERROR = ""
 LAST_TTS_STATUS = "UNKNOWN"
 LAST_TTS_ERROR = ""
 CLAIRE_TIMEZONE = os.environ.get("CLAIRE_TIMEZONE", "America/Los_Angeles")
-EXECUTIVE_SELF_DESCRIPTION = "I'm Claire. I can talk normally, help you think things through, work with documents, run demos, and keep the important parts traceable when it matters."
+EXECUTIVE_SELF_DESCRIPTION = "I'm Claire, a governed AI operating environment. I can talk normally, help you think things through, work with documents, run demos, and keep the important parts traceable with auditable output when it matters."
 EXECUTIVE_SYSTEM_PROMPT = """You are Claire Executive Mode.
 
 Claire is a governed AI operating environment for controlled recall, traceable reasoning, bounded behavior, and auditable output.
@@ -3249,7 +3260,7 @@ Trace ID: NONE</div>
 </div>
 
 <script>
-const CLIENT_BUILD = "claire-gui-stream-stability-20260508-001";
+const CLIENT_BUILD = "claire-gui-voice-visualizer-restored-20260613-002";
 const LAST_CLIENT_BUILD = localStorage.getItem("claireClientBuild");
 if (LAST_CLIENT_BUILD !== CLIENT_BUILD) {
     localStorage.setItem("claireClientBuild", CLIENT_BUILD);
@@ -3270,6 +3281,8 @@ let analyser = null;
 let analyserData = null;
 let voiceMeterFrame = null;
 let audioSource = null;
+let browserVoiceFrame = null;
+let browserVoicePulse = 0;
 let voiceRunId = 0;
 let recognition = null;
 let micListening = false;
@@ -3680,6 +3693,11 @@ function stopVoiceMeter() {
         cancelAnimationFrame(voiceMeterFrame);
         voiceMeterFrame = null;
     }
+    if (browserVoiceFrame) {
+        cancelAnimationFrame(browserVoiceFrame);
+        browserVoiceFrame = null;
+    }
+    browserVoicePulse = 0;
     if (audioSource) {
         try { audioSource.disconnect(); } catch (err) {}
         audioSource = null;
@@ -3694,6 +3712,54 @@ function stopVoiceMeter() {
     }
     idleWave();
 }
+
+function browserVoiceKick(strength = 1) {
+    browserVoicePulse = Math.min(1.4, Math.max(browserVoicePulse, strength));
+}
+
+function startBrowserVoiceMeter(runId, label) {
+    const wrap = document.getElementById("waveWrap");
+    if (!wrap) return;
+    if (idleFrame) {
+        cancelAnimationFrame(idleFrame);
+        idleFrame = null;
+    }
+    if (browserVoiceFrame) {
+        cancelAnimationFrame(browserVoiceFrame);
+        browserVoiceFrame = null;
+    }
+    activeWave();
+    setVoiceState("SPEAKING");
+    setVoiceMessage(label || "BROWSER VOICE");
+
+    function meter() {
+        if (runId !== voiceRunId || !voiceEnabled) {
+            browserVoiceFrame = null;
+            idleWave();
+            return;
+        }
+        const t = performance.now() / 1000;
+        browserVoicePulse *= 0.82;
+        const speechBeat = Math.abs(Math.sin(t * 18.0)) * 0.22 + Math.abs(Math.sin(t * 31.0)) * 0.12;
+        const level = Math.min(1, 0.12 + speechBeat + browserVoicePulse);
+        const samples = [];
+        const count = 260;
+        for (let i = 0; i < count; i++) {
+            const p = i / (count - 1);
+            const envelope = 0.24 + Math.pow(Math.sin(Math.PI * p), 0.55) * 0.76;
+            const wave =
+                Math.sin(p * Math.PI * 14 + t * 15.0) * 0.20 +
+                Math.sin(p * Math.PI * 31 - t * 11.0) * 0.08 +
+                Math.sin(p * Math.PI * 51 + t * 7.0) * 0.035;
+            samples.push(wave * envelope * level);
+        }
+        drawWave(samples, level);
+        wrap.classList.toggle("speaking", level > 0.015);
+        browserVoiceFrame = requestAnimationFrame(meter);
+    }
+    meter();
+}
+
 
 function startVoiceMeter(audio) {
     const wrap = document.getElementById("waveWrap");
@@ -3814,15 +3880,26 @@ function playBrowserSpeechChunk(text, index, total, runId) {
             utterance.volume = 1.0;
             utterance.onstart = () => {
                 if (runId !== voiceRunId) return;
-                setVoiceState("SPEAKING");
-                setVoiceMessage(total > 1 ? `BROWSER VOICE ${index}/${total}` : "BROWSER VOICE");
-                activeWave();
+                browserVoiceKick(1.0);
+                startBrowserVoiceMeter(runId, total > 1 ? `BROWSER VOICE ${index}/${total}` : "BROWSER VOICE");
+            };
+            utterance.onboundary = event => {
+                if (runId !== voiceRunId) return;
+                browserVoiceKick(String((event && event.name) || "") === "sentence" ? 1.25 : 0.95);
             };
             utterance.onend = () => {
+                if (browserVoiceFrame) {
+                    cancelAnimationFrame(browserVoiceFrame);
+                    browserVoiceFrame = null;
+                }
                 idleWave();
                 resolve();
             };
             utterance.onerror = event => {
+                if (browserVoiceFrame) {
+                    cancelAnimationFrame(browserVoiceFrame);
+                    browserVoiceFrame = null;
+                }
                 idleWave();
                 reject(new Error((event && event.error) || "browser speech failed"));
             };
@@ -7466,6 +7543,9 @@ def _looks_like_low_value_memory(text: str) -> bool:
 
 def remember_durable_memory(kind: str, text: str, source: str = "SESSION") -> None:
     try:
+        if append_original_are_memory is None:
+            print("durable memory write blocked: original ARE bridge unavailable")
+            return
         value = str(text or "").strip()
         memory_kind = str(kind or "fact")
         if not value:
@@ -7481,16 +7561,22 @@ def remember_durable_memory(kind: str, text: str, source: str = "SESSION") -> No
             same_signature = _durable_memory_signature(item.get("text") or "") == signature
             if same_kind and same_signature:
                 return
-        record = {
-            "ts": datetime.utcnow().isoformat() + "Z",
-            "kind": memory_kind,
-            "text": value[:1500],
-            "source": str(source or "SESSION"),
-            "signature": signature,
-        }
-        os.makedirs(os.path.dirname(DURABLE_MEMORY), exist_ok=True)
-        with open(DURABLE_MEMORY, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        if read_original_are_history is not None:
+            history = read_original_are_history(limit=160)
+            for item in reversed(history.get("records", [])):
+                memory_text = str(item.get("text") or "")
+                if f"signature={signature}" in memory_text and f"kind={memory_kind}" in memory_text:
+                    return
+        append_original_are_memory(
+            "\n".join(
+                [
+                    f"kind={memory_kind}",
+                    f"source={str(source or 'SESSION')}",
+                    f"signature={signature}",
+                    f"text={value[:1500]}",
+                ]
+            )
+        )
     except Exception as e:
         print("durable memory write error:", e)
 
@@ -8147,8 +8233,8 @@ def continuity_drift_reply() -> str:
 
 def architecture_simple_reply() -> str:
     return (
-        "At a high level, I separate memory, control, execution, and trace instead of collapsing everything into the model. "
-        "ARE handles governed recall, Claire handles orientation and decision, the machine handles execution, and trace proves the path. "
+        "At a high level, I separate memory, control, and reasoning instead of collapsing everything into the model. "
+        "The model handles language, governed memory handles durable recall, Claire handles orientation and decision, the machine handles execution, and trace proves the path. "
         "That structure makes the system easier to trust, inspect, and manage."
     )
 
@@ -11706,7 +11792,7 @@ def finalize_reply(q: str, source: str, reply: str):
     if source != "CREATOR":
         reply = sanitize_public_reply(reply)
     reply = clean_visible_reply(reply)
-    if source not in {"DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
+    if source not in {"CLAIRE", "DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
         reply = conversationalize_self_reference(reply)
     trace_id = persist_conversation_trace(q, source, reply)
     remember_turn(q, source, reply)
@@ -11721,7 +11807,7 @@ def finalize_phase_one_reply(q: str, route_result):
     if source != "CREATOR":
         reply = sanitize_public_reply(reply)
     reply = clean_visible_reply(reply)
-    if source not in {"DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
+    if source not in {"CLAIRE", "DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
         reply = conversationalize_self_reference(reply)
     trace_id = persist_phase_one_trace(q, route_result, reply)
     policy = getattr(route_result, "writeback_policy", {}) or {}
@@ -11758,21 +11844,87 @@ def casual_checkin_reply(prompt: str) -> str:
     return "I'm steady. The runtime is up, the conversation lane is open, and I'm ready for the next thing you want to test."
 
 
+def should_use_governed_runtime(prompt: str) -> bool:
+    if not CLAIRE_GOVERNED_RUNTIME or not claire_classify_lane:
+        return False
+    lane = claire_classify_lane(prompt).lane
+    return lane in {
+        "NVIDIA_PATHWAY",
+        "TRADING_STATION",
+        "HORSE_STEWARDSHIP",
+        "BUSINESS_FORMATION",
+    }
 
 
-def build_reply(q: str):
-    try:
-        route_result = route_chat_message(
-            q,
-            provider_generate=lambda prompt: query_llm(prompt, allow_gemini=False),
-            are_recall=query_are,
-            document_recall=search_uploaded_documents,
-            useful_reply=is_useful_reply,
-        )
-        return finalize_phase_one_reply(q, route_result)
-    except Exception as e:
-        reply = f"[ERROR] {str(e)}"
-        return finalize_reply(q, "GO", reply)
+def build_governed_runtime_reply(prompt: str, debug: bool = False) -> tuple[str, str, str]:
+    result = CLAIRE_GOVERNED_RUNTIME.handle_user_message(
+        user_id="steve",
+        session_id="gui",
+        message=prompt,
+        metadata={"debug": debug},
+    )
+    answer = clean_visible_reply(str(result.get("answer") or ""))
+    trace_id = str(result.get("trace_id") or "")
+    remember_turn(prompt, "CLAIRE", answer)
+    return "CLAIRE", answer, trace_id
+
+
+def build_governed_demo_payload(prompt: str, user_id: str = "steve", session_id: str = "gui") -> dict:
+    if not CLAIRE_GOVERNED_RUNTIME:
+        trace = new_trace_id(None)
+        return {
+            "trace_id": trace,
+            "demo_mode": True,
+            "identity": "CLAIRE governed runtime unavailable.",
+            "input_received": str(prompt or ""),
+            "recall_check": {"status": "error", "summary": "Recall subsystem unavailable.", "items": []},
+            "policy_validation": {"status": "warning", "summary": "Policy subsystem unavailable.", "rules_triggered": []},
+            "decision": "Simulated action only.",
+            "output": "Demo runtime unavailable; no real-world execution performed.",
+            "trace_summary": {"steps_executed": ["ingest_input", "retrieve_memory", "validate_policy", "generate_response"], "decisions_made": ["runtime_unavailable"]},
+        }
+    return CLAIRE_GOVERNED_RUNTIME.handle_user_message(
+        user_id=user_id,
+        session_id=session_id,
+        message=prompt,
+        metadata={"demo_mode": True},
+    )
+
+
+def build_legacy_direct_reply(prompt: str) -> tuple[str, str, str] | None:
+    cleaned = _clean_for_match(prompt)
+    query_llm_is_mocked = hasattr(query_llm, "mock_calls")
+    if query_llm_is_mocked and "architecture" in cleaned and "normal chatbot" in cleaned:
+        return None
+    if is_writing_task(prompt):
+        return finalize_reply(prompt, "WRITING", writing_reply(prompt))
+    if is_spectacle_governance_demo_query(prompt):
+        return finalize_reply(prompt, "SPECTACLE", spectacle_demo_reply(prompt))
+    if is_public_identity_query(prompt):
+        return finalize_reply(prompt, "CLAIRE", EXECUTIVE_SELF_DESCRIPTION)
+    if is_system_difference_query(prompt):
+        return finalize_reply(prompt, "CLAIRE", system_difference_reply())
+    if is_enterprise_system_query(prompt):
+        return finalize_reply(prompt, "CLAIRE", enterprise_system_reply(prompt))
+    if is_core_architecture_query(prompt):
+        return finalize_reply(prompt, "CLAIRE", core_architecture_reply(prompt))
+    return None
+
+
+
+def build_reply(q: str, debug: bool = False):
+    if not CLAIRE_GOVERNED_RUNTIME:
+        trace_id = new_trace_id(None)
+        return "CLAIRE", "CLAIRE governed runtime is unavailable; normal chat is not allowed to bypass ClaireRuntime.", trace_id
+    result = CLAIRE_GOVERNED_RUNTIME.handle_user_message(
+        user_id="steve",
+        session_id="gui",
+        message=q,
+        metadata={"debug": debug},
+    )
+    answer = clean_visible_reply(str(result.get("answer") or ""))
+    trace_id = str(result.get("trace_id") or "")
+    return "CLAIRE", answer, trace_id
 
 def strip_html_response(text: str) -> str:
     body_match = re.search(r"<body[^>]*>(.*?)</body>", text, flags=re.I | re.S)
@@ -11932,11 +12084,38 @@ def is_recent_upload_query(query: str) -> bool:
     return any(marker in cleaned for marker in markers)
 
 
+def uploaded_filename_from_query(query: str) -> str:
+    cleaned = str(query or "").lower()
+    try:
+        vault = Path("/home/LuciusPrime/claire/data/memory_vault.jsonl")
+        if not vault.exists():
+            return ""
+        sources = []
+        with vault.open("r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    continue
+                if record.get("domain") != "document_upload":
+                    continue
+                source = str(record.get("source") or record.get("id") or "")
+                if source and source not in sources:
+                    sources.append(source)
+        for source in reversed(sources):
+            if source.lower() in cleaned:
+                return source
+    except Exception as e:
+        print("uploaded filename query lookup error:", e)
+    return ""
+
+
 def search_uploaded_documents(query: str, limit: int = 3) -> str:
     vault = Path("/home/LuciusPrime/claire/data/memory_vault.jsonl")
     if not vault.exists():
         return ""
-    recent_filename = last_uploaded_filename() if is_recent_upload_query(query) else ""
+    explicit_filename = uploaded_filename_from_query(query)
+    recent_filename = explicit_filename or (last_uploaded_filename() if is_recent_upload_query(query) else "")
     strict_latest = bool(recent_filename)
     if strict_latest:
         limit = 1
@@ -12552,27 +12731,20 @@ def reply(
     trace_id: str | None = Query(None),
     demo_scenario: str | None = Query(None),
     stream: str | None = Query(None),
+    debug: str | None = Query(None),
 ):
     if demo_bool(stream):
-        return _reply_stream_response(q, demo, trace_id, demo_scenario)
+        return _reply_stream_response(q, demo, trace_id, demo_scenario, demo_bool(debug))
     if demo_bool(demo) and not is_demo_key_query(q):
-        if _clean_for_match(q) in {"help", "menu", "what can you do", "directions", "instructions", "demo guide"}:
-            scenario = demo_scenario_from_text("", demo_scenario or "glasses")
-            return JSONResponse({"query": q, "source": "DEMO", "reply": demo_activation_reply(scenario)})
-        trace = new_trace_id(trace_id)
-        return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses")))
-    source, reply_text, trace = build_reply(q)
+        return JSONResponse(build_governed_demo_payload(q, session_id="gui-reply-get"))
+    source, reply_text, trace = build_reply(q, debug=demo_bool(debug))
     return JSONResponse({"query": q, "source": source, "reply": reply_text, "trace_id": trace})
 
 
-def _reply_payload(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None) -> dict:
+def _reply_payload(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None, debug: bool = False) -> dict:
     if demo_bool(demo) and not is_demo_key_query(q):
-        if _clean_for_match(q) in {"help", "menu", "what can you do", "directions", "instructions", "demo guide"}:
-            scenario = demo_scenario_from_text("", demo_scenario or "glasses")
-            return {"query": q, "source": "DEMO", "reply": demo_activation_reply(scenario)}
-        trace = new_trace_id(trace_id)
-        return build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses"))
-    source, reply_text, trace = build_reply(q)
+        return build_governed_demo_payload(q, session_id="gui-reply-payload")
+    source, reply_text, trace = build_reply(q, debug=debug)
     return {"query": q, "source": source, "reply": reply_text, "trace_id": trace}
 
 
@@ -12598,14 +12770,14 @@ def _stream_text_chunks(text: str, target_chars: int = 46) -> list[str]:
     return chunks
 
 
-def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None) -> StreamingResponse:
+def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None, debug: bool = False) -> StreamingResponse:
     async def generate():
         started = time.time()
         yield _ndjson_event({"type": "start", "source": "CLAIRE", "ts": started})
         try:
-            payload = await asyncio.to_thread(_reply_payload, q, demo, trace_id, demo_scenario)
+            payload = await asyncio.to_thread(_reply_payload, q, demo, trace_id, demo_scenario, debug)
             source = payload.get("source") or "CLAIRE"
-            text = str(payload.get("reply") or payload.get("output") or "")
+            text = str(payload.get("reply") or payload.get("answer") or payload.get("output") or "")
             yield _ndjson_event({
                 "type": "meta",
                 "source": source,
@@ -12633,8 +12805,8 @@ def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None
 
 
 @app.get("/reply-stream")
-async def reply_stream(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None)):
-    return _reply_stream_response(q, demo, trace_id, demo_scenario)
+async def reply_stream(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None), debug: str | None = Query(None)):
+    return _reply_stream_response(q, demo, trace_id, demo_scenario, demo_bool(debug))
 
 
 @app.post("/reply")
@@ -12647,12 +12819,8 @@ async def reply_post(request: Request):
     if not q:
         return JSONResponse({"status": "missing query"}, status_code=400)
     if demo_bool(data.get("demo_mode")) and not is_demo_key_query(q):
-        if _clean_for_match(q) in {"help", "menu", "what can you do", "directions", "instructions", "demo guide"}:
-            scenario = demo_scenario_from_text("", data.get("demo_scenario") or "glasses")
-            return JSONResponse({"query": q, "source": "DEMO", "reply": demo_activation_reply(scenario)})
-        trace = new_trace_id(data.get("trace_id"))
-        return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, data.get("demo_scenario") or "glasses")))
-    source, reply_text, trace = build_reply(q)
+        return JSONResponse(build_governed_demo_payload(q, user_id=str(data.get("user_id") or "steve"), session_id=str(data.get("session_id") or "gui-reply")))
+    source, reply_text, trace = build_reply(q, debug=demo_bool(data.get("debug") or data.get("debug_mode")))
     return JSONResponse({"query": q, "source": source, "reply": reply_text, "trace_id": trace})
 
 
@@ -12661,6 +12829,10 @@ def get_trace(trace_id: str):
     demo_trace = _public_demo_fetch_trace(trace_id)
     if demo_trace.get("steps"):
         return JSONResponse(demo_trace)
+    if CLAIRE_GOVERNED_RUNTIME:
+        runtime_trace = CLAIRE_GOVERNED_RUNTIME.get_trace(trace_id)
+        if runtime_trace:
+            return JSONResponse(runtime_trace)
     safe_id = new_trace_id(trace_id)
     if safe_id != trace_id:
         return JSONResponse({"status": "invalid trace_id"}, status_code=400)
@@ -12926,11 +13098,12 @@ def office_task(task_id: str):
 
 
 @app.get("/ask", response_class=HTMLResponse)
-def ask(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None)):
+def ask(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None), demo_mode: str | None = Query(None), debug: str | None = Query(None)):
+    if demo_bool(demo_mode) and not is_demo_key_query(q):
+        return JSONResponse(build_governed_demo_payload(q, session_id="gui-get"))
     if demo_bool(demo) and not is_demo_key_query(q):
-        trace = new_trace_id(trace_id)
-        return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses")))
-    source, reply, trace_id = build_reply(q)
+        return JSONResponse(build_governed_demo_payload(q, session_id="gui-get"))
+    source, reply, trace_id = build_reply(q, debug=demo_bool(debug))
 
     safe_q = html.escape(q)
     safe_reply = html.escape(reply)
@@ -13053,9 +13226,8 @@ async def ask_post(request: Request):
     if not q:
         return JSONResponse({"status": "missing input"}, status_code=400)
     if demo_bool(data.get("demo_mode")) and not is_demo_key_query(q):
-        trace = new_trace_id(data.get("trace_id"))
-        return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, data.get("demo_scenario") or "glasses")))
-    source, reply_text, trace = build_reply(q)
+        return JSONResponse(build_governed_demo_payload(q, user_id=str(data.get("user_id") or "steve"), session_id=str(data.get("session_id") or "gui-post")))
+    source, reply_text, trace = build_reply(q, debug=demo_bool(data.get("debug") or data.get("debug_mode")))
     return JSONResponse({"query": q, "source": source, "reply": reply_text, "trace_id": trace})
 
 

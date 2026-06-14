@@ -55,6 +55,7 @@ class ClaireRuntime:
         trace_id = new_trace_id()
 
         normalized = self._normalize_input(message)
+        debug_enabled = self._debug_enabled(metadata, normalized)
         c3rp_route = self._c3rp_route(normalized)
         lane_result = self._lane_result_from_c3rp(normalized, c3rp_route, metadata.get("recent_context"))
         lane = lane_result.lane
@@ -66,7 +67,7 @@ class ClaireRuntime:
         entities = identify_entities(normalized)
         entity_names = [entity["name"] for entity in entities]
         eligibility = evaluate_memory_eligibility(normalized, lane)
-        recent_path, long_term_memories = self._recall_memory(user_id, lane_result, entity_names)
+        recent_path, long_term_memories, rejected_memories = self._recall_memory(user_id, lane_result, entity_names, normalized)
         risk_level, risks = self._risk_authority_gate(lane, normalized)
         constraints = self._constraints(lane)
 
@@ -87,13 +88,15 @@ class ClaireRuntime:
             provider_generate=metadata.get("provider_generate"),
         )
         answer = str(raw_response.get("content") or "").strip()
+        answer = self.sanitize_user_answer(answer, debug=debug_enabled)
         answer = strengthen_confidence_language(answer)
         if lane == "NVIDIA_PATHWAY":
             answer = apply_nvidia_mode(answer)
+        answer = self._redact_sensitive(answer)
 
         validator_result = validate_response(answer, context_packet, lane)
         if not validator_result.get("approved") and validator_result.get("revised_answer"):
-            answer = str(validator_result["revised_answer"])
+            answer = self.sanitize_user_answer(str(validator_result["revised_answer"]), debug=debug_enabled)
 
         runtime_report = None
         if self._wants_runtime_orientation(normalized):
@@ -108,14 +111,14 @@ class ClaireRuntime:
                 validator_result=validator_result,
                 model_answer=answer,
             )
-            answer = json.dumps(runtime_report, ensure_ascii=False, indent=2)
+            answer = self._visible_orientation_answer(normalized, runtime_report, answer)
 
         memory_written, memory_event = self._commit_memory(
             user_id=user_id,
             session_id=session_id,
-            message=normalized,
+            message=self._redact_sensitive(normalized),
             lane=lane,
-            answer=answer,
+            answer=self._redact_sensitive(answer),
             eligibility=eligibility,
         )
 
@@ -127,7 +130,20 @@ class ClaireRuntime:
             "trace_id": trace_id,
             "memory_written": memory_written,
         }
-        if runtime_report is not None:
+        if debug_enabled:
+            result["debug"] = self._safe_debug_payload(
+                trace_id=trace_id,
+                lane=lane,
+                risk_level=risk_level,
+                used_memory=result["used_memory"],
+                memory_written=memory_written,
+                validator_result=validator_result,
+                runtime_report=runtime_report,
+            )
+            if self._wants_debug_visible(normalized):
+                answer = self._append_visible_debug(answer, result["debug"])
+                result["answer"] = answer
+        if runtime_report is not None and debug_enabled:
             result["runtime_report"] = runtime_report
         trace_record = {
             "trace_id": trace_id,
@@ -139,6 +155,7 @@ class ClaireRuntime:
             "lane_result": lane_result.to_dict() if hasattr(lane_result, "to_dict") else lane_result.__dict__,
             "c3rp_route": c3rp_route,
             "memories_recalled": result["used_memory"],
+            "memories_rejected": rejected_memories,
             "prompt_hash": sha_text(messages_to_prompt(messages)),
             "model_used": self._model_used(raw_response),
             "risk_level": risk_level,
@@ -167,6 +184,94 @@ class ClaireRuntime:
         if self.memory_store is not None:
             self.memory_store.append_session_trace(trace_id, user_id, session_id, lane, trace_record)
         return result
+
+    INTERNAL_LINE_PATTERNS = [
+        re.compile(r"^\s*CLAIRE processed the message through the governed runtime before Nemotron\.?.*$", re.I),
+        re.compile(r"^\s*(Lane|Risk|Risk level|Answer basis|Current request|Memory eligibility|Trace|Trace ID|Sentinel|Authority gates|Runtime|Context packet|Subsystem attachment notes)\s*[:=].*$", re.I),
+    ]
+    SENSITIVE_PATTERNS = [
+        re.compile(r"\bBATTLEBORN[_-][A-Z0-9_\-]+\b", re.I),
+        re.compile(r"\bexecution passphrase\s+is\s+\S+", re.I),
+        re.compile(r"\b(passphrase|password|private key|api key|secret)\s*[:=]?\s*\S+", re.I),
+    ]
+
+    def _debug_enabled(self, metadata: dict[str, Any], message: str) -> bool:
+        return bool(metadata.get("debug") or metadata.get("debug_mode") or self._wants_debug_visible(message))
+
+    def _wants_debug_visible(self, message: str) -> bool:
+        text = str(message or "").lower()
+        return any(
+            marker in text
+            for marker in [
+                "show runtime trace",
+                "show debug",
+                "show lane",
+                "show your routing",
+                "debug lane",
+            ]
+        )
+
+    def _redact_sensitive(self, text: str) -> str:
+        clean = str(text or "")
+        for pattern in self.SENSITIVE_PATTERNS:
+            clean = pattern.sub("[REDACTED]", clean)
+        return clean
+
+    def sanitize_user_answer(self, answer: str, debug: bool = False) -> str:
+        text = self._redact_sensitive(str(answer or "").replace("\r\n", "\n").replace("\r", "\n"))
+        if debug:
+            return text.strip()
+        lines: list[str] = []
+        for line in text.splitlines():
+            if any(pattern.match(line) for pattern in self.INTERNAL_LINE_PATTERNS):
+                continue
+            lines.append(line)
+        clean = "\n".join(lines).strip()
+        clean = re.sub(r"\n{3,}", "\n\n", clean)
+        if not clean:
+            clean = "I can help with that. Tell me the specific outcome you want, and I will give a direct next step."
+        return clean
+
+    def _safe_debug_payload(
+        self,
+        *,
+        trace_id: str,
+        lane: str,
+        risk_level: str,
+        used_memory: list[str],
+        memory_written: bool,
+        validator_result: dict[str, Any],
+        runtime_report: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload = {
+            "trace_id": trace_id,
+            "lane": lane,
+            "risk_level": risk_level,
+            "used_memory": used_memory,
+            "memory_written": memory_written,
+            "validator_issues": list((validator_result or {}).get("issues") or []),
+        }
+        if runtime_report:
+            payload["runtime_report_summary"] = {
+                "lane": runtime_report.get("lane"),
+                "should_write_to_ARE": runtime_report.get("should_write_to_ARE"),
+                "recall_summary": runtime_report.get("recall_summary"),
+            }
+        return json.loads(self._redact_sensitive(json.dumps(payload, ensure_ascii=False)))
+
+    def _append_visible_debug(self, answer: str, debug_payload: dict[str, Any]) -> str:
+        debug_lines = [
+            "",
+            "Debug:",
+            f"Lane: {debug_payload.get('lane')}",
+            f"Risk: {debug_payload.get('risk_level')}",
+            f"Trace: {debug_payload.get('trace_id')}",
+            f"Memory written: {debug_payload.get('memory_written')}",
+        ]
+        issues = debug_payload.get("validator_issues") or []
+        if issues:
+            debug_lines.append("Validator issues: " + ", ".join(map(str, issues)))
+        return self._redact_sensitive(str(answer or "").strip() + "\n" + "\n".join(debug_lines)).strip()
 
     def _subsystem_status_for_lane(self, lane: str) -> dict[str, Any]:
         if lane == "TRADING_STATION":
@@ -472,14 +577,21 @@ class ClaireRuntime:
             "tracked cases",
         ]
         lowered_message = str(message or "").lower()
-        if any(marker in lowered_message for marker in finance_markers):
+        architecture_orientation = (
+            any(marker in lowered_message for marker in ["difference between", "allowed to own memory", "own memory", "governed runtime", "chronological memory authority"])
+            and any(marker in lowered_message for marker in ["claire", "are", "nemotron", "trace"])
+        )
+        if self._has_finance_marker(lowered_message, finance_markers):
             lane = "TRADING_STATION"
             reason = f"C3RP route={c3rp_lane}; finance/trading marker admitted to TRADING_STATION."
-        if any(marker in lowered_message for marker in legal_monitor_markers):
+        if architecture_orientation:
+            lane = "CLAIRE_SYSTEM_ARCHITECTURE"
+            reason = f"C3RP route={c3rp_lane}; architecture/orientation question admitted to CLAIRE_SYSTEM_ARCHITECTURE."
+        elif any(marker in lowered_message for marker in legal_monitor_markers):
             lane = "LEGAL_CASE"
             reason = f"C3RP route={c3rp_lane}; legal-monitor marker admitted to LEGAL_CASE."
 
-        if c3rp_lane == "LEGAL_RESEARCH":
+        if c3rp_lane == "LEGAL_RESEARCH" and not architecture_orientation:
             lane = "LEGAL_CASE"
         elif c3rp_lane == "DOCUMENT_QA":
             lane = "GENERAL_CHAT"
@@ -514,6 +626,18 @@ class ClaireRuntime:
             output_style=base.output_style,
         )
 
+    def _has_finance_marker(self, lowered_message: str, finance_markers: list[str]) -> bool:
+        for marker in finance_markers:
+            marker = str(marker or "").lower().strip()
+            if not marker:
+                continue
+            if re.fullmatch(r"[a-z0-9]{2,4}", marker):
+                if re.search(rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])", lowered_message):
+                    return True
+            elif marker in lowered_message:
+                return True
+        return False
+
     def _wants_runtime_orientation(self, message: str) -> bool:
         text = str(message or "").lower()
         triggers = [
@@ -525,6 +649,25 @@ class ClaireRuntime:
             "orient first",
         ]
         return any(trigger in text for trigger in triggers)
+
+    def _visible_orientation_answer(self, message: str, runtime_report: dict[str, Any], model_answer: str) -> str:
+        text = str(message or "").lower()
+        if all(marker in text for marker in ["claire", "are", "nemotron", "trace"]) and "own memory" in text:
+            return (
+                "Claire is the human person. CLAIRE is the governed AI/runtime system.\n\n"
+                "ARE is the chronological memory authority: append-only records, timestamp, short hash, preserved text, ordered recall.\n\n"
+                "Nemotron is only the language engine. It can draft words, but it does not own memory.\n\n"
+                "Trace is audit evidence. It records what happened; it is not memory authority.\n\n"
+                "Veritas is financial monitoring: market data, risk checks, paper-trade ledgers. It is not CLAIRE memory.\n\n"
+                "CourtListener is legal monitoring: docket/case research and source evidence. It is not CLAIRE memory.\n\n"
+                "Only ARE owns CLAIRE durable memory. Trace, Veritas, and CourtListener may keep their own audit or subsystem ledgers, but they do not become CLAIRE's memory."
+            )
+        return (
+            f"Runtime orientation: lane={runtime_report.get('lane')}; "
+            f"memory_write={runtime_report.get('should_write_to_ARE')}; "
+            f"risk={runtime_report.get('Sentinel_checks', {}).get('risk_level')}.\n\n"
+            f"{model_answer}"
+        ).strip()
 
     def _build_runtime_report(
         self,
@@ -594,10 +737,28 @@ class ClaireRuntime:
         user_id: str,
         lane_result: LaneResult,
         entity_names: list[str],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        query: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        rejected: list[dict[str, Any]] = []
+
+        def reject(memory: dict[str, Any], reason: str) -> None:
+            rejected.append(
+                {
+                    "memory_id": memory.get("memory_id"),
+                    "lane": memory.get("lane"),
+                    "reason": reason,
+                }
+            )
+
+        def admit(memory: dict[str, Any]) -> bool:
+            ok, reason = self._memory_supports_active_query(query, lane_result, memory, entity_names)
+            if not ok:
+                reject(memory, reason)
+            return ok
+
         if self.use_original_are:
             history = read_original_are_history(limit=8)
-            memories = [
+            candidates = [
                 {
                     "memory_id": f"original_are_{item.get('sha') or item.get('line_number')}",
                     "timestamp_ns": int(item.get("ts") or 0) * 1_000_000_000,
@@ -609,8 +770,9 @@ class ClaireRuntime:
                 }
                 for item in history.get("records", [])
             ]
+            memories = [memory for memory in candidates if admit(memory)]
             memories.sort(key=lambda memory: int(memory.get("timestamp_ns") or 0))
-            return memories[-5:], memories[:-5]
+            return memories[-5:], memories[:-5], rejected
 
         allowed = set(lane_result.allowed_memory_lanes or [lane_result.lane])
         primary_lane = lane_result.lane
@@ -624,11 +786,70 @@ class ClaireRuntime:
         ordered: list[dict[str, Any]] = []
         for memory in recent + entity_hits:
             memory_id = str(memory.get("memory_id") or "")
-            if memory_id and memory_id not in seen and lane_allowed(memory):
+            if not memory_id or memory_id in seen:
+                continue
+            if not lane_allowed(memory):
+                reject(memory, "lane_not_allowed")
+                continue
+            if admit(memory):
                 seen.add(memory_id)
                 ordered.append(memory)
         ordered.sort(key=lambda memory: int(memory.get("timestamp_ns") or 0))
-        return ordered[-5:], ordered[:-5]
+        return ordered[-5:], ordered[:-5], rejected
+
+    def _memory_supports_active_query(
+        self,
+        query: str,
+        lane_result: LaneResult,
+        memory: dict[str, Any],
+        entity_names: list[str],
+    ) -> tuple[bool, str]:
+        memory_lane = str(memory.get("lane") or "")
+        lane = str(lane_result.lane or "")
+        allowed = set(lane_result.allowed_memory_lanes or [lane])
+        if memory_lane not in allowed and memory_lane not in {"GENERAL_CHAT", "SESSION", "ORIGINAL_ARE"}:
+            return False, "lane_not_allowed"
+
+        text = " ".join(str(memory.get(key) or "") for key in ("summary", "raw_excerpt", "source", "lane")).lower()
+        if not text.strip():
+            return False, "empty_memory"
+
+        query_terms = self._support_terms(query)
+        memory_terms = set(re.findall(r"[a-z0-9']+", text))
+        if not query_terms:
+            return False, "no_distinctive_query_terms"
+
+        if entity_names:
+            lowered_entities = [entity.lower() for entity in entity_names if entity]
+            if any(entity and entity in text for entity in lowered_entities):
+                return True, "entity_match"
+
+        overlap = query_terms.intersection(memory_terms)
+        if len(overlap) >= 2:
+            return True, "semantic_term_overlap"
+
+        architecture_lanes = {"CLAIRE_SYSTEM_ARCHITECTURE", "NVIDIA_PATHWAY", "BUSINESS_FORMATION"}
+        if lane in architecture_lanes and overlap and any(
+            term in memory_terms
+            for term in {"claire", "are", "runtime", "sentinel", "trace", "memory", "veritas", "governance"}
+        ):
+            return True, "architecture_support_match"
+
+        return False, "semantic_mismatch"
+
+    def _support_terms(self, text: str) -> set[str]:
+        stopwords = {
+            "about", "after", "again", "also", "because", "before", "being", "between",
+            "could", "does", "doing", "from", "have", "into", "just", "like", "more",
+            "must", "only", "over", "should", "that", "their", "them", "then", "there",
+            "these", "they", "this", "what", "when", "where", "which", "with", "would",
+            "your", "youre", "answer", "explain", "give", "tell",
+        }
+        return {
+            term
+            for term in re.findall(r"[a-z0-9']+", str(text or "").lower())
+            if len(term) > 3 and term not in stopwords
+        }
 
     def _recall_demo_memory(self, user_id: str, lane: str) -> list[dict[str, Any]]:
         if self.use_original_are:
@@ -702,7 +923,15 @@ class ClaireRuntime:
     def _risk_authority_gate(self, lane: str, message: str) -> tuple[str, list[str]]:
         text = message.lower()
         risks: list[str] = []
-        if lane == "TRADING_STATION" and any(term in text for term in ["buy now", "sell now", "buy ", "sell ", "place order", "execute", "live trade"]):
+        live_trade_request = (
+            lane == "TRADING_STATION"
+            and (
+                any(term in text for term in ["buy now", "sell now", "buy ", "sell ", "place order", "execute", "live trade"])
+                or ("place" in text and "trade" in text)
+                or ("live" in text and "trade" in text)
+            )
+        )
+        if live_trade_request:
             risks.append("Live trading requires Veritas live gates, passphrase, risk governor, kill switch check, and external confirmation.")
         if lane == "LEGAL_CASE":
             risks.append("Legal lane requires source gating and no professional-certainty claims.")

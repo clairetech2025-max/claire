@@ -2,6 +2,7 @@
 .env
 *.env
 claire_keys.env
+keys/
 
 # Python/Go build artifacts
 __pycache__/
@@ -19,12 +20,15 @@ creator_venv/
 .venv/
 
 # Logs and runtime state
+*.db
+*.sqlite
 *.log
 logs/
 server.log
 are.log
 claire.log
 nohup.out
+claire_state/claire_runtime_traces.db
 
 # Local data, uploads, generated reports, and model assets
 data/
@@ -35,6 +39,8 @@ exports/
 models/
 certs/
 void/
+backups/
+private_payloads/
 private_repo_payloads/
 
 # Large vendored or nested repositories

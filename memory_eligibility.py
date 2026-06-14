@@ -13,6 +13,17 @@ class MemoryMode(str, Enum):
     QUARANTINED = "QUARANTINED"
 
 
+MEMORY_CATEGORIES = {
+    "EPHEMERAL",
+    "SESSION_ONLY",
+    "PROJECT_MEMORY",
+    "BUSINESS_MEMORY",
+    "LEGAL_MEMORY",
+    "PERSONAL_MEMORY",
+    "SENSITIVE_MEMORY",
+}
+
+
 @dataclass
 class MemoryEligibility:
     mode: MemoryMode
@@ -20,6 +31,10 @@ class MemoryEligibility:
     allowed_lanes: list[str] = field(default_factory=list)
     required_evidence: bool = False
     reason: str = ""
+    category: str = "EPHEMERAL"
+    should_consider_write: bool = False
+    requires_confirmation: bool = False
+    importance_score: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -97,3 +112,92 @@ def determine_memory_eligibility(normalized_input: dict[str, Any], lane_result: 
 
     return MemoryEligibility(mode=MemoryMode.OFF, reason=f"No eligible memory needed for {lane or 'unknown'} lane.")
 
+
+def evaluate_memory_eligibility(message: str, lane: str, importance_score: float = 0.5) -> MemoryEligibility:
+    text = str(message or "").lower()
+    lane = str(lane or "UNKNOWN").upper()
+    explicit = any(marker in text for marker in ["remember this", "save this", "note this", "log this"])
+    sensitive = any(marker in text for marker in ["ssn", "social security", "password", "passphrase", "private key", "api key", "bank account", "battleborn_"])
+    explanatory = any(
+        marker in text
+        for marker in [
+            "explain",
+            "what is",
+            "what are",
+            "what does",
+            "which of",
+            "tell me which",
+            "difference between",
+            "before you answer",
+            "orient first",
+        ]
+    )
+
+    if sensitive:
+        return MemoryEligibility(
+            mode=MemoryMode.QUARANTINED,
+            reason="Sensitive content requires confirmation before durable memory.",
+            category="SENSITIVE_MEMORY",
+            should_consider_write=False,
+            requires_confirmation=True,
+            importance_score=0.1,
+        )
+
+    durable_markers = [
+        "remember this",
+        "save this",
+        "milestone",
+        "confirmed",
+        "role",
+        "officer",
+        "member",
+        "filed",
+        "incorporated",
+        "ein",
+        "operating agreement",
+        "nvidia",
+        "nemotron",
+        "veritas",
+        "are",
+        "horse",
+        "pedro",
+        "wyoming",
+        "benchmark",
+        "commit",
+    ]
+    if explanatory and not explicit:
+        return MemoryEligibility(
+            mode=MemoryMode.OFF,
+            reason="Explanatory/orientation request should not create durable memory by itself.",
+            category="EPHEMERAL",
+            should_consider_write=False,
+            requires_confirmation=False,
+            importance_score=min(importance_score, 0.4),
+        )
+
+    durable = explicit or any(marker in text for marker in durable_markers)
+
+    if lane == "LEGAL_CASE" and durable:
+        category = "LEGAL_MEMORY"
+    elif lane == "BUSINESS_FORMATION" and durable:
+        category = "BUSINESS_MEMORY"
+    elif lane in {"CLAIRE_SYSTEM_ARCHITECTURE", "NVIDIA_PATHWAY", "TRADING_STATION", "HORSE_STEWARDSHIP"} and durable:
+        category = "PROJECT_MEMORY"
+    elif explicit:
+        category = "PROJECT_MEMORY"
+    elif lane == "PERSONAL_SUPPORT":
+        category = "PERSONAL_MEMORY"
+    else:
+        category = "EPHEMERAL"
+
+    should_write = category in {"PROJECT_MEMORY", "BUSINESS_MEMORY", "LEGAL_MEMORY"} and durable
+    return MemoryEligibility(
+        mode=MemoryMode.SUPPORT if should_write else MemoryMode.OFF,
+        allowed_stores=["are"] if should_write else [],
+        allowed_lanes=[lane] if should_write else [],
+        reason="Durable governed memory signal found." if should_write else "No durable memory write required.",
+        category=category,
+        should_consider_write=should_write,
+        requires_confirmation=False,
+        importance_score=max(importance_score, 0.65) if should_write else min(importance_score, 0.4),
+    )
