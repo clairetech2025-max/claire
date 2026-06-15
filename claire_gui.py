@@ -3265,7 +3265,7 @@ Trace ID: NONE</div>
 </div>
 
 <script>
-const CLIENT_BUILD = "claire-gui-voice-visualizer-ribbon-20260614-001";
+const CLIENT_BUILD = "claire-gui-long-prompt-stream-post-20260615-001";
 const LAST_CLIENT_BUILD = localStorage.getItem("claireClientBuild");
 if (LAST_CLIENT_BUILD !== CLIENT_BUILD) {
     localStorage.setItem("claireClientBuild", CLIENT_BUILD);
@@ -4348,11 +4348,13 @@ function routeForSource(source) {
     return "reply";
 }
 
-async function readReplyStream(url, turnId) {
+async function readReplyStream(url, turnId, options = {}) {
     streamAbortController = new AbortController();
     const res = await fetch(url, {
         cache: "no-store",
-        headers: {"Accept": "application/x-ndjson", "X-Claire-Client": CLIENT_BUILD},
+        method: options.method || "GET",
+        headers: {"Accept": "application/x-ndjson", "X-Claire-Client": CLIENT_BUILD, ...(options.headers || {})},
+        body: options.body || undefined,
         signal: streamAbortController.signal,
     });
     if (!res.ok || !res.body) {
@@ -5747,7 +5749,21 @@ async function submitQuery(event) {
         traceId: "PENDING",
     });
     try {
-        const data = await readReplyStream("/reply?stream=true&q=" + encodeURIComponent(outboundQ), turnId);
+        const streamUrl = "/reply?stream=true&q=" + encodeURIComponent(outboundQ);
+        const streamOptions = outboundQ.length > 1800
+            ? {
+                method: "POST",
+                body: JSON.stringify({q: outboundQ}),
+            }
+            : {};
+        if (streamOptions.method === "POST") {
+            streamOptions.headers = {"Content-Type": "application/json"};
+        }
+        const data = await readReplyStream(
+            streamOptions.method === "POST" ? "/reply-stream" : streamUrl,
+            turnId,
+            streamOptions
+        );
         const sourceKey = String((data && data.source) || "conversation").toUpperCase();
         setWorkflowDebug({
             endpoint: "/reply",
@@ -12900,6 +12916,24 @@ def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None
 @app.get("/reply-stream")
 async def reply_stream(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None), debug: str | None = Query(None)):
     return _reply_stream_response(q, demo, trace_id, demo_scenario, demo_bool(debug))
+
+
+@app.post("/reply-stream")
+async def reply_stream_post(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    q = str(data.get("q") or data.get("query") or data.get("prompt") or "").strip()
+    if not q:
+        return JSONResponse({"status": "missing query"}, status_code=400)
+    return _reply_stream_response(
+        q,
+        data.get("demo") or data.get("demo_mode"),
+        data.get("trace_id"),
+        data.get("demo_scenario"),
+        demo_bool(data.get("debug") or data.get("debug_mode")),
+    )
 
 
 @app.post("/reply")
