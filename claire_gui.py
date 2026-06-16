@@ -990,6 +990,9 @@ SESSION_MEMORY = "/home/LuciusPrime/claire/data/session_memory.jsonl"
 DURABLE_MEMORY = "/home/LuciusPrime/claire/data/durable_memory.jsonl"
 TMF_SNAPSHOTS = "/home/LuciusPrime/claire/data/conversation_tmf.jsonl"
 UPLOAD_DIR = "/home/LuciusPrime/claire/data/uploads"
+MAX_INGEST_UPLOAD_BYTES = int(os.environ.get("CLAIRE_MAX_INGEST_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
+UPLOAD_DISK_SAFETY_BYTES = int(os.environ.get("CLAIRE_UPLOAD_DISK_SAFETY_BYTES", str(256 * 1024 * 1024)))
+UPLOAD_WRITE_CHUNK_BYTES = int(os.environ.get("CLAIRE_UPLOAD_WRITE_CHUNK_BYTES", str(4 * 1024 * 1024)))
 TRACE_LOG = "/home/LuciusPrime/claire/data/traces.jsonl"
 FEEDBACK_LOG = "/home/LuciusPrime/claire/data/feedback.jsonl"
 OFFICE_TASK_LOG = "/home/LuciusPrime/claire/data/office_tasks.jsonl"
@@ -3077,7 +3080,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                 <input class="hidden-file-input" id="docFile" name="file" type="file" accept=".txt,.md,.py,.pdf,.docx,.csv,.json,.jsonl" multiple />
                 <button class="send-btn" type="submit">Ingest</button>
             </form>
-            <div class="upload-status" id="uploadStatus">Select files, then ingest. TXT, MD, PY, PDF, DOCX, CSV, JSONL accepted. 12MB max per file.</div>
+            <div class="upload-status" id="uploadStatus">Select files, then ingest. TXT, MD, PY, PDF, DOCX, CSV, JSONL accepted. Parser limit: 2 GiB per file, disk permitting.</div>
         </div>
 
         <div class="proof-strip" aria-label="Claire architecture proof controls">
@@ -13025,6 +13028,47 @@ def drive_lane_status() -> dict:
     }
 
 
+def format_bytes_short(value: int) -> str:
+    value = int(value or 0)
+    if value >= 1024 ** 3:
+        return f"{value / (1024 ** 3):.1f} GiB"
+    if value >= 1024 ** 2:
+        return f"{value / (1024 ** 2):.1f} MiB"
+    if value >= 1024:
+        return f"{value / 1024:.1f} KiB"
+    return f"{value} B"
+
+
+def upload_free_bytes() -> int:
+    Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    return int(shutil.disk_usage(UPLOAD_DIR).free)
+
+
+async def save_upload_file_chunked(file: UploadFile, path_text: str) -> int:
+    total = 0
+    free_before = upload_free_bytes()
+    if free_before < UPLOAD_DISK_SAFETY_BYTES:
+        raise ValueError(
+            "insufficient disk for ingest upload; "
+            f"free={format_bytes_short(free_before)}, safety_required={format_bytes_short(UPLOAD_DISK_SAFETY_BYTES)}"
+        )
+    with open(path_text, "wb") as handle:
+        while True:
+            chunk = await file.read(UPLOAD_WRITE_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_INGEST_UPLOAD_BYTES:
+                raise ValueError(f"file too large; {format_bytes_short(MAX_INGEST_UPLOAD_BYTES)} max")
+            if upload_free_bytes() < UPLOAD_DISK_SAFETY_BYTES:
+                raise ValueError(
+                    "insufficient disk during ingest upload; "
+                    f"free={format_bytes_short(upload_free_bytes())}, safety_required={format_bytes_short(UPLOAD_DISK_SAFETY_BYTES)}"
+                )
+            handle.write(chunk)
+    return total
+
+
 def search_drive_research_cache(query: str, limit: int = 8) -> list[dict]:
     if not os.path.exists(DRIVE_RESEARCH_CACHE):
         return []
@@ -13123,14 +13167,17 @@ async def _ingest_one_uploaded_file(file: UploadFile) -> dict:
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     stamped = datetime.utcnow().strftime("%Y%m%d_%H%M%S_") + filename
     path_text = str(Path(UPLOAD_DIR) / stamped)
-    content = await file.read()
-    if len(content) > 12 * 1024 * 1024:
-        raise ValueError("file too large; 12MB max")
-    Path(path_text).write_bytes(content)
-
-    text_body = extract_upload_text(path_text, filename)
-    if len(text_body.strip()) < 5:
-        raise ValueError("no extractable text found")
+    try:
+        upload_bytes = await save_upload_file_chunked(file, path_text)
+        text_body = extract_upload_text(path_text, filename)
+        if len(text_body.strip()) < 5:
+            raise ValueError("no extractable text found")
+    except Exception:
+        try:
+            Path(path_text).unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
     chunks, ingest_results = ingest_document_chunks(filename, text_body)
     ok = sum(1 for result in ingest_results if 200 <= result["status_code"] < 300)
     status_text = f"anchored {ok}/{len(ingest_results)} chunks"
@@ -13139,6 +13186,7 @@ async def _ingest_one_uploaded_file(file: UploadFile) -> dict:
         "status": status_text,
         "filename": filename,
         "saved_as": stamped,
+        "upload_bytes": upload_bytes,
         "chars": len(text_body),
         "chunks": len(chunks),
         "ingested": ok,
@@ -13153,7 +13201,7 @@ async def upload_document(file: UploadFile | None = File(None)):
         return JSONResponse(await _ingest_one_uploaded_file(file))
     except ValueError as e:
         detail = str(e)
-        status_code = 413 if "12MB" in detail else 422 if "extractable text" in detail else 400
+        status_code = 413 if "file too large" in detail else 507 if "insufficient disk" in detail else 422 if "extractable text" in detail else 400
         return JSONResponse({"status": detail, "filename": safe_upload_name(file.filename)}, status_code=status_code)
     except Exception as e:
         return JSONResponse({"status": "extract/ingest failed", "detail": str(e), "filename": safe_upload_name(file.filename)}, status_code=500)
@@ -13384,7 +13432,9 @@ def filesystem_runtime_status() -> dict:
         "file_count": len(files),
         "free_mb": free_mb,
         "total_mb": round(usage.total / 1024 / 1024, 1),
-        "max_upload_mb": 12,
+        "max_upload_mb": round(MAX_INGEST_UPLOAD_BYTES / 1024 / 1024, 1),
+        "max_upload_label": format_bytes_short(MAX_INGEST_UPLOAD_BYTES),
+        "disk_safety_label": format_bytes_short(UPLOAD_DISK_SAFETY_BYTES),
     }
 
 
@@ -13692,7 +13742,8 @@ def diagnostic(target: str = Query(...)):
                     f"Writable: {fs['writable']}\n"
                     f"Files: {fs['file_count']}\n"
                     f"Free disk: {fs['free_mb']} MB / {fs['total_mb']} MB\n"
-                    f"Max upload per file: {fs['max_upload_mb']} MB"
+                    f"Parser limit per file: {fs['max_upload_label']}\n"
+                    f"Disk safety reserve: {fs['disk_safety_label']}"
                 ),
                 "next": "Free disk is limited; keep uploads small until model/data storage is cleaned up.",
             }
