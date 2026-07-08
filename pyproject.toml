@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claire-are"
+version = "0.1.0"
+description = "Plugin-ready CLAIRE Analog Recall Engine memory module"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "pydantic",
+  "requests",
+]
+
+[project.optional-dependencies]
+demo = ["gradio"]
+
+[tool.setuptools.packages.find]
+include = ["claire_are*"]

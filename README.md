@@ -48,3 +48,60 @@ Run the controller tests:
 python3 -m py_compile claire_controller.py test_claire_controller.py diode_protocol.py
 python3 test_claire_controller.py
 ```
+
+## CLAIRE ARE Plugin Package
+
+`claire_are/` exposes the Analog Recall Engine as a small package another AI app can use without importing the full CLAIRE runtime.
+
+It preserves the core ARE contract:
+
+- append-first chronological memory
+- durable segmented JSONL records
+- checksum/HMAC Truth Spine verification
+- lane-scoped read/write governance
+- consult-before-LLM gateway
+- archive-not-delete segment rotation
+- audit events for recall and completion
+
+Run locally:
+
+```bash
+pip install -e .
+uvicorn claire_are.api:app --host 0.0.0.0 --port 8000
+```
+
+Run with Docker:
+
+```bash
+docker compose up --build
+```
+
+Public API:
+
+- `POST /v1/memory/ingest`
+- `POST /v1/memory/recall`
+- `POST /v1/llm/complete`
+- `GET /v1/health`
+- `GET /v1/audit/recent`
+- `GET /v1/memory/verify`
+
+SDK example:
+
+```python
+from claire_are.sdk import ClaireAREClient
+
+client = ClaireAREClient("http://localhost:8000")
+client.ingest(text="User said ARE is the memory authority.", lane="architecture", source="demo")
+memories = client.recall(query="What is ARE?", lane="architecture")
+answer = client.complete(prompt="Explain ARE in plain English.", lane="architecture")
+```
+
+Hugging Face demo entry point:
+
+```bash
+pip install -e .[demo]
+python -m claire_are.hf_demo_app
+```
+
+This package does not include production CLAIRE private memory, Veritas Legal files, Azure secrets, model credentials, or generated indexes.
+
