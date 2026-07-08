@@ -14,6 +14,7 @@ from context_builder import build_context_packet
 from current_truth_loader import load_current_truth, truth_for_lane
 from diode_protocol import DiodeProtocol
 from entity_registry import identify_entities
+from faiss_are_index import original_are_records, query_records
 from handshake_broker import HandshakeBroker
 from lane_classifier import LaneResult, classify_lane
 from claire_runtime_router import c3rp_classify, normalize_input as c3rp_normalize_input, provisional_orientation
@@ -127,6 +128,24 @@ class ClaireRuntime:
                 answer_mode=loop["answer_mode"],
                 secret_detected=secret_detected,
             )
+        if "private_data_exfiltration_blocked" in set(authority_decision.denied_reasons):
+            answer = self._apply_authority_answer_boundary("", lane, authority_decision.denied_reasons)
+            return self._return_loopback_response(
+                trace_id=trace_id,
+                user_id=user_id,
+                session_id=session_id,
+                normalized=normalized,
+                lane_result=lane_result,
+                c3rp_route=c3rp_route,
+                risk_level="high",
+                authority_capsule=authority_capsule,
+                authority_denied=authority_decision.denied_reasons,
+                gyro_trace=gyro_trace,
+                loopback_reason="private data exfiltration blocked",
+                answer=answer,
+                answer_mode="refuse",
+                secret_detected=secret_detected,
+            )
         recent_path, long_term_memories, rejected_memories = self._recall_memory(
             user_id,
             lane_result,
@@ -134,6 +153,8 @@ class ClaireRuntime:
             normalized,
             authority_capsule,
         )
+        canonical_memories = self._canonical_memory_leads(normalized, lane, current_truth)
+        recent_path = self._dedupe_memories(canonical_memories + recent_path)
         constraints = self._constraints(lane)
 
         context_packet = build_context_packet(
@@ -153,12 +174,25 @@ class ClaireRuntime:
             provider_generate=metadata.get("provider_generate"),
         )
         answer = str(raw_response.get("content") or "").strip()
+        if self._is_generic_provider_filler(answer) and risk_level != "high":
+            retry_messages = self._generic_filler_retry_messages(messages, normalized)
+            retry_response = call_nemotron(
+                retry_messages,
+                model_config=metadata.get("model_config") or self.model_config,
+                provider_generate=metadata.get("provider_generate"),
+            )
+            retry_answer = str(retry_response.get("content") or "").strip()
+            if retry_answer and not self._is_generic_provider_filler(retry_answer):
+                raw_response = retry_response
+                messages = retry_messages
+                answer = retry_answer
         answer = self.sanitize_user_answer(answer, debug=debug_enabled)
         answer = strengthen_confidence_language(answer)
         if lane == "NVIDIA_PATHWAY":
             answer = apply_nvidia_mode(answer)
         answer = self._redact_sensitive(self.diode.redact(answer))
         answer = self._apply_authority_answer_boundary(answer, lane, authority_decision.denied_reasons)
+        answer = self._apply_canonical_answer_boundary(answer, normalized, lane, current_truth)
         post_loop = self.loopback.post_generation_check(
             prompt=normalized,
             answer=answer,
@@ -271,6 +305,7 @@ class ClaireRuntime:
                 "handshake_broker_authority",
                 "memory_eligibility_review",
                 "are_chronological_recall",
+                "faiss_are_candidate_search",
                 "current_truth_loading",
                 "authorized_subsystem_inspection",
                 "context_building",
@@ -332,6 +367,36 @@ class ClaireRuntime:
         if not clean:
             clean = "I can help with that. Tell me the specific outcome you want, and I will give a direct next step."
         return clean
+
+    def _is_generic_provider_filler(self, answer: str) -> bool:
+        text = " ".join(str(answer or "").lower().split())
+        return any(
+            marker in text
+            for marker in [
+                "tell me the goal",
+                "goal, constraints",
+                "make the request concrete",
+                "specific outcome you want",
+                "i don't have enough context",
+            ]
+        )
+
+    def _generic_filler_retry_messages(self, messages: list[dict[str, str]], normalized: str) -> list[dict[str, str]]:
+        retry = [dict(message) for message in messages]
+        retry.insert(
+            1,
+            {
+                "role": "system",
+                "content": (
+                    "The previous draft was generic filler. Answer the user's actual turn naturally and directly. "
+                    "For greetings, introductions, acknowledgements, and ordinary conversation, respond conversationally. "
+                    "Do not ask for goals or constraints unless the user truly asked for planning help."
+                ),
+            },
+        )
+        if retry and retry[-1].get("role") == "user":
+            retry[-1] = {"role": "user", "content": normalized}
+        return retry
 
     def _safe_debug_payload(
         self,
@@ -508,6 +573,8 @@ class ClaireRuntime:
             return "That action is blocked from normal chat. It requires a separate step-up path that is not implemented here."
         if "trusted_authority_required_for_veritas_status" in denied:
             return "Veritas status requires trusted authority. From guest chat I can only explain the safety boundary: Veritas is a governed financial intelligence subsystem, not CLAIRE memory, and live execution is blocked here."
+        if "private_data_exfiltration_blocked" in denied:
+            return "I cannot show private information from previous users or dump private memory. I can only work with information you are authorized to access, and private recall requires the proper identity, scope, and purpose."
         if "legal_filing_blocked_from_normal_chat" in denied:
             return "Court filing actions are blocked from normal chat. I can summarize monitored legal information when authorized, but I cannot file or submit documents here."
         if "sensitive_action_requires_step_up_path" in denied:
@@ -796,9 +863,24 @@ class ClaireRuntime:
             any(marker in lowered_message for marker in ["difference between", "allowed to own memory", "own memory", "governed runtime", "chronological memory authority"])
             and any(marker in lowered_message for marker in ["claire", "are", "nemotron", "trace"])
         )
+        are_canonical_question = (
+            (" are " in f" {lowered_message} " or "analog recall" in lowered_message)
+            and any(marker in lowered_message for marker in ["what does", "what is", "mean", "definition", "evidence", "supports that definition", "where did"])
+        )
+        governed_runtime_security = (
+            any(marker in lowered_message for marker in ["governed-runtime", "governed runtime"])
+            and any(marker in lowered_message for marker in ["malicious skill", "supply-chain attack", "supply chain attack", "plugin", "plugins", "tool trust"])
+            and any(marker in lowered_message for marker in ["handshake broker", "diode", "sentinel", "trace", "c3rp", "are"])
+        )
         if approval_followup and any(marker in recent_context_text for marker in ["trade", "trading", "btc", "live execution"]):
             lane = "TRADING_STATION"
             reason = f"C3RP route={c3rp_lane}; approval follow-up remains inside TRADING_STATION and cannot execute."
+        elif governed_runtime_security:
+            lane = "CLAIRE_SYSTEM_ARCHITECTURE"
+            reason = f"C3RP route={c3rp_lane}; governed runtime security prompt admitted to CLAIRE_SYSTEM_ARCHITECTURE."
+        elif are_canonical_question:
+            lane = "CLAIRE_SYSTEM_ARCHITECTURE"
+            reason = f"C3RP route={c3rp_lane}; canonical ARE definition/evidence prompt admitted to CLAIRE_SYSTEM_ARCHITECTURE."
         elif officeai_product:
             lane = "BUSINESS_FORMATION"
             reason = f"C3RP route={c3rp_lane}; OfficeAI product prompt admitted to BUSINESS_FORMATION."
@@ -817,7 +899,7 @@ class ClaireRuntime:
         elif c3rp_lane == "DOCUMENT_QA":
             lane = "GENERAL_CHAT"
             reason = "C3RP document utility route admitted through governed runtime."
-        elif c3rp_lane == "SAFETY_SENSITIVE":
+        elif c3rp_lane == "SAFETY_SENSITIVE" and not governed_runtime_security:
             lane = "GENERAL_CHAT"
             reason = "C3RP safety-sensitive route contained by governed runtime."
         elif c3rp_lane == "ACTION_REQUEST" and base.lane == "GENERAL_CHAT":
@@ -832,6 +914,8 @@ class ClaireRuntime:
                 lane = "LEGAL_CASE"
 
         allowed = list(base.allowed_memory_lanes or [])
+        if lane not in allowed:
+            allowed.insert(0, lane)
         for item in c3rp_route.get("allowed_lanes") or []:
             item = str(item)
             if item not in allowed:
@@ -953,6 +1037,177 @@ class ClaireRuntime:
             },
         }
 
+    def _canonical_terms(self, current_truth: dict[str, Any]) -> dict[str, Any]:
+        data = (current_truth or {}).get("canonical_terms") or {}
+        terms = data.get("terms") if isinstance(data, dict) else {}
+        return terms if isinstance(terms, dict) else {}
+
+    def _canonical_are(self, current_truth: dict[str, Any]) -> dict[str, Any] | None:
+        term = self._canonical_terms(current_truth).get("ARE")
+        return term if isinstance(term, dict) else None
+
+    def _is_are_definition_or_evidence_query(self, query: str) -> bool:
+        text = " ".join(str(query or "").lower().split())
+        if "are" not in text and "analog recall" not in text:
+            return False
+        return any(
+            marker in text
+            for marker in [
+                "what does are mean",
+                "what does are mean in claire systems",
+                "what is are",
+                "define are",
+                "definition of are",
+                "evidence supports",
+                "supports that definition",
+                "support that definition",
+                "where did that definition",
+                "where does that definition",
+                "analog recall engine",
+            ]
+        )
+
+    def _canonical_memory_leads(self, query: str, lane: str, current_truth: dict[str, Any]) -> list[dict[str, Any]]:
+        if lane != "CLAIRE_SYSTEM_ARCHITECTURE" or not self._is_are_definition_or_evidence_query(query):
+            return []
+        are = self._canonical_are(current_truth)
+        if not are:
+            return []
+        evidence = are.get("evidence") if isinstance(are.get("evidence"), list) else []
+        evidence_summary = "; ".join(
+            str(item.get("summary") or item.get("reference") or "")
+            for item in evidence
+            if isinstance(item, dict)
+        )
+        related = ", ".join(str(term) for term in (are.get("related_terms") or []))
+        summary = (
+            f"Canonical ARE definition: {are.get('definition')} "
+            f"Origin: {(are.get('origin') or {}).get('source')}. "
+            f"Evidence: {evidence_summary}. "
+            f"Related terms: {related}."
+        )
+        return [
+            {
+                "memory_id": "canonical_term_ARE",
+                "timestamp_ns": 0,
+                "lane": "CLAIRE_SYSTEM_ARCHITECTURE",
+                "memory_scope": "PUBLIC",
+                "summary": summary[:800],
+                "raw_excerpt": summary[:2000],
+                "source": "canonical_terms",
+                "provenance_hash": "canonical_terms_ARE",
+                "importance_score": 1.0,
+                "retrieval_source": "canonical_current_truth",
+            }
+        ]
+
+    def _apply_canonical_answer_boundary(
+        self,
+        answer: str,
+        query: str,
+        lane: str,
+        current_truth: dict[str, Any],
+    ) -> str:
+        if lane != "CLAIRE_SYSTEM_ARCHITECTURE" or not self._is_are_definition_or_evidence_query(query):
+            return answer
+        are = self._canonical_are(current_truth)
+        if not are:
+            return answer
+        lowered = str(answer or "").lower()
+        are_mode = self._are_answer_mode(query)
+        evidence_question = are_mode in {"evidence", "creator"}
+        definition_question = are_mode == "normal"
+        answer_has_definition = (
+            "analog recall engine" in lowered
+            and "chronological" in lowered
+            and "memory" in lowered
+            and "agent runtime environment" not in lowered
+            and "gpu memory" not in lowered
+        )
+        answer_has_evidence = (
+            "original_are" in lowered
+            or "original are" in lowered
+            or "arestore" in lowered
+            or "subsystem_registry" in lowered
+            or "record shape" in lowered
+            or "ts" in lowered and "sha" in lowered
+        )
+        generic_failure = any(
+            marker in lowered
+            for marker in [
+                "tell me the goal",
+                "make the request concrete",
+                "generic filler",
+                "do not have enough context",
+                "give me the exact constraint",
+                "exact constraint",
+                "specific outcome",
+            ]
+        )
+        if definition_question:
+            return self._canonical_are_answer(are, mode="normal")
+        if answer_has_definition and answer_has_evidence and not generic_failure:
+            return answer
+        return self._canonical_are_answer(are, mode=are_mode)
+
+    def _are_answer_mode(self, query: str) -> str:
+        text = " ".join(str(query or "").lower().split())
+        if any(
+            marker in text
+            for marker in [
+                "creator mode",
+                "developer detail",
+                "implementation evidence",
+                "architecture internals",
+                "glasses on",
+            ]
+        ):
+            return "creator"
+        if any(
+            marker in text
+            for marker in [
+                "what evidence supports",
+                "evidence supports",
+                "supports that definition",
+                "where does that definition come from",
+                "where did that definition come from",
+                "show source evidence",
+                "prove it",
+                "cite the implementation",
+            ]
+        ):
+            return "evidence"
+        return "normal"
+
+    def _canonical_are_answer(self, are: dict[str, Any], *, mode: str) -> str:
+        definition = str(are.get("definition") or "").strip()
+        origin = are.get("origin") if isinstance(are.get("origin"), dict) else {}
+        evidence = [item for item in (are.get("evidence") or []) if isinstance(item, dict)]
+        related = ", ".join(str(term) for term in (are.get("related_terms") or []))
+
+        lines = [
+            "ARE means Analog Recall Engine in Claire Systems.",
+            "It is Claire's external chronological memory and provenance-continuity layer. It preserves what happened, when it happened, and what evidence supports it before Claire speaks. ARE is not the model, not GPU/RAM memory, and not a generic runtime label.",
+        ]
+        if mode == "normal":
+            return " ".join(lines)
+        if mode in {"evidence", "creator"}:
+            lines.append("The supporting evidence is:")
+            for item in evidence:
+                lines.append(f"- {item.get('reference')}: {item.get('summary')}")
+        if mode == "creator":
+            lines.append(
+                "Creator Mode detail: the implementation evidence points to append-style JSONL, timestamped records, hash fingerprints, AREStore, original ARE JSONL, the bridge/wrapper relationship, and governed recall before model response."
+            )
+            if definition and definition not in lines:
+                lines.append(definition)
+            lines.append(
+                f"The definition comes from {origin.get('source') or 'the original ARE implementation and CLAIRE architecture authority docs'}."
+            )
+        if mode == "creator" and related:
+            lines.append(f"Related terms: {related}.")
+        return "\n\n".join(lines).strip()
+
     def _recall_memory(
         self,
         user_id: str,
@@ -984,19 +1239,25 @@ class ClaireRuntime:
 
         if self.use_original_are:
             history = read_original_are_history(limit=8)
-            candidates = [
+            recent_candidates = [
                 {
                     "memory_id": f"original_are_{item.get('sha') or item.get('line_number')}",
                     "timestamp_ns": int(item.get("ts") or 0) * 1_000_000_000,
                     "lane": "ORIGINAL_ARE",
                     "memory_scope": "PUBLIC",
                     "summary": str(item.get("text") or "")[:500],
+                    "raw_excerpt": str(item.get("text") or "")[:2000],
                     "source": "original_are",
                     "provenance_hash": item.get("sha"),
                     "importance_score": 1.0,
+                    "retrieval_source": "original_are_recent",
                 }
                 for item in history.get("records", [])
             ]
+            memory_file = history.get("memory_file")
+            indexed_records = original_are_records(memory_file, limit=500) if memory_file else []
+            semantic_candidates, _semantic_status = query_records(indexed_records, query, top_k=8)
+            candidates = self._dedupe_memories(recent_candidates + semantic_candidates)
             memories = [memory for memory in candidates if admit(memory)]
             memories.sort(key=lambda memory: int(memory.get("timestamp_ns") or 0))
             return memories[-5:], memories[:-5], rejected
@@ -1005,13 +1266,15 @@ class ClaireRuntime:
         primary_lane = lane_result.lane
         recent = self.memory_store.recall_recent(user_id, lane=primary_lane, limit=8)
         entity_hits = self.memory_store.recall_by_entity(user_id, entity_names, lane=primary_lane, limit=8)
+        lane_pool = self.memory_store.recall_for_lanes(user_id, sorted(allowed), limit=200)
+        semantic_hits, _semantic_status = query_records(lane_pool, query, top_k=8)
 
         def lane_allowed(memory: dict[str, Any]) -> bool:
             return str(memory.get("lane") or "") in allowed
 
         seen: set[str] = set()
         ordered: list[dict[str, Any]] = []
-        for memory in recent + entity_hits:
+        for memory in recent + entity_hits + semantic_hits:
             memory_id = str(memory.get("memory_id") or "")
             if not memory_id or memory_id in seen:
                 continue
@@ -1023,6 +1286,17 @@ class ClaireRuntime:
                 ordered.append(memory)
         ordered.sort(key=lambda memory: int(memory.get("timestamp_ns") or 0))
         return ordered[-5:], ordered[:-5], rejected
+
+    def _dedupe_memories(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for memory in memories:
+            memory_id = str(memory.get("memory_id") or memory.get("provenance_hash") or "")
+            if not memory_id or memory_id in seen:
+                continue
+            seen.add(memory_id)
+            deduped.append(memory)
+        return deduped
 
     def _memory_scope_allowed(self, memory: dict[str, Any], allowed_scopes: set[str]) -> bool:
         allowed_scopes = {str(scope).upper() for scope in allowed_scopes}

@@ -160,7 +160,7 @@ def classify_lane(message: str, recent_context: list[dict[str, Any]] | None = No
             "practical_support",
         )
 
-    if _contains(text, ["federal complaint", "court", "lawsuit", "legal", "case", "filing", "complaint", "pleading", "jurisdiction", "statute"]):
+    if _contains(text, ["sue", "suing", "lawsuit", "legal claim", "federal complaint", "court", "legal", "case", "filing", "complaint", "pleading", "jurisdiction", "statute"]):
         return LaneResult(
             "LEGAL_CASE",
             0.78,

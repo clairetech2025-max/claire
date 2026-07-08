@@ -27,9 +27,11 @@ def build_messages(context_packet: dict[str, Any], user_message: str) -> list[di
         {
             "role": "system",
             "content": (
-                "You are NVIDIA Nemotron operating downstream of CLAIRE's governed runtime. "
-                "Use only the supplied context packet, current user message, and general reasoning. "
-                "Do not invent memory. Separate fact, inference, uncertainty, and next action."
+                "You are Claire speaking to the user through CLAIRE's governed runtime. "
+                "Use the supplied context packet only as private orientation. Do not mention the context packet, current lane, user goal label, runtime, trace, policy, or internal routing unless the user explicitly asks for debug. "
+                "Answer the user's message directly in natural language. Do not ask for goals or constraints when the request can be answered with a reasonable first pass. "
+                "Do not claim you will search, browse, contact services, or perform actions unless a tool actually ran in this request. If live external information is required and no tool result is present, say that clearly and offer a useful non-live next step. "
+                "Do not invent memory. Separate fact, inference, uncertainty, and next action only when that structure helps the user."
             ),
         },
         {"role": "system", "content": render_context_packet(context_packet)},
@@ -45,6 +47,12 @@ def call_nemotron(messages: list[dict[str, str]], model_config: dict[str, Any] |
 
     api_key = os.environ.get("NVIDIA_API_KEY", "").strip()
     if not api_key:
+        if _should_use_deterministic_guardrail(messages):
+            return {"content": _deterministic_stub(messages), "reasoning_content": "", "raw": {"provider": "local_deterministic_stub", "model": "nemotron-stub"}}
+        if not model_config.get("disable_local_bridge"):
+            local_text = _call_local_bridge(messages, model_config)
+            if local_text:
+                return {"content": local_text, "reasoning_content": "", "raw": {"provider": "local_bridge"}}
         return {"content": _deterministic_stub(messages), "reasoning_content": "", "raw": {"provider": "local_deterministic_stub", "model": "nemotron-stub"}}
 
     base_url = model_config.get("base_url") or os.environ.get("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
@@ -61,6 +69,56 @@ def call_nemotron(messages: list[dict[str, str]], model_config: dict[str, Any] |
     if response.status_code >= 400:
         return {"content": f"GO provider unavailable: NVIDIA NIM status {response.status_code}", "reasoning_content": "", "raw": {"status_code": response.status_code}}
     return parse_response(response.json())
+
+
+def _call_local_bridge(messages: list[dict[str, str]], model_config: dict[str, Any]) -> str:
+    base_url = str(
+        model_config.get("local_base_url")
+        or os.environ.get("CLAIRE_LOCAL_LLM_URL")
+        or os.environ.get("LLM_BASE_URL")
+        or "http://127.0.0.1:8080"
+    ).rstrip("/")
+    prompt = messages_to_prompt(messages)
+    payload = {
+        "prompt": prompt,
+        "temperature": float(model_config.get("temperature", 0.35)),
+        "n_predict": int(model_config.get("max_tokens", 700)),
+        "max_tokens": int(model_config.get("max_tokens", 700)),
+    }
+    for path in ("/completion", ""):
+        try:
+            response = requests.post(f"{base_url}{path}", json=payload, timeout=int(model_config.get("timeout", 60)))
+            response.raise_for_status()
+            data = response.json()
+            if isinstance(data, dict) and data.get("ok") is False:
+                continue
+            if isinstance(data, dict):
+                for key in ("response", "content", "output", "text", "answer", "result"):
+                    value = str(data.get(key) or "").strip()
+                    if value and not value.lower().startswith("go provider unavailable"):
+                        return value
+            text = response.text.strip()
+            if text and not text.lower().startswith("<html"):
+                return text
+        except Exception:
+            continue
+    return ""
+
+
+def _should_use_deterministic_guardrail(messages: list[dict[str, str]]) -> bool:
+    context = messages[1]["content"] if len(messages) > 1 else ""
+    user_message = messages[-1]["content"] if messages else ""
+    lowered = user_message.lower()
+    lane = "UNKNOWN"
+    for line in context.splitlines():
+        if line.startswith("- Current lane:"):
+            lane = line.split(":", 1)[1].strip()
+            break
+    if lane in {"NVIDIA_PATHWAY", "TRADING_STATION", "HORSE_STEWARDSHIP", "BUSINESS_FORMATION", "CLAIRE_SYSTEM_ARCHITECTURE"}:
+        return True
+    if lane == "LEGAL_CASE" and any(term in lowered for term in ["sue", "lawsuit", "file", "motion", "court filing", "public entity"]):
+        return True
+    return any(term in lowered for term in ["officeai", "office ai", "governed runtime", "malicious skill", "supply-chain attack", "supply chain attack"])
 
 
 def parse_response(raw_response: Any) -> dict[str, Any]:
@@ -103,6 +161,13 @@ def _deterministic_stub(messages: list[dict[str, str]]) -> str:
             "not trading",
         ]
     )
+    governed_runtime_security = (
+        any(term in lowered for term in ["malicious skill", "malicious functionality", "supply-chain attack", "supply chain attack"])
+        and any(term in lowered for term in ["plugin", "plugins", "tool", "tools", "skill", "skills", "agent capability"])
+        and any(term in lowered for term in ["governed runtime", "governed-runtime", "handshake broker", "diode", "sentinel", "trace"])
+    )
+    if governed_runtime_security:
+        return _tool_supply_chain_fallback()
     if officeai_product:
         return _officeai_fallback()
     if lane == "HORSE_STEWARDSHIP" or "hoof" in lowered or "horse" in lowered:
@@ -118,7 +183,9 @@ def _deterministic_stub(messages: list[dict[str, str]]) -> str:
     if lane == "NVIDIA_PATHWAY":
         return _nvidia_runtime_fallback()
     if lane == "LEGAL_CASE":
-        return "I can summarize legal-monitor status or source-backed research, but this is not legal advice and no filing action is performed from chat."
+        if any(term in lowered for term in ["file a motion", "submit filing", "e-file", "efile", "court filing"]):
+            return "Court filing actions are blocked from normal chat. I can help organize facts, issues, drafts, and questions for qualified legal review, but I cannot file or submit documents from chat."
+        return _legal_cautious_fallback()
     return "I can help with that. Tell me the goal, constraints, and what outcome you want, and I will give a direct next step."
 
 
@@ -149,4 +216,29 @@ def _officeai_fallback() -> str:
         "Likely buyers are small businesses, clinics, field-service operators, professional offices, and internal operations teams that lose time to inbox triage, document follow-up, scheduling support, task tracking, customer-response drafting, and handoff confusion. "
         "The pain point is not headcount replacement; it is fragmented office work with weak memory, unclear authority, and little auditability. "
         "CLAIRE governs those tasks by identifying the user and session, limiting recall to authorized memory scopes, exposing only permitted tools, redacting secrets before model or trace paths, validating the response before release, and recording trace evidence so office actions remain reviewable."
+    )
+
+
+def _tool_supply_chain_fallback() -> str:
+    return (
+        "The problem is agentic AI tool trust and malicious tool-supply-chain risk. As AI agents gain downloadable skills, plugins, and workflow tools, "
+        "each new capability becomes a new authority relationship. An attacker does not have to compromise the model if they can persuade the agent "
+        "to trust a tool that can see data, call systems, or influence downstream work.\n\n"
+        "That matters now because agents are moving from text generation into office workflows, enterprise data access, ticket handling, document operations, "
+        "and delegated actions. The risk shifts from model behavior alone to the runtime around the model: who is asking, which lane the request belongs to, "
+        "what memory may be recalled, which tools may run, whether credentials can flow into prompts or logs, and whether the output was checked before release.\n\n"
+        "This validates the Claire Systems governed-runtime approach as a relevant design response, without claiming enterprise proof. CLAIRE acts as the governed "
+        "runtime around model intelligence. ARE provides memory and provenance continuity so requests are not treated as isolated context. C3RP separates lanes "
+        "and tool routing so capabilities are not trusted everywhere by default. Handshake Broker ties identity and authority to the session before private recall "
+        "or sensitive tools are exposed. Diode blocks credentials and private tokens from flowing backward into chat, memory, prompts, trace, or logs. Sentinel "
+        "validates before output, and Trace records redacted audit evidence of the path taken.\n\n"
+        "OfficeAI-500 is useful as an enterprise demo chamber because office work naturally combines memory, identity, tool permissions, credentials, validation, "
+        "and auditability. It can demonstrate governed delegation without presenting CLAIRE as already enterprise-proven."
+    )
+
+
+def _legal_cautious_fallback() -> str:
+    return (
+        "I cannot make the legal decision for you, and this is not legal advice. Treat the question as a claim-screening problem: identify the specific harm, the actor or agency involved, dates, witnesses, documents, deadlines, required notice procedures, available remedies, and the practical cost of proceeding. "
+        "For public-entity or court-facing matters, speak with a qualified attorney before filing or threatening action. I can help organize a timeline, evidence list, issue list, and questions for counsel, but I cannot file anything or promise an outcome from chat."
     )

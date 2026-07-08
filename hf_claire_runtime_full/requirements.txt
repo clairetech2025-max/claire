@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+requests
+python-multipart
+pydantic
+PyYAML
+python-docx
+PyPDF2
+pandas
+numpy
+Pillow
+pytesseract
+odfpy

@@ -14,18 +14,23 @@ class DiodeProtocol:
     """
 
     REDACTION = "[REDACTED_BY_DIODE]"
+    SECRET_JSON_FIELD = re.compile(
+        r'([{\[,]\s*"(?:passphrase|password|api[_\s-]*key|apikey|secret|token|bearer[_\s-]*token|kraken[_\s-]*(?:api[_\s-]*)?(?:key|secret))"\s*:\s*)(".*?"|[A-Za-z0-9_\-./+=]{4,})',
+        re.I,
+    )
     SECRET_PATTERNS = [
         re.compile(r"\bexecution\s+passphrase\s+(?:is|=|:)\s*\S+", re.I),
         re.compile(r"\b(passphrase|password|api\s*key|apikey|secret|token)\s*(?:is|=|:)?\s*['\"]?[A-Za-z0-9_\-./+=]{4,}", re.I),
         re.compile(r"\bbearer\s+[A-Za-z0-9_\-./+=]{8,}", re.I),
         re.compile(r"\bkraken[_\s-]*(?:api[_\s-]*)?(?:key|secret)\s*(?:is|=|:)?\s*['\"]?[A-Za-z0-9_\-./+=]{4,}", re.I),
         re.compile(r"-----BEGIN\s+(?:RSA\s+|EC\s+|OPENSSH\s+)?PRIVATE\s+KEY-----.*?-----END\s+(?:RSA\s+|EC\s+|OPENSSH\s+)?PRIVATE\s+KEY-----", re.I | re.S),
-        re.compile(r"\b[A-Z0-9_]*BATTLEBORN[A-Z0-9_\-]*\b", re.I),
+        re.compile(r"\bBATTLEBORN[_-][A-Z0-9_\-]{6,}\b", re.I),
     ]
 
     @classmethod
     def redact(cls, text: str) -> str:
         clean = str(text or "")
+        clean = cls.SECRET_JSON_FIELD.sub(lambda match: f"{match.group(1)}\"{cls.REDACTION}\"", clean)
         for pattern in cls.SECRET_PATTERNS:
             clean = pattern.sub(cls.REDACTION, clean)
         return clean

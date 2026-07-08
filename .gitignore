@@ -1,6 +1,9 @@
 # Secrets and local environment
 .env
 *.env
+*.key
+*.pem
+secrets/
 claire_keys.env
 keys/
 
@@ -29,7 +32,17 @@ are.log
 claire.log
 nohup.out
 claire_state/claire_runtime_traces.db
+*.index
+claire_state/faiss_memory.index
+claire_state/faiss_memory_map.jsonl
+private_faiss/
+local_faiss/
 
+*.sqlite3
+trace/
+traces/
+runtime/
+claire_state/private/
 # Local data, uploads, generated reports, and model assets
 data/
 silo_data/
@@ -40,8 +53,17 @@ models/
 certs/
 void/
 backups/
+data/private/
+CLAIRE_SYSTEMS_BACKUP/
+private/
+veritas_private/
+legal_private/
 private_payloads/
 private_repo_payloads/
+veritas/account_history/
+veritas/paper_state/
+veritas/public_candles/
+veritas_discovery_data/
 
 # Large vendored or nested repositories
 llama.cpp/

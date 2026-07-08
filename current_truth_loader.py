@@ -13,6 +13,7 @@ TRUTH_FILES = [
     "mission_statement.md",
     "nvidia_pathway.json",
     "technical_stack.json",
+    "canonical_terms.json",
     "horse_stewardship.json",
     "legal_case_summary.json",
     "trading_station_status.json",
@@ -71,6 +72,6 @@ def truth_for_lane(lane: str, truth: dict[str, Any] | None = None) -> dict[str, 
         "NVIDIA_PATHWAY": ["nvidia_pathway", "technical_stack", "repo_checkpoint", "company_profile"],
         "TRADING_STATION": ["trading_station_status", "technical_stack", "repo_checkpoint"],
         "LEGAL_CASE": ["legal_case_summary"],
-        "CLAIRE_SYSTEM_ARCHITECTURE": ["technical_stack", "mission_statement", "repo_checkpoint"],
+        "CLAIRE_SYSTEM_ARCHITECTURE": ["technical_stack", "canonical_terms", "mission_statement", "repo_checkpoint"],
     }.get(lane, ["company_profile", "mission_statement", "repo_checkpoint"])
     return {key: truth.get(key) for key in keys if truth.get(key) is not None}

@@ -347,6 +347,49 @@ def is_supported(path: Path) -> bool:
     )
 
 
+def unsafe_zip_member_reason(member_name: str) -> Optional[str]:
+    """Return a reason if a ZIP member path could escape extraction root."""
+    raw = str(member_name or "").replace("\\", "/")
+    if not raw or raw.endswith("/"):
+        return None
+    if raw.startswith("/"):
+        return "absolute path"
+    if re.match(r"^[A-Za-z]:", raw):
+        return "windows drive path"
+    parts = [part for part in raw.split("/") if part not in {"", "."}]
+    if any(part == ".." for part in parts):
+        return "parent traversal"
+    return None
+
+
+def safe_extract_zip(zf: zipfile.ZipFile, extract_dir: Path, logger: Optional[logging.Logger] = None) -> List[Path]:
+    """
+    Extract ZIP members without allowing path traversal outside extract_dir.
+    Returns extracted file paths. Unsafe members are skipped and logged.
+    """
+    extracted: List[Path] = []
+    root = extract_dir.resolve()
+    ensure_dir(root)
+    for member in zf.infolist():
+        reason = unsafe_zip_member_reason(member.filename)
+        if reason:
+            if logger:
+                logger.warning("Skipped unsafe ZIP member %s: %s", member.filename, reason)
+            continue
+        if member.is_dir():
+            continue
+        target = (root / member.filename).resolve()
+        if root != target and root not in target.parents:
+            if logger:
+                logger.warning("Skipped unsafe ZIP member %s: escaped extraction root", member.filename)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(member, "r") as src, target.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+        extracted.append(target)
+    return extracted
+
+
 class ClaireParser:
     def __init__(
         self,
@@ -532,7 +575,7 @@ class ClaireParser:
         count = 0
 
         with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(extract_dir)
+            safe_extract_zip(zf, extract_dir, self.logger)
 
         for item in sorted(extract_dir.rglob("*")):
             if item.is_file() and is_supported(item):

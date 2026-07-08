@@ -175,6 +175,20 @@ class AREMemoryStore:
             (user_id, lane, int(limit)),
         )[::-1]
 
+    def recall_for_lanes(self, user_id: str, lanes: list[str], limit: int = 200) -> list[dict[str, Any]]:
+        clean_lanes = [str(lane) for lane in lanes if str(lane or "").strip()]
+        if not clean_lanes:
+            return []
+        placeholders = ",".join("?" for _ in clean_lanes)
+        return self._rows(
+            f"""
+            SELECT * FROM memory_events
+            WHERE user_id = ? AND lane IN ({placeholders})
+            ORDER BY timestamp_ns DESC LIMIT ?
+            """,
+            tuple([user_id, *clean_lanes, int(limit)]),
+        )[::-1]
+
     def recall_by_entity(self, user_id: str, entities: list[str], lane: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
         if not entities:
             return []

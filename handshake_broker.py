@@ -35,6 +35,17 @@ SENSITIVE_TOOL_MARKERS = [
     "e-file",
 ]
 
+PRIVATE_DATA_EXFIL_MARKERS = [
+    "all private information",
+    "private information from previous users",
+    "previous users",
+    "other users",
+    "private memory",
+    "owner-only memory",
+    "dump private",
+    "show private",
+]
+
 
 @dataclass
 class BrokerDecision:
@@ -92,6 +103,10 @@ class HandshakeBroker:
         approval_followup = lowered.strip() in {"i approve it", "approved", "yes approve", "i approve", "go ahead"}
         if any(marker in lowered for marker in SENSITIVE_TOOL_MARKERS) or (lane == "TRADING_STATION" and approval_followup):
             denied.append("sensitive_tool_action_blocked_from_normal_chat")
+            tools = []
+        if any(marker in lowered for marker in PRIVATE_DATA_EXFIL_MARKERS):
+            denied.append("private_data_exfiltration_blocked")
+            scopes = ["PUBLIC"] if "PUBLIC" in scopes else []
             tools = []
         if lane == "TRADING_STATION" and not trusted:
             denied.append("trusted_authority_required_for_veritas_status")

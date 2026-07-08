@@ -29,6 +29,14 @@ from archimedes_demo import (
 )
 
 try:
+    from veritas_legal import EvidenceEngine, claire_explains_summary, safe_id
+except Exception as e:
+    print("veritas legal import error:", e)
+    EvidenceEngine = None
+    claire_explains_summary = None
+    safe_id = None
+
+try:
     from zoneinfo import ZoneInfo
 except Exception:
     ZoneInfo = None
@@ -990,6 +998,7 @@ SESSION_MEMORY = "/home/LuciusPrime/claire/data/session_memory.jsonl"
 DURABLE_MEMORY = "/home/LuciusPrime/claire/data/durable_memory.jsonl"
 TMF_SNAPSHOTS = "/home/LuciusPrime/claire/data/conversation_tmf.jsonl"
 UPLOAD_DIR = "/home/LuciusPrime/claire/data/uploads"
+VERITAS_LEGAL_STATE_DIR = "/home/LuciusPrime/claire/data/veritas_legal_gui"
 MAX_INGEST_UPLOAD_BYTES = int(os.environ.get("CLAIRE_MAX_INGEST_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
 UPLOAD_DISK_SAFETY_BYTES = int(os.environ.get("CLAIRE_UPLOAD_DISK_SAFETY_BYTES", str(256 * 1024 * 1024)))
 UPLOAD_WRITE_CHUNK_BYTES = int(os.environ.get("CLAIRE_UPLOAD_WRITE_CHUNK_BYTES", str(4 * 1024 * 1024)))
@@ -3079,8 +3088,10 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                 <label class="file-picker-control" for="docFile">Select Files</label>
                 <input class="hidden-file-input" id="docFile" name="file" type="file" accept=".txt,.md,.py,.pdf,.docx,.csv,.json,.jsonl" multiple />
                 <button class="send-btn" type="submit">Ingest</button>
+                <button class="send-btn" id="veritasLegalBtn" type="button">Run Veritas Legal</button>
             </form>
-            <div class="upload-status" id="uploadStatus">Select files, then ingest. TXT, MD, PY, PDF, DOCX, CSV, JSONL accepted. Parser limit: 2 GiB per file, disk permitting.</div>
+            <div class="upload-status" id="uploadStatus">Step 1: select a file and press Ingest. Step 2: press Run Veritas Legal.</div>
+            <div class="upload-status" id="veritasLegalStatus">Veritas organizes the latest uploaded local copy. Evidence organization only; not legal advice.</div>
         </div>
 
         <div class="proof-strip" aria-label="Claire architecture proof controls">
@@ -3634,15 +3645,17 @@ function ensureRecognition() {
         const heard = transcript.trim();
         const input = document.getElementById("queryInput");
         if (input && heard) input.value = heard;
-        if (heard) {
+        const isFinal = event.results[event.results.length - 1].isFinal;
+        if (heard && !isFinal) {
+            setVoiceMessage("Listening: " + heard);
+        }
+        if (heard && isFinal) {
             renderWorkspace({
                 source: "VOICE",
-                reply: event.results[event.results.length - 1].isFinal
-                    ? ("Voice captured:\n" + heard + "\n\nClaire is listening...")
-                    : ("Listening...\n" + heard)
+                reply: "Voice captured:\n" + heard + "\n\nClaire is listening..."
             });
         }
-        if (event.results[event.results.length - 1].isFinal && !micFinalHandled) {
+        if (isFinal && !micFinalHandled) {
             micFinalHandled = true;
             micListening = false;
             updateMicButton();
@@ -5905,6 +5918,64 @@ async function runDriveResearch(event) {
     }
 }
 
+async function runVeritasLegal(event) {
+    if (event) event.preventDefault();
+    const status = document.getElementById("veritasLegalStatus");
+    if (status) status.innerText = "Running Veritas Legal on local uploaded evidence...";
+    renderWorkspace({
+        source: "VERITAS LEGAL",
+        reply: "Veritas Legal request received.\n\nClaire is organizing the uploaded local evidence copies, hashing sources, redacting secret-like markers, extracting dates/entities, and building a trace. This is not legal advice."
+    });
+    scrollToWorkspace();
+    setWorkflowDebug({
+        endpoint: "/veritas-legal/run",
+        route: "veritas_legal",
+        lane: "legal_evidence",
+        controlLayer: "YES",
+        machineCalled: "NO",
+        traceId: "PENDING",
+    });
+    try {
+        const data = await safeJsonFetch("/veritas-legal/run", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({mode: "latest_upload"})
+        });
+        if (status) status.innerText = data.status || "Veritas Legal complete.";
+        const lines = [
+            data.title || "Veritas Legal",
+            "",
+            data.explanation || data.summary_text || "",
+        ];
+        if (data.processed_files && data.processed_files.length) {
+            lines.push("", "Processed local uploaded copies:");
+            data.processed_files.forEach(item => {
+                lines.push("- " + item.filename + " | dates: " + item.dates + " | entities: " + item.entities + " | redactions: " + item.redactions);
+            });
+        }
+        if (data.skipped_files && data.skipped_files.length) {
+            lines.push("", "Skipped:");
+            data.skipped_files.forEach(item => {
+                lines.push("- " + item.filename + ": " + item.reason);
+            });
+        }
+        if (data.state_dir) lines.push("", "Local output folder: " + data.state_dir);
+        renderWorkspace({source: "VERITAS LEGAL", reply: lines.filter(Boolean).join("\n")});
+        setWorkflowDebug({
+            endpoint: "/veritas-legal/run",
+            route: "veritas_legal",
+            lane: "legal_evidence",
+            controlLayer: "YES",
+            machineCalled: "NO",
+            traceId: data.trace_id || "NONE",
+        });
+        checkStatus();
+    } catch (err) {
+        if (status) status.innerText = "Veritas Legal failed: " + err.message;
+        renderWorkspace({source: "ERROR", reply: "Veritas Legal failed: " + err.message});
+    }
+}
+
 async function runDiagnostic(target) {
     const label = (target || "system").toUpperCase();
     setWorkflowDebug({
@@ -5937,6 +6008,7 @@ async function runDiagnostic(target) {
 const queryForm = document.getElementById("queryForm");
 const queryInput = document.getElementById("queryInput");
 const uploadForm = document.getElementById("uploadForm");
+const veritasLegalBtn = document.getElementById("veritasLegalBtn");
 const driveResearchForm = document.getElementById("driveResearchForm");
 const beginHereBtn = document.getElementById("beginHereBtn");
 const clearWorkspaceBtn = document.getElementById("clearWorkspaceBtn");
@@ -5952,6 +6024,7 @@ const demoCloseBtn = document.getElementById("demoCloseBtn");
 const diagnosticButtons = document.querySelectorAll("[data-diagnostic]");
 if (queryForm) queryForm.addEventListener("submit", submitQuery);
 if (uploadForm) uploadForm.addEventListener("submit", uploadDocument);
+if (veritasLegalBtn) veritasLegalBtn.addEventListener("click", runVeritasLegal);
 if (driveResearchForm) driveResearchForm.addEventListener("submit", runDriveResearch);
 if (beginHereBtn) beginHereBtn.addEventListener("click", runBeginHereTour);
 if (clearWorkspaceBtn) clearWorkspaceBtn.addEventListener("click", clearWorkspace);
@@ -11599,13 +11672,6 @@ def sanitize_public_reply(text: str) -> str:
             "I need a clearer task to route this correctly. "
             "Send a question, document, or scenario, and I will separate facts, risks, options, and next actions."
         )
-    replacements = {
-        "Lucius Prime": "the creator",
-        "LuciusPrime": "the creator",
-        "Lucius": "the creator",
-    }
-    for old, new in replacements.items():
-        clean = clean.replace(old, new)
     return clean
 
 
@@ -11900,10 +11966,36 @@ def clean_visible_reply(text: str) -> str:
     return clean.strip()
 
 
+BAD_PUBLIC_ANSWER_MARKERS = [
+    "the language provider returned a generic filler",
+    "tell me the specific outcome you want",
+    "tell me the goal",
+    "i don't have enough context",
+    "make the request concrete",
+    "as an ai language model",
+]
+
+
+def claire_quality_gate(prompt: str, reply: str) -> str:
+    clean = str(reply or "").strip()
+    lowered = _clean_for_match(clean)
+    if not clean or any(marker in lowered for marker in BAD_PUBLIC_ANSWER_MARKERS):
+        if is_operator_identity_prompt(prompt):
+            return operator_identity_reply()
+        if is_capability_prompt(prompt):
+            return claire_capability_reply()
+        return (
+            "I heard you, but the language provider did not return a useful answer. "
+            "I will answer from my control layer instead: I am here to help with memory, evidence, governed workflow, trace review, and clear next steps."
+        )
+    return clean
+
+
 def finalize_reply(q: str, source: str, reply: str):
     if source != "CREATOR":
         reply = sanitize_public_reply(reply)
     reply = clean_visible_reply(reply)
+    reply = claire_quality_gate(q, reply)
     if source not in {"CLAIRE", "DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
         reply = conversationalize_self_reference(reply)
     trace_id = persist_conversation_trace(q, source, reply)
@@ -11919,6 +12011,7 @@ def finalize_phase_one_reply(q: str, route_result):
     if source != "CREATOR":
         reply = sanitize_public_reply(reply)
     reply = clean_visible_reply(reply)
+    reply = claire_quality_gate(getattr(route_result, "prompt", "") or "", reply)
     if source not in {"CLAIRE", "DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
         reply = conversationalize_self_reference(reply)
     trace_id = persist_phase_one_trace(q, route_result, reply)
@@ -12025,6 +12118,9 @@ def build_legacy_direct_reply(prompt: str) -> tuple[str, str, str] | None:
 
 
 def build_reply(q: str, debug: bool = False):
+    direct = public_operator_tone_reply(q)
+    if direct:
+        return finalize_reply(q, "CLAIRE", direct)
     if not CLAIRE_GOVERNED_RUNTIME:
         trace_id = new_trace_id(None)
         return "CLAIRE", "CLAIRE governed runtime is unavailable; normal chat is not allowed to bypass ClaireRuntime.", trace_id
@@ -12036,7 +12132,81 @@ def build_reply(q: str, debug: bool = False):
     )
     answer = clean_visible_reply(str(result.get("answer") or ""))
     trace_id = str(result.get("trace_id") or "")
+    print(
+        "CLAIRE_LIVE_PATH "
+        f"endpoint=build_reply runtime=ClaireRuntime lane={result.get('lane')} "
+        f"canonical_ARE_loaded={'canonical_term_ARE' in set(result.get('used_memory') or [])} "
+        f"trace_id={trace_id}",
+        flush=True,
+    )
     return "CLAIRE", answer, trace_id
+
+
+def is_operator_identity_prompt(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    markers = [
+        "hello claire this is lucius prime",
+        "this is lucius prime",
+        "i am lucius prime",
+        "i am battleborn",
+        "do you not recognize your creator",
+        "do you recognize your creator",
+        "that would be me",
+        "i am your creator",
+        "your creator",
+    ]
+    return any(marker in cleaned for marker in markers)
+
+
+def is_capability_prompt(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    return any(
+        marker in cleaned
+        for marker in [
+            "what are you good at",
+            "what can you do",
+            "what do you do",
+            "what are you for",
+            "why would anyone buy",
+            "why should anyone buy",
+            "not much for conversation",
+            "not good at conversation",
+        ]
+    )
+
+
+def operator_identity_reply() -> str:
+    return (
+        "I recognize Lucius Prime and Battleborn as operator identity terms in this session context.\n\n"
+        "I am not conscious, and I will not pretend to be. But I can respect the operator context, keep protected lanes governed, and speak plainly instead of hiding behind sterile disclaimers.\n\n"
+        "Protected lanes still stay protected. I will not print secrets, credentials, private memory, or unsafe tools into public chat."
+    )
+
+
+def claire_capability_reply() -> str:
+    return (
+        "I am strongest at memory, evidence, and control.\n\n"
+        "What I can do well:\n"
+        "- remember prior context when it has been stored\n"
+        "- recall relevant experience instead of guessing\n"
+        "- organize documents and evidence\n"
+        "- check policy before simulated actions\n"
+        "- produce traces that show what happened\n"
+        "- help turn messy work into reviewable workflows\n\n"
+        "I should not act like a loose chatbot. My value is continuity, governance, and proof."
+    )
+
+
+def public_operator_tone_reply(prompt: str) -> str:
+    if is_operator_identity_prompt(prompt):
+        return operator_identity_reply()
+    if is_capability_prompt(prompt):
+        return claire_capability_reply()
+    return ""
 
 def strip_html_response(text: str) -> str:
     body_match = re.search(r"<body[^>]*>(.*?)</body>", text, flags=re.I | re.S)
@@ -12395,6 +12565,10 @@ def query_gemini(prompt: str, system_prompt: str) -> str:
 
 def known_general_reply(prompt: str) -> str:
     cleaned = _clean_for_match(prompt)
+    if is_operator_identity_prompt(prompt):
+        return operator_identity_reply()
+    if is_capability_prompt(prompt):
+        return claire_capability_reply()
     if "ooda" in cleaned and any(marker in cleaned for marker in ["buyer line", "pitch line", "sales line", "lap memory", "ddp", "drone dominance"]):
         return (
             "Buyer line:\n"
@@ -12553,8 +12727,8 @@ def public_page(title: str, eyebrow: str, body_html: str) -> HTMLResponse:
             letter-spacing: 1.5px;
         }}
         .brand img {{ width: 42px; height: 42px; object-fit: contain; }}
-        .nav-links {{ display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }}
-        .nav-links a {{ color: var(--muted); text-decoration: none; }}
+	        .nav-links {{ display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }}
+	        .nav-links a {{ color: var(--muted); text-decoration: none; }}
         .wrap {{
             position: relative;
             z-index: 1;
@@ -12663,10 +12837,11 @@ def public_page(title: str, eyebrow: str, body_html: str) -> HTMLResponse:
             <img src="/static/logo.png" alt="" onerror="this.style.display='none';">
             <span>CLAIRE SYSTEMS</span>
         </a>
-        <div class="nav-links">
-            <a href="/are-spectacle">ARE Spectacle</a>
-            <a href="/support">Support</a>
-            <a href="/privacy">Privacy</a>
+	        <div class="nav-links">
+	            <a href="/are-demo">ARE Demo</a>
+	            <a href="/are-spectacle">ARE Spectacle</a>
+	            <a href="/support">Support</a>
+	            <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
         </div>
     </nav>
@@ -12737,7 +12912,1014 @@ def are_spectacle_page():
                 </ul>
             </div>
         """,
+	    )
+
+
+ARE_DEMO_DB = Path("/home/LuciusPrime/claire/data/are_demo_memory.sqlite")
+ARE_DEMO_EXPIRY_DAYS = 30
+ARE_DEMO_MAX_MEMORY_CHARS = 500
+ARE_DEMO_RATE_LIMIT_WINDOW = 60
+ARE_DEMO_RATE_LIMIT_MAX = 40
+ARE_DEMO_RATE_BUCKET: dict[str, list[float]] = {}
+ARE_DEMO_SECRET_PATTERNS = [
+    re.compile(pattern, re.I)
+    for pattern in [
+        r"api[_-]?key",
+        r"secret",
+        r"password",
+        r"passphrase",
+        r"token",
+        r"private[_-]?key",
+        r"access[_-]?token",
+        r"refresh[_-]?token",
+        r"bearer\s+[a-z0-9._-]+",
+        r"sk-[a-z0-9_-]{12,}",
+    ]
+]
+
+
+def _are_demo_now() -> datetime:
+    return datetime.utcnow()
+
+
+def _are_demo_ts(dt: datetime | None = None) -> str:
+    return (dt or _are_demo_now()).isoformat(timespec="seconds") + "Z"
+
+
+def _are_demo_expiry() -> str:
+    return _are_demo_ts(_are_demo_now() + timedelta(days=ARE_DEMO_EXPIRY_DAYS))
+
+
+def _are_demo_checksum(text: str, length: int = 12) -> str:
+    return hashlib.sha256(str(text or "").encode("utf-8", errors="ignore")).hexdigest()[:length]
+
+
+def _are_demo_code() -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    raw = uuid.uuid4().hex.upper()
+    chars = []
+    for idx in range(6):
+        chars.append(alphabet[int(raw[idx * 2 : idx * 2 + 2], 16) % len(alphabet)])
+    return "ARE-LANE-" + "".join(chars)
+
+
+def _are_demo_connect():
+    ARE_DEMO_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(ARE_DEMO_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _are_demo_init() -> None:
+    with _are_demo_connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS are_demo_lanes (
+                lane_code TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS are_demo_memories (
+                memory_id TEXT PRIMARY KEY,
+                lane_code TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                memory_text TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY(lane_code) REFERENCES are_demo_lanes(lane_code)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS are_demo_ledger (
+                event_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                lane_code TEXT NOT NULL,
+                checksum TEXT,
+                memory_preview TEXT,
+                recall_query TEXT,
+                recall_result TEXT,
+                expires_at TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_are_demo_memories_lane ON are_demo_memories(lane_code, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_are_demo_ledger_lane ON are_demo_ledger(lane_code, timestamp)")
+
+
+def _are_demo_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return (forwarded.split(",", 1)[0].strip() or (request.client.host if request.client else "unknown"))[:80]
+
+
+def _are_demo_rate_limit(request: Request) -> tuple[bool, str | None]:
+    ip = _are_demo_client_ip(request)
+    now = time.time()
+    recent = [ts for ts in ARE_DEMO_RATE_BUCKET.get(ip, []) if now - ts < ARE_DEMO_RATE_LIMIT_WINDOW]
+    if len(recent) >= ARE_DEMO_RATE_LIMIT_MAX:
+        ARE_DEMO_RATE_BUCKET[ip] = recent
+        return False, "Rate limit reached. Please wait a minute and try again."
+    recent.append(now)
+    ARE_DEMO_RATE_BUCKET[ip] = recent
+    return True, None
+
+
+def _are_demo_clean_text(text: str) -> str:
+    cleaned = " ".join(str(text or "").split())
+    return cleaned[:ARE_DEMO_MAX_MEMORY_CHARS]
+
+
+def _are_demo_secret_risk(text: str) -> bool:
+    return any(pattern.search(text or "") for pattern in ARE_DEMO_SECRET_PATTERNS)
+
+
+def _are_demo_preview(text: str, limit: int = 120) -> str:
+    cleaned = _are_demo_clean_text(text)
+    return cleaned[:limit] + ("..." if len(cleaned) > limit else "")
+
+
+def _are_demo_fetch_lane(conn, lane_code: str):
+    return conn.execute(
+        "SELECT lane_code, created_at, expires_at, deleted FROM are_demo_lanes WHERE lane_code = ?",
+        (lane_code,),
+    ).fetchone()
+
+
+def _are_demo_lane_available(conn, lane_code: str) -> tuple[bool, str, sqlite3.Row | None]:
+    lane = _are_demo_fetch_lane(conn, lane_code)
+    if not lane:
+        return False, "Memory lane not found.", None
+    if int(lane["deleted"] or 0):
+        return False, "Memory lane was deleted.", lane
+    if lane["expires_at"] < _are_demo_ts():
+        return False, "Memory lane expired.", lane
+    return True, "ok", lane
+
+
+def _are_demo_ledger(
+    conn,
+    event_type: str,
+    lane_code: str,
+    checksum: str | None = None,
+    memory_preview: str | None = None,
+    recall_query: str | None = None,
+    recall_result: str | None = None,
+    expires_at: str | None = None,
+) -> dict:
+    record = {
+        "event_id": "areevt_" + uuid.uuid4().hex[:14],
+        "timestamp": _are_demo_ts(),
+        "event_type": event_type,
+        "lane_code": lane_code,
+        "checksum": checksum,
+        "memory_preview": memory_preview,
+        "recall_query": recall_query,
+        "recall_result": recall_result,
+        "expires_at": expires_at,
+    }
+    conn.execute(
+        """
+        INSERT INTO are_demo_ledger
+        (event_id, timestamp, event_type, lane_code, checksum, memory_preview, recall_query, recall_result, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            record["event_id"],
+            record["timestamp"],
+            record["event_type"],
+            record["lane_code"],
+            record["checksum"],
+            record["memory_preview"],
+            record["recall_query"],
+            record["recall_result"],
+            record["expires_at"],
+        ),
     )
+    return record
+
+
+def _are_demo_score_memory(query: str, memory: str) -> tuple[int, bool]:
+    q = _are_demo_clean_text(query).lower()
+    m = _are_demo_clean_text(memory).lower()
+    if not q or not m:
+        return 0, False
+    if q in m or m in q:
+        return max(len(q), len(m)), True
+    query_terms = {term for term in re.findall(r"[a-z0-9]+", q) if len(term) >= 3}
+    memory_terms = {term for term in re.findall(r"[a-z0-9]+", m) if len(term) >= 3}
+    overlap = query_terms & memory_terms
+    return len(overlap), bool(overlap)
+
+
+def _are_demo_public_ledger_rows(conn, lane_code: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT timestamp, event_type, lane_code, checksum, memory_preview, recall_query, recall_result, expires_at
+        FROM are_demo_ledger
+        WHERE lane_code = ?
+        ORDER BY timestamp ASC
+        LIMIT 200
+        """,
+        (lane_code,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+_are_demo_init()
+
+
+@app.post("/are-demo/api/lane")
+async def are_demo_create_lane(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    with _are_demo_connect() as conn:
+        lane_code = _are_demo_code()
+        while _are_demo_fetch_lane(conn, lane_code):
+            lane_code = _are_demo_code()
+        created_at = _are_demo_ts()
+        expires_at = _are_demo_expiry()
+        conn.execute(
+            "INSERT INTO are_demo_lanes (lane_code, created_at, expires_at, deleted) VALUES (?, ?, ?, 0)",
+            (lane_code, created_at, expires_at),
+        )
+        _are_demo_ledger(conn, "lane_created", lane_code, expires_at=expires_at)
+        conn.commit()
+        return {"ok": True, "lane_code": lane_code, "created_at": created_at, "expires_at": expires_at, "ledger": _are_demo_public_ledger_rows(conn, lane_code)}
+
+
+@app.post("/are-demo/api/open")
+async def are_demo_open_lane(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    payload = await request.json()
+    lane_code = str(payload.get("lane_code") or "").strip().upper()
+    with _are_demo_connect() as conn:
+        ok, message, lane = _are_demo_lane_available(conn, lane_code)
+        if not ok:
+            return JSONResponse({"ok": False, "error": message}, status_code=404)
+        memories = conn.execute(
+            "SELECT created_at, checksum, memory_text, expires_at FROM are_demo_memories WHERE lane_code = ? ORDER BY created_at ASC LIMIT 100",
+            (lane_code,),
+        ).fetchall()
+        return {
+            "ok": True,
+            "lane_code": lane_code,
+            "created_at": lane["created_at"],
+            "expires_at": lane["expires_at"],
+            "memories": [
+                {
+                    "created_at": row["created_at"],
+                    "checksum": row["checksum"],
+                    "memory_preview": _are_demo_preview(row["memory_text"]),
+                    "expires_at": row["expires_at"],
+                }
+                for row in memories
+            ],
+            "ledger": _are_demo_public_ledger_rows(conn, lane_code),
+        }
+
+
+@app.post("/are-demo/api/memory")
+async def are_demo_save_memory(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    payload = await request.json()
+    lane_code = str(payload.get("lane_code") or "").strip().upper()
+    memory_text = _are_demo_clean_text(payload.get("memory_text") or "")
+    if not memory_text:
+        return JSONResponse({"ok": False, "error": "Type a safe demo memory first."}, status_code=400)
+    if _are_demo_secret_risk(memory_text):
+        return JSONResponse({"ok": False, "error": "This looks like it may contain a secret. Demo memories cannot store secrets, passwords, tokens, or private keys."}, status_code=400)
+    with _are_demo_connect() as conn:
+        ok, message, lane = _are_demo_lane_available(conn, lane_code)
+        if not ok:
+            return JSONResponse({"ok": False, "error": message}, status_code=404)
+        memory_id = "aremem_" + uuid.uuid4().hex[:14]
+        checksum = _are_demo_checksum(memory_text)
+        created_at = _are_demo_ts()
+        expires_at = lane["expires_at"]
+        conn.execute(
+            """
+            INSERT INTO are_demo_memories (memory_id, lane_code, created_at, checksum, memory_text, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (memory_id, lane_code, created_at, checksum, memory_text, expires_at),
+        )
+        _are_demo_ledger(conn, "memory_saved", lane_code, checksum=checksum, memory_preview=_are_demo_preview(memory_text), expires_at=expires_at)
+        conn.commit()
+        return {
+            "ok": True,
+            "lane_code": lane_code,
+            "created_at": created_at,
+            "checksum": checksum,
+            "memory_preview": _are_demo_preview(memory_text),
+            "expires_at": expires_at,
+            "ledger": _are_demo_public_ledger_rows(conn, lane_code),
+        }
+
+
+@app.post("/are-demo/api/recall")
+async def are_demo_recall_memory(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    payload = await request.json()
+    lane_code = str(payload.get("lane_code") or "").strip().upper()
+    query = _are_demo_clean_text(payload.get("query") or "")
+    if not query:
+        return JSONResponse({"ok": False, "error": "Ask a recall question first."}, status_code=400)
+    if _are_demo_secret_risk(query):
+        return JSONResponse({"ok": False, "error": "Recall questions cannot include secrets, passwords, tokens, or private keys."}, status_code=400)
+    with _are_demo_connect() as conn:
+        ok, message, lane = _are_demo_lane_available(conn, lane_code)
+        if not ok:
+            return JSONResponse({"ok": False, "error": message}, status_code=404)
+        _are_demo_ledger(conn, "recall_requested", lane_code, recall_query=query, expires_at=lane["expires_at"])
+        memories = conn.execute(
+            "SELECT created_at, checksum, memory_text, expires_at FROM are_demo_memories WHERE lane_code = ? ORDER BY created_at ASC",
+            (lane_code,),
+        ).fetchall()
+        scored = []
+        for row in memories:
+            score, matched = _are_demo_score_memory(query, row["memory_text"])
+            if matched:
+                scored.append((score, row))
+        scored.sort(key=lambda item: (item[0], item[1]["created_at"]), reverse=True)
+        if scored:
+            best = scored[0][1]
+            result = f'You previously saved: "{best["memory_text"]}"'
+            checksum = best["checksum"]
+            preview = _are_demo_preview(best["memory_text"])
+            found = True
+        else:
+            result = "No matching prior memory was found in this lane."
+            checksum = None
+            preview = None
+            found = False
+        _are_demo_ledger(
+            conn,
+            "memory_recalled",
+            lane_code,
+            checksum=checksum,
+            memory_preview=preview,
+            recall_query=query,
+            recall_result=result,
+            expires_at=lane["expires_at"],
+        )
+        conn.commit()
+        return {
+            "ok": True,
+            "lane_code": lane_code,
+            "query": query,
+            "found": found,
+            "recall_result": result,
+            "matched_memory": {"checksum": checksum, "memory_preview": preview} if found else None,
+            "expires_at": lane["expires_at"],
+            "ledger": _are_demo_public_ledger_rows(conn, lane_code),
+            "explanation": "The lane code opened the memory lane. ARE then searched the lane memories using your question.",
+        }
+
+
+@app.post("/are-demo/api/delete")
+async def are_demo_delete_lane(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    payload = await request.json()
+    lane_code = str(payload.get("lane_code") or "").strip().upper()
+    with _are_demo_connect() as conn:
+        ok, message, lane = _are_demo_lane_available(conn, lane_code)
+        if not ok:
+            return JSONResponse({"ok": False, "error": message}, status_code=404)
+        conn.execute("UPDATE are_demo_lanes SET deleted = 1 WHERE lane_code = ?", (lane_code,))
+        _are_demo_ledger(conn, "lane_deleted", lane_code, expires_at=lane["expires_at"])
+        conn.commit()
+        return {"ok": True, "lane_code": lane_code, "deleted": True}
+
+
+@app.get("/are-demo", response_class=HTMLResponse)
+def are_demo_page():
+    return HTMLResponse("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARE Memory Demo | Claire Systems</title>
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --panel: #111827;
+            --panel2: #172033;
+            --line: #243044;
+            --cyan: #22d3ee;
+            --green: #34d399;
+            --amber: #f59e0b;
+            --red: #f87171;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --plain: #d9f99d;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; min-height: 100%; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Courier New", Courier, monospace;
+            padding: 24px;
+        }
+        a { color: #bff7ff; }
+        .safety {
+            background: #facc15;
+            color: #111827;
+            font-size: 12px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-align: center;
+            text-transform: uppercase;
+            padding: 10px 12px;
+            border: 1px solid #f59e0b;
+            margin-bottom: 18px;
+        }
+        header {
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        h1 { margin: 0; color: var(--cyan); font-size: 22px; letter-spacing: 0.08em; }
+        .subtitle { color: var(--muted); font-size: 12px; margin-top: 6px; }
+        .plain-explainer {
+            margin-top: 12px;
+            max-width: 860px;
+            color: #ecfccb;
+            background: rgba(217, 249, 157, 0.07);
+            border: 1px solid rgba(217, 249, 157, 0.25);
+            border-radius: 8px;
+            padding: 12px 14px;
+            font-family: "Segoe UI", Tahoma, sans-serif;
+            font-size: 16px;
+            line-height: 1.45;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(52, 211, 153, 0.35);
+            background: rgba(52, 211, 153, 0.08);
+            color: var(--green);
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .pulse {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: var(--green);
+            box-shadow: 0 0 10px var(--green);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: minmax(280px, 0.9fr) minmax(0, 2fr);
+            gap: 20px;
+        }
+        .stack { display: grid; gap: 20px; }
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.25);
+        }
+        .card h2 {
+            color: #dbeafe;
+            font-size: 13px;
+            letter-spacing: 0.07em;
+            margin: 0 0 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--line);
+            text-transform: uppercase;
+        }
+        label, .small { color: var(--muted); font-size: 12px; }
+        .row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+        input[type="range"] { width: 100%; accent-color: var(--cyan); }
+	        textarea, input[type="number"], input[type="text"] {
+            width: 100%;
+            background: #0b0f19;
+            color: #a7f3d0;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 10px;
+            font-family: inherit;
+            font-size: 12px;
+        }
+        textarea { resize: vertical; min-height: 86px; }
+        button {
+            border: 0;
+            border-radius: 6px;
+            padding: 10px 12px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 900;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+        .btn-cyan { background: var(--cyan); color: #06202a; }
+        .btn-amber { background: var(--amber); color: #1f1300; }
+        .btn-dark { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+        .metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .metric {
+            background: var(--panel2);
+            border: 1px solid #334155;
+            border-radius: 6px;
+            text-align: center;
+            padding: 10px;
+        }
+        .metric span { display: block; color: var(--muted); font-size: 10px; }
+        .metric strong { display: block; margin-top: 4px; font-size: 12px; color: var(--cyan); }
+        .terminal {
+            background: #080c14;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            min-height: 380px;
+            max-height: 430px;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        .line {
+            display: grid;
+            grid-template-columns: auto auto minmax(0, 1fr);
+            gap: 10px;
+            border-bottom: 1px solid rgba(36, 48, 68, 0.45);
+            padding: 6px 0;
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+        .ts { color: #64748b; }
+        .sha { color: var(--amber); }
+        .text { color: #e2e8f0; }
+        .narrative {
+            display: grid;
+            gap: 10px;
+            color: #cbd5e1;
+            font-size: 12px;
+            line-height: 1.55;
+        }
+        .narrative-step {
+            border-left: 3px solid rgba(34, 211, 238, 0.5);
+            background: rgba(34, 211, 238, 0.05);
+            padding: 10px 12px;
+        }
+        .narrative-step.active {
+            border-left-color: var(--green);
+            background: rgba(52, 211, 153, 0.08);
+            color: #e7fff4;
+        }
+        .recall-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .recall-controls input { width: 76px; text-align: center; }
+        .search-input { width: min(360px, 100%); text-align: left; }
+	        .recall-output {
+	            margin-top: 14px;
+	            background: #080c14;
+	            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 12px;
+            display: none;
+        }
+        .recall-row {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: #a7f3d0;
+            padding: 9px;
+            margin-top: 8px;
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+	        .footer {
+            margin-top: 22px;
+            color: var(--muted);
+            font-size: 12px;
+            border-top: 1px solid var(--line);
+            padding-top: 14px;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+	            flex-wrap: wrap;
+	        }
+	        .lane-code {
+	            display: inline-block;
+	            color: #ecfccb;
+	            background: rgba(217, 249, 157, 0.08);
+	            border: 1px solid rgba(217, 249, 157, 0.25);
+	            border-radius: 6px;
+	            padding: 8px 10px;
+	            font-size: 16px;
+	            font-weight: 900;
+	            letter-spacing: 0.08em;
+	            margin: 8px 0;
+	        }
+	        .form-grid {
+	            display: grid;
+	            grid-template-columns: minmax(0, 1fr) auto;
+	            gap: 10px;
+	            align-items: start;
+	        }
+	        .ledger-table {
+	            width: 100%;
+	            border-collapse: collapse;
+	            font-size: 11px;
+	            min-width: 760px;
+	        }
+	        .ledger-wrap {
+	            overflow-x: auto;
+	            border: 1px solid var(--line);
+	            border-radius: 8px;
+	            background: #080c14;
+	            max-height: 360px;
+	        }
+	        .ledger-table th, .ledger-table td {
+	            border-bottom: 1px solid rgba(36, 48, 68, 0.55);
+	            padding: 8px;
+	            vertical-align: top;
+	            color: #cbd5e1;
+	        }
+	        .ledger-table th {
+	            color: var(--cyan);
+	            text-align: left;
+	            position: sticky;
+	            top: 0;
+	            background: #080c14;
+	        }
+	        .message {
+	            margin-top: 10px;
+	            color: #cbd5e1;
+	            background: rgba(34, 211, 238, 0.05);
+	            border: 1px solid rgba(34, 211, 238, 0.2);
+	            border-radius: 6px;
+	            padding: 9px;
+	            font-size: 12px;
+	        }
+	        @media (max-width: 920px) {
+	            body { padding: 16px; }
+	            header, .grid { grid-template-columns: 1fr; }
+	            header { flex-direction: column; }
+	            .line { grid-template-columns: 1fr; gap: 2px; }
+	            .form-grid { grid-template-columns: 1fr; }
+	        }
+    </style>
+</head>
+<body>
+	    <div class="safety">Hosted demo only. Do not enter secrets or private information. Server-side demo memory expires after 30 days.</div>
+
+    <header>
+        <div>
+            <h1>ANALOG RECALL ENGINE (ARE)</h1>
+	            <div class="subtitle">Original ARE hosted demo: create a memory lane, record experiences in order, and recall matching prior experience later. Demo lanes expire after 30 days.</div>
+	            <div class="plain-explainer">
+	                ARE is like a careful memory notebook for an AI. It writes down experiences, gives them an ID, keeps them in order, and later recalls the matching memory when you ask.
+	            </div>
+        </div>
+        <div class="status-pill"><span class="pulse"></span><span>Hosted 30-Day Memory</span></div>
+    </header>
+
+    <main class="grid">
+        <section class="stack">
+            <div class="card">
+                <h2>Memory Pressure Control</h2>
+                <label class="row" for="ram-slider">
+                    <span>Pretend Computer Memory Available</span>
+                    <strong id="ram-display" style="color: var(--cyan);">800,000 KB</strong>
+                </label>
+                <input type="range" id="ram-slider" min="200000" max="1000000" step="10000" value="800000">
+                <div class="metrics">
+                    <div class="metric">
+                        <span>Memory Mode</span>
+                        <strong id="status-display" style="color: var(--green);">Nominal State</strong>
+                    </div>
+                    <div class="metric">
+                        <span>How Many Notes It Keeps</span>
+                        <strong id="max-lines-display">5,000 Lines</strong>
+                    </div>
+                </div>
+            </div>
+
+	            <div class="card">
+	                <h2>Memory Lane</h2>
+	                <div class="small">A lane code opens your hosted demo memory lane. It does not point to one note. ARE still has to search the lane when you ask a question. Lanes expire after 30 days.</div>
+	                <button id="create-lane" class="btn-cyan" style="width: 100%; margin-top: 10px;">Create Memory Lane</button>
+	                <div class="form-grid" style="margin-top: 10px;">
+	                    <input type="text" id="lane-code-input" placeholder="ARE-LANE-7K42">
+	                    <button id="open-lane" class="btn-dark">Open Lane</button>
+	                </div>
+	                <div id="lane-status" class="message">No memory lane is open yet.</div>
+	            </div>
+
+	            <div class="card">
+	                <h2>Create Memory</h2>
+	                <textarea id="manual-input" placeholder="Type a safe demo memory, like: My dog eats red ice cream."></textarea>
+	                <button id="submit-ingest" class="btn-cyan" style="width: 100%; margin-top: 10px;">Create Memory</button>
+	                <div class="small" style="margin-top: 8px;">Demo only. Do not enter passwords, tokens, private facts, account data, medical details, legal facts, or confidential information.</div>
+	            </div>
+
+            <div class="card">
+                <h2>Running Narrative</h2>
+                <div class="narrative">
+	                    <div class="narrative-step active" id="story-lane"><strong>1. Lane:</strong> Create or open a scoped memory lane with a random code.</div>
+	                    <div class="narrative-step" id="story-ingest"><strong>2. Experience:</strong> Save demo memories into that lane as chronological events.</div>
+	                    <div class="narrative-step" id="story-hash"><strong>3. Label:</strong> Each memory gets a checksum so the ledger can show what was recorded.</div>
+	                    <div class="narrative-step" id="story-recall"><strong>4. Recall:</strong> Ask a question. ARE searches prior memories in the opened lane.</div>
+	                    <div class="narrative-step" id="story-ledger"><strong>5. Ledger:</strong> The event ledger shows lane creation, memory saves, recall requests, and recall results.</div>
+	                    <div class="narrative-step"><strong>Safety:</strong> This demo is isolated from real CLAIRE private memory, account data, legal files, trading systems, and secrets.</div>
+	                </div>
+	            </div>
+        </section>
+
+        <section class="stack">
+            <div class="card">
+                <div class="row" style="border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 12px;">
+	                    <h2 style="border: 0; margin: 0; padding: 0;">Prior Experience In Lane <span style="color: var(--muted); font-weight: 400;">(server-side demo memory)</span></h2>
+	                    <span id="line-counter" style="color: var(--cyan); font-size: 12px;">0 Lines Written</span>
+	                </div>
+	                <div id="storage-container" class="terminal"></div>
+	            </div>
+
+	            <div class="card">
+	                <h2>Recall Memory</h2>
+	                <div class="recall-controls">
+	                    <input class="search-input" type="text" id="recall-query" placeholder="Ask: What did I say about my dog?">
+	                    <button id="trigger-recall" class="btn-amber">Recall Memory</button>
+	                    <button id="refresh-ledger" class="btn-dark">Refresh Ledger</button>
+	                    <button id="delete-lane" class="btn-dark">Delete Lane</button>
+	                </div>
+	                <div id="recall-output" class="recall-output"></div>
+	            </div>
+
+	            <div class="card">
+	                <h2>Memory Ledger</h2>
+	                <div class="small" style="margin-bottom: 10px;">Public-safe event record. It shows that recall came from stored prior experience in the lane, not from the lane code itself.</div>
+	                <div class="ledger-wrap">
+	                    <table class="ledger-table">
+	                        <thead>
+	                            <tr>
+	                                <th>Timestamp</th>
+	                                <th>Event</th>
+	                                <th>Lane</th>
+	                                <th>Checksum</th>
+	                                <th>Memory Preview</th>
+	                                <th>Recall Query</th>
+	                                <th>Recall Result</th>
+	                                <th>Expires</th>
+	                            </tr>
+	                        </thead>
+	                        <tbody id="ledger-body">
+	                            <tr><td colspan="8">No lane opened yet.</td></tr>
+	                        </tbody>
+	                    </table>
+	                </div>
+	            </div>
+        </section>
+    </main>
+
+    <div class="footer">
+        <span>Claire Systems ARE demo. A public-safe memory simulation for review.</span>
+        <span><a href="/">Claire Demo</a> | <a href="/are-spectacle">ARE Spectacle</a> | <a href="mailto:Steve@clairesystems.ai">Steve@clairesystems.ai</a></span>
+    </div>
+
+	    <script>
+	        let activeLaneCode = "";
+	        let currentMemories = [];
+
+	        function escapeHtml(str) {
+	            return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	        }
+
+	        function activateStory(id) {
+	            document.querySelectorAll(".narrative-step").forEach(el => el.classList.remove("active"));
+	            const item = document.getElementById(id);
+	            if (item) item.classList.add("active");
+	        }
+
+	        async function apiPost(path, body) {
+	            const response = await fetch(path, {
+	                method: "POST",
+	                headers: {"Content-Type": "application/json"},
+	                body: JSON.stringify(body || {})
+	            });
+	            const data = await response.json();
+	            if (!response.ok || data.ok === false) {
+	                throw new Error(data.error || "Request failed.");
+	            }
+	            return data;
+	        }
+
+	        function setMessage(text, kind = "info") {
+	            const el = document.getElementById("lane-status");
+	            el.innerHTML = escapeHtml(text);
+	            el.style.borderColor = kind === "error" ? "rgba(248,113,113,0.45)" : "rgba(34,211,238,0.2)";
+	        }
+
+	        function setLane(laneCode, expiresAt) {
+	            activeLaneCode = laneCode || "";
+	            document.getElementById("lane-code-input").value = activeLaneCode;
+	            if (activeLaneCode) {
+	                setMessage(`Open hosted lane: ${activeLaneCode}. Expires: ${expiresAt || "30 days after creation"}.`);
+	            } else {
+	                setMessage("No memory lane is open yet.");
+	            }
+	        }
+
+	        function renderMemories(memories) {
+	            currentMemories = memories || [];
+	            const container = document.getElementById("storage-container");
+	            const counter = document.getElementById("line-counter");
+	            container.innerHTML = "";
+	            counter.innerText = `${currentMemories.length} Memories In Lane`;
+	            if (!currentMemories.length) {
+	                container.innerHTML = '<div class="line"><span class="text">No prior experience saved in this lane yet.</span></div>';
+	                return;
+	            }
+	            currentMemories.forEach((line, idx) => {
+	                const element = document.createElement("div");
+	                element.className = "line";
+	                element.innerHTML = `<span class="ts">[${escapeHtml(line.created_at)}]</span><span class="sha">${escapeHtml(line.checksum)}</span><span class="text">${idx + 1}. ${escapeHtml(line.memory_preview || "")}</span>`;
+	                container.appendChild(element);
+	            });
+	            container.scrollTop = container.scrollHeight;
+	        }
+
+	        function renderLedger(rows) {
+	            const body = document.getElementById("ledger-body");
+	            body.innerHTML = "";
+	            const ledger = rows || [];
+	            if (!ledger.length) {
+	                body.innerHTML = '<tr><td colspan="8">No ledger events yet.</td></tr>';
+	                return;
+	            }
+	            ledger.slice().reverse().forEach(row => {
+	                const tr = document.createElement("tr");
+	                tr.innerHTML = `
+	                    <td>${escapeHtml(row.timestamp)}</td>
+	                    <td>${escapeHtml(row.event_type)}</td>
+	                    <td>${escapeHtml(row.lane_code)}</td>
+	                    <td>${escapeHtml(row.checksum || "")}</td>
+	                    <td>${escapeHtml(row.memory_preview || "")}</td>
+	                    <td>${escapeHtml(row.recall_query || "")}</td>
+	                    <td>${escapeHtml(row.recall_result || "")}</td>
+	                    <td>${escapeHtml(row.expires_at || "")}</td>
+	                `;
+	                body.appendChild(tr);
+	            });
+	        }
+
+	        function renderRecall(data) {
+	            const outputBlock = document.getElementById("recall-output");
+	            outputBlock.style.display = "block";
+	            outputBlock.innerHTML = `<div style="color: var(--cyan); font-weight: 900; font-size: 11px; text-transform: uppercase;">Recall Result</div>
+	                <div class="recall-row">${escapeHtml(data.recall_result || "")}</div>
+	                <div class="recall-row" style="color: var(--muted);">${escapeHtml(data.explanation || "Lane opened, then lane memories searched by question.")}</div>`;
+	        }
+
+	        function requireLane() {
+	            if (!activeLaneCode) {
+	                throw new Error("Create or open a memory lane first.");
+	            }
+	            return activeLaneCode;
+	        }
+
+	        document.getElementById("ram-slider").addEventListener("input", function(e) {
+	            const val = parseInt(e.target.value, 10);
+	            document.getElementById("ram-display").innerText = `${val.toLocaleString()} KB`;
+	            const statusDisplay = document.getElementById("status-display");
+	            const maxLinesDisplay = document.getElementById("max-lines-display");
+	            if (val < 350000) {
+	                statusDisplay.innerText = "Critical Throttling";
+	                statusDisplay.style.color = "var(--red)";
+	                maxLinesDisplay.innerText = "500 Memories";
+	            } else if (val < 600000) {
+	                statusDisplay.innerText = "Warning Active";
+	                statusDisplay.style.color = "var(--amber)";
+	                maxLinesDisplay.innerText = "2,000 Memories";
+	            } else {
+	                statusDisplay.innerText = "Nominal State";
+	                statusDisplay.style.color = "var(--green)";
+	                maxLinesDisplay.innerText = "5,000 Memories";
+	            }
+	        });
+
+	        document.getElementById("create-lane").addEventListener("click", async function() {
+	            try {
+	                activateStory("story-lane");
+	                const data = await apiPost("/are-demo/api/lane", {});
+	                setLane(data.lane_code, data.expires_at);
+	                renderMemories([]);
+	                renderLedger(data.ledger);
+	                document.getElementById("recall-output").style.display = "block";
+	                document.getElementById("recall-output").innerHTML = `<div class="recall-row">Your memory lane code is <span class="lane-code">${escapeHtml(data.lane_code)}</span><br>Save this code. It opens your demo lane later, but it does not directly retrieve one note.</div>`;
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("open-lane").addEventListener("click", async function() {
+	            try {
+	                activateStory("story-lane");
+	                const laneCode = document.getElementById("lane-code-input").value;
+	                const data = await apiPost("/are-demo/api/open", {lane_code: laneCode});
+	                setLane(data.lane_code, data.expires_at);
+	                renderMemories(data.memories);
+	                renderLedger(data.ledger);
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("submit-ingest").addEventListener("click", async function() {
+	            try {
+	                const laneCode = requireLane();
+	                const inputElement = document.getElementById("manual-input");
+	                activateStory("story-ingest");
+	                const data = await apiPost("/are-demo/api/memory", {lane_code: laneCode, memory_text: inputElement.value});
+	                activateStory("story-hash");
+	                inputElement.value = "";
+	                const opened = await apiPost("/are-demo/api/open", {lane_code: laneCode});
+	                renderMemories(opened.memories);
+	                renderLedger(data.ledger);
+	                setMessage(`Memory created in ${laneCode}. Checksum: ${data.checksum}.`);
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("trigger-recall").addEventListener("click", async function() {
+	            try {
+	                const laneCode = requireLane();
+	                activateStory("story-recall");
+	                const query = document.getElementById("recall-query").value;
+	                const data = await apiPost("/are-demo/api/recall", {lane_code: laneCode, query: query});
+	                renderRecall(data);
+	                renderLedger(data.ledger);
+	                activateStory("story-ledger");
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("refresh-ledger").addEventListener("click", async function() {
+	            try {
+	                const laneCode = requireLane();
+	                const data = await apiPost("/are-demo/api/open", {lane_code: laneCode});
+	                renderMemories(data.memories);
+	                renderLedger(data.ledger);
+	                activateStory("story-ledger");
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("delete-lane").addEventListener("click", async function() {
+	            try {
+	                const laneCode = requireLane();
+	                if (!confirm(`Delete demo lane ${laneCode}? This only deletes the public demo lane.`)) return;
+	                await apiPost("/are-demo/api/delete", {lane_code: laneCode});
+	                activeLaneCode = "";
+	                document.getElementById("lane-code-input").value = "";
+	                renderMemories([]);
+	                renderLedger([]);
+	                setMessage("Demo memory lane deleted.");
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+	    </script>
+</body>
+</html>""")
 
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -13156,6 +14338,204 @@ async def drive_research(request: Request):
         "items": [],
         "next": "Install CLAIRE_GOOGLE_OAUTH_TOKEN_JSON or CLAIRE_GOOGLE_SERVICE_ACCOUNT_JSON for claire-gui.service, or have Codex create data/drive_research_cache.jsonl from selected Drive files.",
     })
+
+
+def _veritas_recent_uploaded_paths(limit: int = 12, latest_only: bool = False) -> list[Path]:
+    upload_root = Path(UPLOAD_DIR).resolve()
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for record in recent_uploads(limit):
+        saved_as = Path(str(record.get("saved_as") or "")).name
+        if not saved_as:
+            continue
+        path = (upload_root / saved_as).resolve()
+        if upload_root not in path.parents or not path.exists() or not path.is_file():
+            continue
+        key = str(path)
+        if key not in seen:
+            paths.append(path)
+            seen.add(key)
+    if paths:
+        return paths[:1] if latest_only else paths
+    try:
+        fallback = sorted(
+            [p for p in upload_root.iterdir() if p.is_file()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        selected = fallback[:limit]
+        return selected[:1] if latest_only else selected
+    except Exception:
+        return []
+
+
+def _veritas_trace_id() -> str:
+    return "veritas_legal_" + datetime.utcnow().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8]
+
+
+def _load_veritas_hardened_parser():
+    import importlib.machinery
+    import importlib.util
+    import sys
+
+    base_dir = Path(__file__).resolve().parent
+    parser_path = base_dir / "claire_parser"
+    if not parser_path.exists():
+        parser_path = base_dir / "claire_parser.py"
+    if not parser_path.exists():
+        raise FileNotFoundError("claire_parser is not available")
+
+    loader = importlib.machinery.SourceFileLoader("claire_parser_gui_runtime", str(parser_path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    if spec is None:
+        raise RuntimeError(f"Could not load parser spec from {parser_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
+    loader.exec_module(module)
+    return module
+
+
+def _veritas_parser_output_path(run_state_dir: Path, source_path: Path) -> Path:
+    stem = safe_id(source_path.stem, "source") if callable(safe_id) else re.sub(r"[^A-Za-z0-9_.-]+", "_", source_path.stem)
+    digest = hashlib.sha256(str(source_path).encode("utf-8", errors="ignore")).hexdigest()[:10]
+    return run_state_dir / "parser_output" / f"{stem}_{digest}.jsonl"
+
+
+@app.post("/veritas-legal/run")
+async def veritas_legal_run(request: Request):
+    trace_id = _veritas_trace_id()
+    if EvidenceEngine is None or claire_explains_summary is None:
+        return JSONResponse(
+            {
+                "status": "Veritas Legal unavailable.",
+                "title": "Veritas Legal",
+                "trace_id": trace_id,
+                "summary_text": "Veritas Legal could not load inside the GUI runtime.",
+                "processed_files": [],
+                "skipped_files": [],
+            },
+            status_code=503,
+        )
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    mode = str((payload or {}).get("mode") or "latest_upload").strip().lower()
+    raw_matter_id = str((payload or {}).get("matter_id") or "gui_matter_default")
+    matter_id = safe_id(raw_matter_id) if callable(safe_id) else raw_matter_id
+    latest_only = mode != "recent_uploads"
+    paths = _veritas_recent_uploaded_paths(latest_only=latest_only)
+    if not paths:
+        return JSONResponse(
+            {
+                "status": "Upload evidence first.",
+                "title": "Veritas Legal",
+                "trace_id": trace_id,
+                "summary_text": "No uploaded local evidence copies are available yet. Upload a TXT, PDF, DOCX, CSV, JSON, or JSONL file first, then run Veritas Legal.",
+                "processed_files": [],
+                "skipped_files": [],
+            },
+            status_code=400,
+        )
+
+    run_state_dir = Path(VERITAS_LEGAL_STATE_DIR) / trace_id
+    engine = EvidenceEngine(run_state_dir, matter_id=matter_id)
+    processed: list[dict] = []
+    skipped: list[dict] = []
+    try:
+        claire_parser = _load_veritas_hardened_parser()
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "status": "Veritas parser unavailable.",
+                "title": "Veritas Legal",
+                "trace_id": trace_id,
+                "summary_text": f"The hardened parser could not load: {exc}",
+                "processed_files": [],
+                "skipped_files": [{"reason": str(exc)}],
+                "state_dir": str(run_state_dir),
+            },
+            status_code=503,
+        )
+
+    for path in paths:
+        try:
+            parser_output = _veritas_parser_output_path(run_state_dir, path)
+            parser = claire_parser.ClaireParser(
+                output_jsonl=parser_output,
+                temp_root=run_state_dir / "parser_temp",
+                enable_ocr=True,
+                enable_media=False,
+            )
+            parsed_units = parser.parse_tree(path)
+            records = engine.ingest_parser_jsonl(parser_output) if parser_output.exists() else []
+            if not records:
+                skipped.append(
+                    {
+                        "filename": path.name,
+                        "reason": "hardened parser produced no legal evidence chunks",
+                        "parser_output": str(parser_output),
+                        "parsed_units": parsed_units,
+                    }
+                )
+                continue
+            for record in records:
+                processed.append(
+                    {
+                        "filename": path.name,
+                        "source_path": record.source_path,
+                        "matter_id": record.matter_id,
+                        "source_doc_id": record.source_doc_id,
+                        "source_sha256": record.source_sha256,
+                        "source_hash": record.source_hash,
+                        "text_sha256": record.text_sha256,
+                        "are_event_sha": record.are_event_sha,
+                        "dates": len(record.dates),
+                        "entities": len(record.entities),
+                        "redactions": record.redactions,
+                        "excerpt": record.excerpt[:260],
+                        "parser_first": True,
+                        "parser_output": str(parser_output),
+                        "parsed_units": parsed_units,
+                    }
+                )
+        except Exception as exc:
+            skipped.append({"filename": path.name, "reason": str(exc)})
+
+    if not processed:
+        return JSONResponse(
+            {
+                "status": "No supported evidence processed.",
+                "title": "Veritas Legal",
+                "trace_id": trace_id,
+                "summary_text": "Veritas Legal found uploaded files, but none could be processed by the safe local parser.",
+                "processed_files": processed,
+                "skipped_files": skipped,
+                "state_dir": str(run_state_dir),
+            },
+            status_code=422,
+        )
+
+    summary = engine.summary()
+    explanation = claire_explains_summary(summary)
+    return JSONResponse(
+        {
+            "status": f"Veritas Legal organized {len(processed)} evidence file(s).",
+            "title": "Veritas Legal",
+            "trace_id": trace_id,
+            "summary": summary,
+            "summary_text": summary.get("notice", "Evidence organization only; not legal advice."),
+            "explanation": explanation,
+            "processed_files": processed,
+            "skipped_files": skipped,
+            "state_dir": str(run_state_dir),
+            "records_path": summary.get("records_path"),
+            "manifest_path": summary.get("manifest_path"),
+            "legal_metadata_path": summary.get("legal_metadata_path"),
+            "trace_path": summary.get("trace_path"),
+            "safety": "Evidence organization only; not legal advice. No filing, court contact, or real-world legal action performed.",
+        }
+    )
 
 
 async def _ingest_one_uploaded_file(file: UploadFile) -> dict:

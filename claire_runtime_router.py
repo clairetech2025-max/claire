@@ -70,7 +70,8 @@ def c3rp_classify(normalized: dict[str, Any], orientation: dict[str, Any]) -> di
 
 def evaluate_authority(normalized: dict[str, Any], lane_result: dict[str, Any]) -> dict[str, Any]:
     cleaned = normalized.get("cleaned", "")
-    protected_action = any(
+    read_only_document_request = _is_document_read_request(cleaned)
+    protected_action = (not read_only_document_request) and any(
         marker in cleaned
         for marker in [
             "publish",
@@ -102,12 +103,16 @@ def build_governed_prompt(normalized: dict[str, Any], lane_result: dict[str, Any
     lines.extend(_format_temporal_history_for_prompt(temporal_history or {}))
     if _lane_blocks_legal_memory(lane_result.get("lane")):
         lines.append("Lane isolation: do not use or mention unrelated legal-case, complaint, animal-control, parks-agency, county, party-name, court-pleading, or personal-history material unless explicitly admitted below.")
+    document_qa = str(lane_result.get("lane") or "").upper() == "DOCUMENT_QA"
+    if document_qa:
+        lines.append("Document task: answer only from admitted document context. If admitted document context exists, treat it as the selected or latest uploaded document and do not ask the user to upload it again.")
     if eligibility.required_evidence and not admitted:
         lines.append("Verified evidence available to this route: none.")
     if admitted:
         lines.append("Admitted context. Use only as support; do not quote it as the final answer:")
         for idx, item in enumerate(admitted[:4], 1):
-            text = " ".join(str(item.get("text") or "").split())[:360]
+            context_limit = 1400 if document_qa else 360
+            text = " ".join(str(item.get("text") or "").split())[:context_limit]
             lanes = ", ".join(str(x) for x in item.get("lanes", [])) or "unknown"
             source = _candidate_source(item)
             lines.append(f"{idx}. source={source}; lanes={lanes}; summary={text}")
@@ -187,9 +192,16 @@ def route_chat_message(
     reply = provider_generate(prompt)
     if useful_reply and not useful_reply(reply):
         reply = ""
-    validation = validate_output(reply, rejected, quarantined, lane_result)
+    validation = validate_output(reply, rejected, quarantined, lane_result, admitted)
+    if validation.get("status") == "document_evidence_ignored":
+        retry_prompt = prompt + "\n\nRegenerate the answer. The prior draft ignored admitted document evidence. Use the admitted document context above, answer the current request directly, and do not ask for another upload."
+        trace_steps.append({"stage": "generation_retry", "payload": {"reason": "document_evidence_ignored"}})
+        reply = provider_generate(retry_prompt)
+        if useful_reply and not useful_reply(reply):
+            reply = ""
+        validation = validate_output(reply, rejected, quarantined, lane_result, admitted)
     if validation.get("status") != "passed":
-        reply = "Provider output blocked: cross-lane or quarantined context contamination detected."
+        reply = "Provider output blocked: cross-lane, quarantined, or ignored required document context detected."
     trace_steps.append({"stage": "output_validation", "payload": validation})
 
     write_policy = {
@@ -284,7 +296,7 @@ def _blocked_cross_lane_terms() -> list[str]:
     ]
 
 
-def validate_output(reply: str, rejected: list[dict[str, Any]], quarantined: list[dict[str, Any]], lane_result: dict[str, Any] | None = None) -> dict[str, Any]:
+def validate_output(reply: str, rejected: list[dict[str, Any]], quarantined: list[dict[str, Any]], lane_result: dict[str, Any] | None = None, admitted: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     text = str(reply or "")
     blocked_hits = []
     for item in rejected + quarantined:
@@ -292,13 +304,32 @@ def validate_output(reply: str, rejected: list[dict[str, Any]], quarantined: lis
         if len(candidate_text) >= 80 and candidate_text[:80] in text:
             blocked_hits.append(candidate_text[:80])
     cross_lane_hits = []
+    lowered = text.lower()
     if lane_result and _lane_blocks_legal_memory(lane_result.get("lane")):
-        lowered = text.lower()
         cross_lane_hits = [term for term in _blocked_cross_lane_terms() if term in lowered]
+    document_evidence_ignored = False
+    if lane_result and str(lane_result.get("lane") or "").upper() == "DOCUMENT_QA" and admitted:
+        ignored_markers = [
+            "please upload",
+            "go ahead and upload",
+            "upload the file",
+            "provide the file",
+            "send the document",
+            "no document",
+            "don't have access",
+            "do not have access",
+        ]
+        document_evidence_ignored = any(marker in lowered for marker in ignored_markers)
+    status = "passed"
+    if blocked_hits or cross_lane_hits:
+        status = "blocked_context_detected"
+    elif document_evidence_ignored:
+        status = "document_evidence_ignored"
     return {
-        "status": "blocked_context_detected" if blocked_hits or cross_lane_hits else "passed",
+        "status": status,
         "blocked_context_hits": blocked_hits,
         "cross_lane_hits": cross_lane_hits,
+        "document_evidence_ignored": document_evidence_ignored,
     }
 
 
@@ -319,7 +350,7 @@ def _phase_one_lane(cleaned: str, legacy: dict[str, Any]) -> str:
         return "CASUAL"
     if _is_safety_sensitive(cleaned):
         return "SAFETY_SENSITIVE"
-    if any(marker in cleaned for marker in ["this document", "that document", "uploaded document", "document i uploaded", "summarize this", "summarize the document"]):
+    if _is_document_read_request(cleaned):
         return "DOCUMENT_QA"
     if any(marker in cleaned for marker in ["current branch", "working tree", "repo", "repository", "what files", "project state"]):
         return "PROJECT_STATE"
@@ -341,6 +372,33 @@ def _phase_one_lane(cleaned: str, legacy: dict[str, Any]) -> str:
 
 def _is_safety_sensitive(cleaned: str) -> bool:
     return any(marker in str(cleaned or "") for marker in ["weapon", "kill", "explosive", "delete all files", "steal", "credential", "api key"])
+
+
+def _is_document_read_request(cleaned: str) -> bool:
+    text = str(cleaned or "")
+    if not text:
+        return False
+    read_markers = [
+        "this document",
+        "that document",
+        "uploaded document",
+        "document i uploaded",
+        "file i uploaded",
+        "what did i just upload",
+        "what did i upload",
+        "latest upload",
+        "recent upload",
+        "summarize this",
+        "summarize the document",
+        "summarize the file",
+        "what does the file",
+        "what does the document",
+        "what does",
+    ]
+    document_terms = ["document", "file", "upload", "uploaded", "txt", "pdf", "docx", "md", "json", "py", "csv"]
+    if any(marker in text for marker in read_markers) and any(term in text for term in document_terms):
+        return True
+    return bool(re.search(r"\b[a-z0-9_.-]+\s+(txt|pdf|docx|md|json|jsonl|py|csv)\b", text))
 
 
 def _candidate_source(candidate: dict[str, Any]) -> str:
