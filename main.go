@@ -445,11 +445,15 @@ func askHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
+	addr := strings.TrimSpace(os.Getenv("CLAIRE_GO_ADDR"))
+	if addr == "" {
+		addr = "127.0.0.1:8080"
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":      true,
 		"service": "claire-go",
-		"port":    8080,
+		"addr":    addr,
 	})
 }
 
@@ -459,6 +463,10 @@ func main() {
 	http.HandleFunc("/chat", askHandler)
 	http.HandleFunc("/health", healthHandler)
 
-	fmt.Println("CLAIRE NODE LIVE :8080")
-	log.Fatal(http.ListenAndServe("127.0.0.1:8080", nil))
+	addr := strings.TrimSpace(os.Getenv("CLAIRE_GO_ADDR"))
+	if addr == "" {
+		addr = "127.0.0.1:8080"
+	}
+	fmt.Println("CLAIRE NODE LIVE " + addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
 }

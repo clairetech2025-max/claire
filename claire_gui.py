@@ -115,7 +115,7 @@ CLAIRE_GOVERNED_RUNTIME = ClaireRuntime() if ClaireRuntime else None
 
 
 def load_keys_env():
-    env_path = "/home/LuciusPrime/claire/claire_keys.env"
+    env_path = os.environ.get("CLAIRE_KEYS_ENV_PATH", "/home/LuciusPrime/claire/claire_keys.env")
     try:
         with open(env_path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
@@ -990,26 +990,30 @@ try:
 except Exception:
     pass
 
-ARE_URL = "http://127.0.0.1:8002"
-LLM_URL = "http://127.0.0.1:8080"
+ARE_URL = os.environ.get("ARE_URL", "http://127.0.0.1:8002").rstrip("/")
+LLM_URL = os.environ.get("LLM_URL", "http://127.0.0.1:8080").rstrip("/")
 ARE_SPECTACLE_URL = os.environ.get("ARE_SPECTACLE_URL", "http://127.0.0.1:8010").rstrip("/")
-REFLECTION_VAULT = "/home/LuciusPrime/claire/data/reflection_capsules.jsonl"
-SESSION_MEMORY = "/home/LuciusPrime/claire/data/session_memory.jsonl"
-DURABLE_MEMORY = "/home/LuciusPrime/claire/data/durable_memory.jsonl"
-TMF_SNAPSHOTS = "/home/LuciusPrime/claire/data/conversation_tmf.jsonl"
-UPLOAD_DIR = "/home/LuciusPrime/claire/data/uploads"
-VERITAS_LEGAL_STATE_DIR = "/home/LuciusPrime/claire/data/veritas_legal_gui"
+CLAIRE_RUNTIME_DATA_DIR = Path(os.environ.get("CLAIRE_RUNTIME_DATA_DIR", "/home/LuciusPrime/claire/data")).resolve()
+CLAIRE_STATE_DIR = Path(os.environ.get("CLAIRE_STATE_DIR", "/home/LuciusPrime/claire/claire_state")).resolve()
+CLAIRE_BASE_DIR = Path(os.environ.get("CLAIRE_BASE_DIR", str(Path(__file__).resolve().parent))).resolve()
+REFLECTION_VAULT = str(CLAIRE_RUNTIME_DATA_DIR / "reflection_capsules.jsonl")
+SESSION_MEMORY = str(CLAIRE_RUNTIME_DATA_DIR / "session_memory.jsonl")
+DURABLE_MEMORY = str(CLAIRE_RUNTIME_DATA_DIR / "durable_memory.jsonl")
+TMF_SNAPSHOTS = str(CLAIRE_RUNTIME_DATA_DIR / "conversation_tmf.jsonl")
+MEMORY_VAULT = str(CLAIRE_RUNTIME_DATA_DIR / "memory_vault.jsonl")
+UPLOAD_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "uploads")
+VERITAS_LEGAL_STATE_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "veritas_legal_gui")
 MAX_INGEST_UPLOAD_BYTES = int(os.environ.get("CLAIRE_MAX_INGEST_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
 UPLOAD_DISK_SAFETY_BYTES = int(os.environ.get("CLAIRE_UPLOAD_DISK_SAFETY_BYTES", str(256 * 1024 * 1024)))
 UPLOAD_WRITE_CHUNK_BYTES = int(os.environ.get("CLAIRE_UPLOAD_WRITE_CHUNK_BYTES", str(4 * 1024 * 1024)))
-TRACE_LOG = "/home/LuciusPrime/claire/data/traces.jsonl"
-FEEDBACK_LOG = "/home/LuciusPrime/claire/data/feedback.jsonl"
-OFFICE_TASK_LOG = "/home/LuciusPrime/claire/data/office_tasks.jsonl"
-DEMO_REPORT_DIR = "/home/LuciusPrime/claire/data/demo_reports"
-DRIVE_RESEARCH_CACHE = "/home/LuciusPrime/claire/data/drive_research_cache.jsonl"
-CRYPTO_TRACE_LOG = "/home/LuciusPrime/claire/data/crypto_paper_trades.jsonl"
-KRAKEN_HISTORY_DIR = "/home/LuciusPrime/claire/data/kraken_history"
-STATE_PARKS_CASE_DIR = "/home/LuciusPrime/claire/data/state_parks_case"
+TRACE_LOG = os.environ.get("CLAIRE_TRACE_PATH", str(CLAIRE_RUNTIME_DATA_DIR / "traces.jsonl"))
+FEEDBACK_LOG = str(CLAIRE_RUNTIME_DATA_DIR / "feedback.jsonl")
+OFFICE_TASK_LOG = str(CLAIRE_RUNTIME_DATA_DIR / "office_tasks.jsonl")
+DEMO_REPORT_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "demo_reports")
+DRIVE_RESEARCH_CACHE = str(CLAIRE_RUNTIME_DATA_DIR / "drive_research_cache.jsonl")
+CRYPTO_TRACE_LOG = str(CLAIRE_RUNTIME_DATA_DIR / "crypto_paper_trades.jsonl")
+KRAKEN_HISTORY_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "kraken_history")
+STATE_PARKS_CASE_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "state_parks_case")
 MEMORY_PERF_DOCUMENT = os.environ.get("CLAIRE_MEMORY_PERF_DOCUMENT", "").strip()
 CLAIRE_PUBLIC_IP = os.environ.get("CLAIRE_PUBLIC_IP", "20.97.65.94").strip()
 PUBLIC_DEMO_BUILD = os.environ.get("CLAIRE_PUBLIC_DEMO_BUILD", "1").strip().lower() not in {"0", "false", "no"}
@@ -7996,7 +8000,7 @@ def is_document_summary_query(prompt: str) -> bool:
 def _uploaded_document_records(filename: str) -> list[dict]:
     if not filename:
         return []
-    vault = Path('/home/LuciusPrime/claire/data/memory_vault.jsonl')
+    vault = Path(MEMORY_VAULT)
     if not vault.exists():
         return []
     records = []
@@ -9136,7 +9140,7 @@ def demo_sample_corpus(prompt: str, limit: int = 4000) -> list[str]:
     paths = [
         SESSION_MEMORY,
         REFLECTION_VAULT,
-        "/home/LuciusPrime/claire/data/memory_vault.jsonl",
+        MEMORY_VAULT,
         TRACE_LOG,
     ]
     for path in paths:
@@ -9198,9 +9202,9 @@ def memory_performance_document_candidates() -> list[Path]:
     except Exception:
         pass
     for fallback in [
-        Path("/home/LuciusPrime/claire/test_memory.txt"),
-        Path("/home/LuciusPrime/claire/data/kali_tools_corpus/corpus_overview.md"),
-        Path("/home/LuciusPrime/claire/knowledge/Us_Constitution.txt"),
+        CLAIRE_BASE_DIR / "test_memory.txt",
+        CLAIRE_RUNTIME_DATA_DIR / "kali_tools_corpus" / "corpus_overview.md",
+        CLAIRE_BASE_DIR / "knowledge" / "Us_Constitution.txt",
     ]:
         candidates.append(fallback)
     seen: set[str] = set()
@@ -10597,7 +10601,7 @@ def market_memory_library_status() -> str:
     total_vectors = 0
     total_files = 0
     try:
-        root = Path("/home/LuciusPrime/claire/data/market_memory")
+        root = CLAIRE_RUNTIME_DATA_DIR / "market_memory"
         for path in root.glob("market_vectors*.jsonl"):
             with path.open("r", encoding="utf-8", errors="ignore") as f:
                 total_vectors += sum(1 for _ in f)
@@ -10891,7 +10895,7 @@ def creator_inventory_report() -> str:
     vault_count = 0
     document_count = 0
     try:
-        vault = Path("/home/LuciusPrime/claire/data/memory_vault.jsonl")
+        vault = Path(MEMORY_VAULT)
         if vault.exists():
             with vault.open("r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
@@ -12062,16 +12066,21 @@ def should_use_governed_runtime(prompt: str) -> bool:
 
 
 def build_governed_runtime_reply(prompt: str, debug: bool = False) -> tuple[str, str, str]:
+    def go_provider_generate(messages, config):
+        prompt = "\n\n".join(f"[{item.get('role', '').upper()}]\n{item.get('content', '')}" for item in messages)
+        return query_llm(prompt)
+
     result = CLAIRE_GOVERNED_RUNTIME.handle_user_message(
         user_id="steve",
         session_id="gui",
         message=prompt,
-        metadata={"debug": debug},
+        metadata={"debug": debug, "provider_generate": go_provider_generate},
     )
     answer = clean_visible_reply(str(result.get("answer") or ""))
     trace_id = str(result.get("trace_id") or "")
+    source = "GO" if ("loopback_triggered" in result and not result.get("loopback_triggered")) else "CLAIRE"
     remember_turn(prompt, "CLAIRE", answer)
-    return "CLAIRE", answer, trace_id
+    return source, answer, trace_id
 
 
 def build_governed_demo_payload(prompt: str, user_id: str = "steve", session_id: str = "gui") -> dict:
@@ -12124,14 +12133,19 @@ def build_reply(q: str, debug: bool = False):
     if not CLAIRE_GOVERNED_RUNTIME:
         trace_id = new_trace_id(None)
         return "CLAIRE", "CLAIRE governed runtime is unavailable; normal chat is not allowed to bypass ClaireRuntime.", trace_id
+    def go_provider_generate(messages, config):
+        prompt = "\n\n".join(f"[{item.get('role', '').upper()}]\n{item.get('content', '')}" for item in messages)
+        return query_llm(prompt)
+
     result = CLAIRE_GOVERNED_RUNTIME.handle_user_message(
         user_id="steve",
         session_id="gui",
         message=q,
-        metadata={"debug": debug},
+        metadata={"debug": debug, "provider_generate": go_provider_generate},
     )
     answer = clean_visible_reply(str(result.get("answer") or ""))
     trace_id = str(result.get("trace_id") or "")
+    source = "GO" if ("loopback_triggered" in result and not result.get("loopback_triggered")) else "CLAIRE"
     print(
         "CLAIRE_LIVE_PATH "
         f"endpoint=build_reply runtime=ClaireRuntime lane={result.get('lane')} "
@@ -12139,7 +12153,7 @@ def build_reply(q: str, debug: bool = False):
         f"trace_id={trace_id}",
         flush=True,
     )
-    return "CLAIRE", answer, trace_id
+    return source, answer, trace_id
 
 
 def is_operator_identity_prompt(prompt: str) -> bool:
@@ -12369,7 +12383,7 @@ def is_recent_upload_query(query: str) -> bool:
 def uploaded_filename_from_query(query: str) -> str:
     cleaned = str(query or "").lower()
     try:
-        vault = Path("/home/LuciusPrime/claire/data/memory_vault.jsonl")
+        vault = Path(MEMORY_VAULT)
         if not vault.exists():
             return ""
         sources = []
@@ -12393,7 +12407,7 @@ def uploaded_filename_from_query(query: str) -> str:
 
 
 def search_uploaded_documents(query: str, limit: int = 3) -> str:
-    vault = Path("/home/LuciusPrime/claire/data/memory_vault.jsonl")
+    vault = Path(MEMORY_VAULT)
     if not vault.exists():
         return ""
     explicit_filename = uploaded_filename_from_query(query)
@@ -12915,7 +12929,7 @@ def are_spectacle_page():
 	    )
 
 
-ARE_DEMO_DB = Path("/home/LuciusPrime/claire/data/are_demo_memory.sqlite")
+ARE_DEMO_DB = CLAIRE_RUNTIME_DATA_DIR / "are_demo_memory.sqlite"
 ARE_DEMO_EXPIRY_DAYS = 30
 ARE_DEMO_MAX_MEMORY_CHARS = 500
 ARE_DEMO_RATE_LIMIT_WINDOW = 60
@@ -15330,8 +15344,8 @@ def action(cmd: str, token: str | None = Query(None)):
 
 
 # --- PUBLIC DEMO CONTROL LAYER ---
-PUBLIC_DEMO_DB = Path("/home/LuciusPrime/claire/data/public_demo.sqlite")
-PUBLIC_DEMO_ROOT = Path("/home/LuciusPrime/claire")
+PUBLIC_DEMO_DB = CLAIRE_RUNTIME_DATA_DIR / "public_demo.sqlite"
+PUBLIC_DEMO_ROOT = CLAIRE_BASE_DIR
 
 
 def _public_demo_connect():
@@ -15424,7 +15438,8 @@ _public_demo_init()
 
 @app.get("/health")
 def public_demo_health():
-    return JSONResponse({"status": "ok", "service": "Claire Public Demo"})
+    service_name = "Claire Runtime Full" if not PUBLIC_DEMO_BUILD else "Claire Public Demo"
+    return JSONResponse({"status": "ok", "service": service_name})
 
 
 @app.get("/machine/trace/{trace_id}")

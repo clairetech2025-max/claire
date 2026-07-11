@@ -11,7 +11,7 @@ ARG CLAIRE_GIT_URL=https://github.com/clairetech2025-max/claire.git
 ARG CLAIRE_GIT_REF=codex/huggingface-portable-demo
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git build-essential \
+    ca-certificates curl git build-essential golang-go \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "$CLAIRE_GIT_REF" "$CLAIRE_GIT_URL" /app
@@ -24,6 +24,8 @@ RUN python -m venv /app/venv \
 
 COPY app.py /app/hf_runtime_adapter.py
 COPY start.sh /app/start_hf_runtime.sh
+RUN mkdir -p /app/bin \
+    && go build -o /app/bin/claire-go /app/main.go
 RUN chmod +x /app/start_hf_runtime.sh
 
 EXPOSE 7860
