@@ -116,71 +116,90 @@ class AdmissionGate:
                 existing = self.repository.get_evidence_by_checksum(checksum)
                 if existing:
                     return existing
-            existing_are = self._find_existing_are_admission(checksum)
-            if existing_are:
+            won_claim = True
+            if self.repository:
+                won_claim = self.repository.try_claim_admission(checksum)
+            if not won_claim:
+                existing_are = self._find_existing_are_admission(checksum)
+                if existing_are:
+                    if self.repository:
+                        self.repository.insert_evidence(existing_are)
+                        self.repository.mark_admission_committed(checksum, existing_are.are_hash)
+                    return existing_are
                 if self.repository:
-                    self.repository.insert_evidence(existing_are)
-                    self.repository.upsert_admission_claim(
-                        content_hash=checksum,
-                        status="committed",
-                        are_hash=existing_are.are_hash,
-                    )
-                return existing_are
-            payload = {
-                "kind": "vde_evidence",
-                "title": draft.title,
-                "text": draft.text,
-                "source": draft.source,
-                "collector": draft.collector,
-                "plane": draft.plane,
-                "value": draft.value,
-                "precision": draft.precision,
-                "confidence": draft.confidence,
-                "provenance_url": draft.provenance_url,
-                "entity_refs": list(draft.entity_refs),
-                "metadata": {**dict(draft.metadata), "content_hash": checksum},
-                "observed_at": draft.observed_at,
-            }
-            text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-            result = self.store.ingest(
-                text=text,
-                lane=VDE_LANE,
-                source=draft.collector,
-                metadata={
+                    status = self.repository.wait_for_admission_resolution(checksum)
+                    if status in {"committed", "error"}:
+                        existing = self.repository.get_evidence_by_checksum(checksum)
+                        if existing:
+                            return existing
+                        existing_are = self._find_existing_are_admission(checksum)
+                        if existing_are:
+                            self.repository.insert_evidence(existing_are)
+                            self.repository.mark_admission_committed(checksum, existing_are.are_hash)
+                            return existing_are
+                raise RuntimeError(f"content_hash {checksum} is claimed by another writer")
+            try:
+                existing_are = self._find_existing_are_admission(checksum)
+                if existing_are:
+                    if self.repository:
+                        self.repository.insert_evidence(existing_are)
+                        self.repository.mark_admission_committed(checksum, existing_are.are_hash)
+                    return existing_are
+                payload = {
                     "kind": "vde_evidence",
+                    "title": draft.title,
+                    "text": draft.text,
                     "source": draft.source,
+                    "collector": draft.collector,
                     "plane": draft.plane,
-                    "checksum": checksum,
-                    "content_hash": checksum,
+                    "value": draft.value,
+                    "precision": draft.precision,
+                    "confidence": draft.confidence,
                     "provenance_url": draft.provenance_url,
                     "entity_refs": list(draft.entity_refs),
-                },
-            )
-            if not result.get("accepted"):
-                raise ValueError(f"Evidence rejected by ARE admission: {result.get('reason')}")
-            evidence = AdmittedEvidence(
-                title=draft.title,
-                text=draft.text,
-                source=draft.source,
-                collector=draft.collector,
-                plane=draft.plane,
-                value=draft.value,
-                precision=draft.precision,
-                confidence=draft.confidence,
-                provenance_url=draft.provenance_url,
-                entity_refs=list(draft.entity_refs),
-                metadata=dict(draft.metadata),
-                are_hash=str(result.get("truth_hash") or result.get("sha") or ""),
-                checksum=checksum,
-            )
-            if self.repository:
-                self.repository.insert_evidence(evidence)
-                self.repository.upsert_admission_claim(
-                    content_hash=checksum,
-                    status="committed",
-                    are_hash=evidence.are_hash,
+                    "metadata": {**dict(draft.metadata), "content_hash": checksum},
+                    "observed_at": draft.observed_at,
+                }
+                text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                result = self.store.ingest(
+                    text=text,
+                    lane=VDE_LANE,
+                    source=draft.collector,
+                    metadata={
+                        "kind": "vde_evidence",
+                        "source": draft.source,
+                        "plane": draft.plane,
+                        "checksum": checksum,
+                        "content_hash": checksum,
+                        "provenance_url": draft.provenance_url,
+                        "entity_refs": list(draft.entity_refs),
+                    },
                 )
-            return evidence
+                if not result.get("accepted"):
+                    raise ValueError(f"Evidence rejected by ARE admission: {result.get('reason')}")
+                evidence = AdmittedEvidence(
+                    title=draft.title,
+                    text=draft.text,
+                    source=draft.source,
+                    collector=draft.collector,
+                    plane=draft.plane,
+                    value=draft.value,
+                    precision=draft.precision,
+                    confidence=draft.confidence,
+                    provenance_url=draft.provenance_url,
+                    entity_refs=list(draft.entity_refs),
+                    metadata=dict(draft.metadata),
+                    are_hash=str(result.get("truth_hash") or result.get("sha") or ""),
+                    checksum=checksum,
+                )
+                if self.repository:
+                    self.repository.insert_evidence(evidence)
+                    self.repository.mark_admission_committed(checksum, evidence.are_hash)
+                return evidence
+            except Exception as exc:
+                if self.repository:
+                    self.repository.mark_admission_error(checksum, str(exc))
+                raise
 
     @classmethod
     def _content_lock(cls, content_hash: str) -> threading.RLock:

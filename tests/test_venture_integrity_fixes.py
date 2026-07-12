@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import multiprocessing
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -42,6 +44,83 @@ def count_vde_memory_events(store: AREStore) -> int:
     )
 
 
+class MockRepo:
+    def __init__(self):
+        self._checkpoint = 0
+        self._evidence = {}
+        self._claims = {}
+
+    def get_reconciliation_checkpoint(self, name):
+        return self._checkpoint
+
+    def set_reconciliation_checkpoint(self, name, value):
+        self._checkpoint = value
+
+    def get_evidence_by_checksum(self, checksum):
+        return self._evidence.get(checksum)
+
+    def insert_evidence(self, evidence):
+        if "poison" in evidence.checksum:
+            raise RuntimeError(f"simulated permanent failure for {evidence.checksum}")
+        self._evidence[evidence.checksum] = evidence
+
+    def upsert_admission_claim(self, content_hash, status, are_hash=None, last_error=None):
+        self._claims[content_hash] = {"status": status, "are_hash": are_hash, "last_error": last_error}
+
+
+class MockTruth:
+    def __init__(self, envelopes):
+        self._envelopes = envelopes
+
+    def envelopes(self):
+        return list(self._envelopes)
+
+
+class MockStore:
+    def __init__(self, envelopes):
+        self.truth = MockTruth(envelopes)
+
+
+def make_envelope(sequence, checksum, text_body=None):
+    body = text_body or {
+        "title": f"item-{sequence}",
+        "text": "x",
+        "source": "s",
+        "collector": "c",
+        "plane": "p",
+        "value": 0.5,
+        "precision": 1.0,
+        "confidence": 0.5,
+        "metadata": {"checksum": checksum, "kind": "vde_evidence"},
+    }
+    return {
+        "sequence": sequence,
+        "truth_hash": f"truth-{sequence}",
+        "payload": {
+            "event_type": "memory",
+            "text": json.dumps(body),
+            "metadata": {"checksum": checksum, "kind": "vde_evidence"},
+        },
+    }
+
+
+def _process_claim_worker(db_path: str, queue, content_hash: str) -> None:
+    claims = VentureRepository(db_path)
+
+    def do_admission():
+        return f"are_hash_from_pid_{multiprocessing.current_process().pid}"
+
+    try:
+        if claims.try_claim_admission(content_hash):
+            claims.mark_admission_committed(content_hash, do_admission())
+            queue.put(("ok", claims.get_admission_claim(content_hash)))
+        else:
+            queue.put(("claimed", claims.get_admission_claim(content_hash)))
+    except Exception as exc:
+        claims.mark_admission_error(content_hash, str(exc))
+        queue.put(("error", str(exc)))
+
+
 def test_orphan_reconciliation_repairs_missing_subordinate_row_and_keeps_single_are_event():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -80,6 +159,28 @@ def test_orphan_reconciliation_repairs_missing_subordinate_row_and_keeps_single_
         assert count_vde_memory_events(store) == 1
         assert store.verify()["valid"]
         store.stop()
+
+
+def test_poison_pill_does_not_block_checkpoint_advancement():
+    envelopes = [
+        make_envelope(1, "good_1"),
+        make_envelope(2, "poison_1"),
+        make_envelope(3, "good_2"),
+    ]
+    store = MockStore(envelopes)
+    repo = MockRepo()
+
+    result = reconcile_orphaned_evidence(store, repo)
+
+    assert result["checkpoint_after"] == 3
+    assert result["repaired"] == 2
+    assert result["errored"] == 1
+    assert repo._claims["poison_1"]["status"] == "error"
+    assert "good_1" in repo._evidence and "good_2" in repo._evidence
+
+    result2 = reconcile_orphaned_evidence(store, repo)
+    assert result2["scanned"] == 0
+    assert result2["checkpoint_after"] == 3
 
 
 def test_retry_after_partial_failure_does_not_create_second_are_commit():
@@ -224,3 +325,29 @@ def test_concurrent_distinct_content_hash_admission_persists_all():
         assert count_vde_memory_events(store) == 8
         assert store.verify()["valid"]
         store.stop()
+
+
+def test_cross_process_admission_claim_allows_only_one_writer():
+    with tempfile.TemporaryDirectory() as td:
+        db_path = str(Path(td) / "claims.sqlite")
+        repo = VentureRepository(db_path)
+        queue = multiprocessing.Queue()
+        content_hash = "cross_process_hash"
+
+        processes = [
+            multiprocessing.Process(target=_process_claim_worker, args=(db_path, queue, content_hash))
+            for _ in range(4)
+        ]
+        for proc in processes:
+            proc.start()
+        for proc in processes:
+            proc.join(timeout=10)
+
+        results = []
+        while not queue.empty():
+            results.append(queue.get())
+
+        assert len(results) == 4
+        ok_results = [item for item in results if item[0] == "ok"]
+        assert len(ok_results) == 1
+        assert repo.get_admission_claim_status(content_hash) == "committed"

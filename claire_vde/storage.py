@@ -228,6 +228,23 @@ class VentureRepository:
                 (content_hash, status, are_hash, time.time(), last_error),
             )
 
+    def try_claim_admission(self, content_hash: str) -> bool:
+        with self.connect() as conn:
+            try:
+                conn.execute(
+                    "INSERT INTO admission_claims (content_hash, status, updated_at) VALUES (?, 'claiming', ?)",
+                    (content_hash, time.time()),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def mark_admission_committed(self, content_hash: str, are_hash: str) -> None:
+        self.upsert_admission_claim(content_hash=content_hash, status="committed", are_hash=are_hash)
+
+    def mark_admission_error(self, content_hash: str, error: str) -> None:
+        self.upsert_admission_claim(content_hash=content_hash, status="error", last_error=error)
+
     def get_admission_claim(self, content_hash: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
@@ -243,6 +260,19 @@ class VentureRepository:
             "updated_at": row["updated_at"],
             "last_error": row["last_error"],
         }
+
+    def get_admission_claim_status(self, content_hash: str) -> str | None:
+        claim = self.get_admission_claim(content_hash)
+        return str(claim["status"]) if claim else None
+
+    def wait_for_admission_resolution(self, content_hash: str, timeout: float = 5.0) -> str | None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self.get_admission_claim_status(content_hash)
+            if status in {"committed", "error"}:
+                return status
+            time.sleep(0.02)
+        return None
 
     def list_admission_claims(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
