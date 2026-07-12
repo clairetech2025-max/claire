@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,6 +64,26 @@ CREATE TABLE IF NOT EXISTS admission_claims (
     are_hash TEXT NOT NULL DEFAULT '',
     updated_at REAL NOT NULL,
     last_error TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS api_rate_limits (
+    client_key TEXT NOT NULL,
+    window_start INTEGER NOT NULL,
+    request_count INTEGER NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (client_key, window_start)
+);
+
+CREATE TABLE IF NOT EXISTS api_request_audit (
+    audit_id TEXT PRIMARY KEY,
+    trace_id TEXT NOT NULL,
+    method TEXT NOT NULL,
+    route TEXT NOT NULL,
+    action TEXT NOT NULL,
+    client_key TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS reconciliation_state (
@@ -517,6 +538,66 @@ class VentureRepository:
             }
             for row in rows
         ]
+
+    def record_api_audit(
+        self,
+        *,
+        trace_id: str,
+        method: str,
+        route: str,
+        action: str,
+        client_key: str,
+        decision: str,
+        reason: str,
+    ) -> None:
+        audit_id = "audit_" + uuid.uuid4().hex[:16]
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO api_request_audit (
+                    audit_id, trace_id, method, route, action, client_key,
+                    decision, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    audit_id,
+                    trace_id,
+                    method,
+                    route,
+                    action,
+                    client_key,
+                    decision,
+                    reason,
+                    time.time(),
+                ),
+            )
+
+    def record_rate_limit_hit(self, *, client_key: str, window_start: int) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                INSERT INTO api_rate_limits (client_key, window_start, request_count, updated_at)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(client_key, window_start) DO UPDATE SET
+                    request_count = api_rate_limits.request_count + 1,
+                    updated_at = excluded.updated_at
+                RETURNING request_count
+                """,
+                (client_key, int(window_start), time.time()),
+            ).fetchone()
+        return int(row["request_count"]) if row else 0
+
+    def get_rate_limit_count(self, *, client_key: str, window_start: int) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT request_count
+                FROM api_rate_limits
+                WHERE client_key = ? AND window_start = ?
+                """,
+                (client_key, int(window_start)),
+            ).fetchone()
+        return int(row["request_count"]) if row else 0
 
     def get_reconciliation_checkpoint(self, name: str) -> int:
         with self.connect() as conn:

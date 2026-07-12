@@ -13,6 +13,7 @@ from claire_vde import EvidenceDraft, StaticEvidenceCollector, VentureDiscoveryE
 from claire_vde.collectors import JsonlEvidenceCollector, NotConfiguredCollector
 from claire_vde.evidence import AdmissionGate
 from claire_vde.ledger import OpportunityHypothesis, OpportunityLedger
+from claire_vde.security import VentureSecurity
 from claire_vde.storage import VentureRepository
 
 
@@ -157,10 +158,18 @@ def test_venture_api_admit_run_orientation_opportunity():
         root = Path(td)
         old_store = api_module.store
         old_repo = api_module.repository
+        old_security = api_module.security
         test_store = make_store(root / "are")
         test_repo = VentureRepository(root / "venture.sqlite")
         api_module.store = test_store
         api_module.repository = test_repo
+        api_module.security = VentureSecurity(
+            test_repo,
+            read_token="read-token",
+            write_token="write-token",
+            admin_token="admin-token",
+            rate_limit_per_minute=100,
+        )
         try:
             client = TestClient(api_module.app)
             health = client.get("/v1/venture/health")
@@ -168,7 +177,7 @@ def test_venture_api_admit_run_orientation_opportunity():
             assert health.json()["status"] == "ok"
 
             payload = draft().__dict__
-            admitted = client.post("/v1/venture/evidence/admit", json=payload)
+            admitted = client.post("/v1/venture/evidence/admit", json=payload, headers={"Authorization": "Bearer write-token"})
             assert admitted.status_code == 200
             assert admitted.json()["truth_spine_authority"]
 
@@ -187,6 +196,7 @@ def test_venture_api_admit_run_orientation_opportunity():
                     "falsification_conditions": ["No budget evidence appears"],
                     "metadata": {},
                 },
+                headers={"Authorization": "Bearer write-token"},
             )
             assert opportunity.status_code == 200
             assert opportunity.json()["truth_hash"]
@@ -194,3 +204,4 @@ def test_venture_api_admit_run_orientation_opportunity():
             test_store.stop()
             api_module.store = old_store
             api_module.repository = old_repo
+            api_module.security = old_security

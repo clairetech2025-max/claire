@@ -10,6 +10,10 @@ services:
     environment:
       CLAIRE_ARE_ROOT: /data/are
       CLAIRE_VDE_DATABASE_URL: postgresql://claire:claire_local_dev_only@postgres:5432/claire_venture
+      CLAIRE_VDE_API_READ_TOKEN: venture_read_local
+      CLAIRE_VDE_API_WRITE_TOKEN: venture_write_local
+      CLAIRE_VDE_API_ADMIN_TOKEN: venture_admin_local
+      CLAIRE_VDE_RATE_LIMIT_PER_MINUTE: "60"
     volumes:
       - venture_are:/data/are
     depends_on:

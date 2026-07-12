@@ -19,6 +19,7 @@ from claire_vde.collectors import CollectorRun, StaticEvidenceCollector
 from claire_vde.evidence import AdmissionGate
 from claire_vde.federal_register import FederalRegisterCollector, FederalRegisterCollectorConfig
 from claire_vde.pipeline import VentureDiscoveryEngine
+from claire_vde.security import VentureSecurity
 from claire_vde.q_insight_venture import QInsightField
 from claire_vde.storage import VentureRepository
 
@@ -314,10 +315,18 @@ def test_api_readable_collected_result(monkeypatch):
         root = Path(td)
         old_store = api_module.store
         old_repo = api_module.repository
+        old_security = api_module.security
         test_store = make_store(root / "are")
         test_repo = make_repo(root)
         api_module.store = test_store
         api_module.repository = test_repo
+        api_module.security = VentureSecurity(
+            test_repo,
+            read_token="read-token",
+            write_token="write-token",
+            admin_token="admin-token",
+            rate_limit_per_minute=100,
+        )
         try:
             sample_run = CollectorRun(
                 collector="federal_register",
@@ -329,7 +338,7 @@ def test_api_readable_collected_result(monkeypatch):
             )
             monkeypatch.setattr("claire_vde.federal_register.FederalRegisterCollector.collect", lambda self: sample_run)
             client = TestClient(api_module.app)
-            response = client.post("/v1/venture/federal-register/run", json={"admit": False})
+            response = client.post("/v1/venture/federal-register/run", json={"admit": False}, headers={"Authorization": "Bearer write-token"})
 
             assert response.status_code == 200
             body = response.json()
@@ -340,6 +349,7 @@ def test_api_readable_collected_result(monkeypatch):
             test_store.stop()
             api_module.store = old_store
             api_module.repository = old_repo
+            api_module.security = old_security
 
 
 def test_live_smoke_federal_register_collection():

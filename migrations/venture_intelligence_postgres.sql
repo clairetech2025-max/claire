@@ -50,6 +50,26 @@ CREATE TABLE IF NOT EXISTS admission_claims (
     last_error TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS api_rate_limits (
+    client_key TEXT NOT NULL,
+    window_start BIGINT NOT NULL,
+    request_count INTEGER NOT NULL,
+    updated_at DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (client_key, window_start)
+);
+
+CREATE TABLE IF NOT EXISTS api_request_audit (
+    audit_id TEXT PRIMARY KEY,
+    trace_id TEXT NOT NULL,
+    method TEXT NOT NULL,
+    route TEXT NOT NULL,
+    action TEXT NOT NULL,
+    client_key TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at DOUBLE PRECISION NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS reconciliation_state (
     name TEXT PRIMARY KEY,
     last_sequence BIGINT NOT NULL DEFAULT 0,
