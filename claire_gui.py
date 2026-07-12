@@ -14781,37 +14781,42 @@ def veritas_mobile_home():
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Veritas Mobile</title>
   <style>
-    :root { --bg:#f6f7fb; --panel:#ffffff; --text:#101828; --muted:#667085; --line:#d0d5dd; --blue:#155eef; --green:#067647; --red:#b42318; }
+    :root { --bg:#eef2f7; --panel:#ffffff; --panel-2:#f8fafc; --text:#101828; --muted:#667085; --line:#d0d5dd; --blue:#155eef; --blue-2:#eff4ff; --green:#067647; --red:#b42318; --gold:#b54708; }
     * { box-sizing:border-box; }
-    body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,sans-serif; font-size:16px; padding-bottom:86px; }
-    header { position:sticky; top:0; z-index:5; background:var(--panel); border-bottom:1px solid var(--line); padding:14px 16px; }
-    h1 { margin:0; font-size:26px; line-height:1.1; }
+    body { margin:0; background:linear-gradient(180deg, #f5f7fb 0%, var(--bg) 100%); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,sans-serif; font-size:16px; padding-bottom:88px; }
+    header { position:sticky; top:0; z-index:5; background:rgba(255,255,255,.92); backdrop-filter:saturate(180%) blur(14px); border-bottom:1px solid rgba(208,213,221,.8); padding:14px 16px 12px; box-shadow:0 1px 0 rgba(16,24,40,.04); }
+    h1 { margin:0; font-size:26px; line-height:1.1; letter-spacing:-0.01em; }
     h2 { margin:0 0 12px; font-size:22px; }
     h3 { margin:0 0 8px; font-size:18px; }
     p { line-height:1.45; }
-    main { max-width:620px; margin:0 auto; padding:16px; }
-    .sub { color:var(--muted); font-size:15px; margin-top:4px; }
+    main { max-width:660px; margin:0 auto; padding:16px; }
+    .sub { color:var(--muted); font-size:14px; margin-top:4px; }
+    .banner { background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); border:1px solid rgba(208,213,221,.9); border-radius:18px; padding:14px; box-shadow:0 10px 24px rgba(16,24,40,.06); }
+    .banner-top { display:flex; gap:10px; justify-content:space-between; align-items:flex-start; }
+    .tag { display:inline-flex; align-items:center; gap:6px; padding:7px 10px; border-radius:999px; background:var(--blue-2); color:#1849a9; border:1px solid #c7d7fe; font-size:12px; font-weight:800; white-space:nowrap; }
+    .tag.gold { background:#fff8ec; border-color:#fedf89; color:var(--gold); }
+    .sectiontitle { font-size:12px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; color:#667085; margin:0 0 8px; }
     .screen { display:none; }
     .screen.active { display:block; }
     .stack { display:grid; gap:12px; }
-    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(16,24,40,.05); }
-    button, .button { width:100%; min-height:52px; border:0; border-radius:13px; padding:14px 16px; font-size:17px; font-weight:750; background:var(--blue); color:white; text-align:left; touch-action:manipulation; }
-    button.secondary { background:#eef4ff; color:#1849a9; border:1px solid #b2ccff; }
-    button.light { background:white; color:var(--text); border:1px solid var(--line); }
-    button.warn { background:#fff6ed; color:#b54708; border:1px solid #fedf89; }
-    button:disabled { background:#eaecf0; color:#98a2b3; border:1px solid #d0d5dd; }
-    input, textarea, select { width:100%; min-height:52px; border:1px solid var(--line); border-radius:12px; padding:12px; font-size:17px; background:white; color:var(--text); }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:14px; box-shadow:0 10px 28px rgba(16,24,40,.06); }
+    button, .button { width:100%; min-height:54px; border:0; border-radius:14px; padding:14px 16px; font-size:17px; font-weight:750; background:var(--blue); color:white; text-align:left; touch-action:manipulation; box-shadow:0 8px 18px rgba(21,94,239,.14); }
+    button.secondary { background:var(--blue-2); color:#1849a9; border:1px solid #c7d7fe; box-shadow:none; }
+    button.light { background:white; color:var(--text); border:1px solid var(--line); box-shadow:none; }
+    button.warn { background:#fff6ed; color:#b54708; border:1px solid #fedf89; box-shadow:none; }
+    button:disabled { background:#eaecf0; color:#98a2b3; border:1px solid #d0d5dd; box-shadow:none; }
+    input, textarea, select { width:100%; min-height:52px; border:1px solid var(--line); border-radius:13px; padding:12px 13px; font-size:17px; background:white; color:var(--text); box-shadow:inset 0 1px 0 rgba(16,24,40,.02); }
     textarea { min-height:110px; resize:vertical; }
     .grid { display:grid; gap:10px; }
     .pillrow { display:flex; gap:8px; overflow:auto; padding-bottom:4px; }
     .pill { display:inline-flex; white-space:nowrap; padding:10px 12px; border-radius:999px; background:#eef4ff; color:#1849a9; border:1px solid #b2ccff; font-weight:700; }
-    .listitem { display:block; width:100%; background:white; border:1px solid var(--line); border-radius:13px; padding:14px; color:var(--text); text-align:left; }
+    .listitem { display:block; width:100%; background:white; border:1px solid var(--line); border-radius:16px; padding:14px; color:var(--text); text-align:left; box-shadow:0 1px 2px rgba(16,24,40,.04); }
     .meta { color:var(--muted); font-size:14px; margin-top:4px; overflow-wrap:anywhere; }
     .ok { color:var(--green); font-weight:800; }
     .err { color:var(--red); font-weight:800; }
-    .bottomnav { position:fixed; left:0; right:0; bottom:0; z-index:10; display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--line); border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom); }
-    .bottomnav button { border-radius:0; min-height:64px; padding:8px 4px; font-size:13px; text-align:center; background:white; color:#344054; border:0; }
-    .bottomnav button.active { color:var(--blue); font-weight:900; }
+    .bottomnav { position:fixed; left:0; right:0; bottom:0; z-index:10; display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:rgba(208,213,221,.9); border-top:1px solid rgba(208,213,221,.8); padding-bottom:env(safe-area-inset-bottom); backdrop-filter:saturate(180%) blur(14px); }
+    .bottomnav button { border-radius:0; min-height:64px; padding:8px 4px; font-size:13px; text-align:center; background:rgba(255,255,255,.96); color:#344054; border:0; box-shadow:none; }
+    .bottomnav button.active { color:var(--blue); font-weight:900; background:#eef4ff; }
     details { background:#f9fafb; border:1px solid var(--line); border-radius:12px; padding:12px; }
     summary { font-weight:800; min-height:44px; }
     pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; }
@@ -14819,10 +14824,26 @@ def veritas_mobile_home():
   </style>
 </head>
 <body>
-  <header><h1>Veritas</h1><div id="caseLabel" class="sub">No case open</div><div class="sub">Veritas build: __VERITAS_BUILD_SHA__</div></header>
+  <header>
+    <div class="banner-top">
+      <div>
+        <h1>Veritas</h1>
+        <div id="caseLabel" class="sub">No case open</div>
+      </div>
+      <div class="tag">Veritas build: __VERITAS_BUILD_SHA__</div>
+    </div>
+    <div class="sub">Mobile evidence intake, case search, timeline, and report flow.</div>
+  </header>
   <main>
     <section id="home" class="screen active">
       <div class="stack">
+        <div class="banner">
+          <div class="sectiontitle">Case Workbench</div>
+          <div class="meta">Create a matter, add source files, extract facts, and keep the source trail visible.</div>
+          <div class="pillrow" style="margin-top:10px;">
+            <span class="tag">TXT</span><span class="tag">PDF</span><span class="tag">DOCX</span><span class="tag">CSV</span><span class="tag">JSON</span>
+          </div>
+        </div>
         <button onclick="showScreen('newcase')">New Case</button>
         <button class="secondary" onclick="showScreen('opencase'); loadCases()">Open Case</button>
         <button class="secondary" onclick="requireCase('upload')">Upload Evidence</button>
@@ -14830,19 +14851,19 @@ def veritas_mobile_home():
         <button class="light" onclick="requireCase('timeline'); loadTimeline()">Build Timeline</button>
         <button class="light" onclick="requireCase('reports')">Generate Report</button>
         <button class="light" onclick="requireCase('ask')">Ask Veritas</button>
-        <div class="card"><h3>Recent Cases</h3><div id="recentCases" class="stack"><div class="meta">Loading...</div></div></div>
+        <div class="card"><div class="sectiontitle">Recent Cases</div><div id="recentCases" class="stack"><div class="meta">Loading...</div></div></div>
       </div>
     </section>
-    <section id="newcase" class="screen"><div class="card stack"><h2>New Case</h2><input id="caseName" placeholder="Case name"><textarea id="caseNote" placeholder="Optional note"></textarea><button onclick="createCase()">Create Case</button><div id="newCaseStatus" class="meta"></div></div></section>
-    <section id="opencase" class="screen"><div class="card stack"><h2>Open Case</h2><div id="caseList" class="stack"></div></div></section>
-    <section id="case" class="screen"><div class="stack"><div class="card"><h2 id="dashTitle">Case</h2><div id="whatChanged" class="meta"></div></div><button onclick="showScreen('upload')">Upload Evidence</button><button class="secondary" onclick="showScreen('ask')">Ask Veritas</button><div class="grid"><button class="light" onclick="showDocuments()">Documents</button><button class="light" onclick="showPeople()">People</button><button class="light" onclick="loadTimeline();showScreen('timeline')">Timeline</button><button class="light" onclick="showScreen('search')">Search</button><button class="light" onclick="showScreen('reports')">Reports</button></div><div class="card"><h3>Recent Activity</h3><div id="activity" class="meta">No activity yet.</div></div></div></section>
-    <section id="upload" class="screen"><div class="card stack"><h2>Upload Evidence</h2><div id="uploadCase" class="meta"></div><input id="fileInput" type="file" multiple accept=".txt,.md,.py,.pdf,.docx,.csv,.json,.jsonl"><button onclick="uploadFiles()">Start Upload</button><div id="uploadStatus" class="meta"></div><button class="light" onclick="showScreen('case')">Back to Case</button></div></section>
-    <section id="documents" class="screen"><div class="card stack"><h2>Documents</h2><div id="documentsList" class="stack"></div></div></section>
+    <section id="newcase" class="screen"><div class="card stack"><div class="sectiontitle">New Case</div><input id="caseName" placeholder="Case name"><textarea id="caseNote" placeholder="Optional note"></textarea><button onclick="createCase()">Create Case</button><div id="newCaseStatus" class="meta"></div></div></section>
+    <section id="opencase" class="screen"><div class="card stack"><div class="sectiontitle">Open Case</div><div id="caseList" class="stack"></div></div></section>
+    <section id="case" class="screen"><div class="stack"><div class="card"><div class="sectiontitle">Current Case</div><h2 id="dashTitle">Case</h2><div id="whatChanged" class="meta"></div></div><button onclick="showScreen('upload')">Upload Evidence</button><button class="secondary" onclick="showScreen('ask')">Ask Veritas</button><div class="grid"><button class="light" onclick="showDocuments()">Documents</button><button class="light" onclick="showPeople()">People</button><button class="light" onclick="loadTimeline();showScreen('timeline')">Timeline</button><button class="light" onclick="showScreen('search')">Search</button><button class="light" onclick="showScreen('reports')">Reports</button></div><div class="card"><div class="sectiontitle">Recent Activity</div><div id="activity" class="meta">No activity yet.</div></div></div></section>
+    <section id="upload" class="screen"><div class="card stack"><div class="sectiontitle">Upload Evidence</div><div id="uploadCase" class="meta"></div><div class="meta">Supported: TXT, MD, PY, PDF, DOCX, CSV, JSON, JSONL.</div><input id="fileInput" type="file" multiple accept=".txt,.md,.py,.pdf,.docx,.csv,.json,.jsonl"><button onclick="uploadFiles()">Start Upload</button><div id="uploadStatus" class="meta"></div><button class="light" onclick="showScreen('case')">Back to Case</button></div></section>
+    <section id="documents" class="screen"><div class="card stack"><div class="sectiontitle">Documents</div><div id="documentsList" class="stack"></div></div></section>
     <section id="document" class="screen"><div id="documentView" class="stack"></div></section>
-    <section id="search" class="screen"><div class="card stack"><h2>Search Evidence</h2><input id="searchQuery" placeholder="Show every mention of Sean James."><div class="pillrow"><span class="pill" onclick="setSearch('What happened in 2013?')">2013</span><span class="pill" onclick="setSearch('Find every reference to CCR 4331.')">CCR 4331</span><span class="pill" onclick="setSearch('Show contradictions.')">Contradictions</span></div><button onclick="runSearch()">Search</button><div id="searchResults" class="stack"></div></div></section>
-    <section id="timeline" class="screen"><div class="card stack"><h2>Timeline</h2><button onclick="loadTimeline()">Build / Refresh Timeline</button><div id="timelineList" class="stack"></div></div></section>
-    <section id="ask" class="screen"><div class="card stack"><h2>Ask Veritas</h2><div class="pillrow"><span class="pill" onclick="setAsk('What is my strongest evidence?')">Strongest evidence?</span><span class="pill" onclick="setAsk('What documents contradict each other?')">Contradictions?</span><span class="pill" onclick="setAsk('What evidence is still missing?')">Missing evidence?</span></div><textarea id="askText" placeholder="Ask about this case."></textarea><button onclick="askVeritas()">Send</button><div id="askAnswer" class="stack"></div></div></section>
-    <section id="reports" class="screen"><div class="card stack"><h2>Reports</h2><button onclick="makeReport('document_index')">Document Index</button><button onclick="makeReport('timeline')">Timeline</button><button onclick="makeReport('case_summary')">Case Summary</button><button onclick="makeReport('evidence_packet')">Evidence Packet</button><button onclick="makeReport('witness_list')">Witness List</button><div id="reportResult" class="stack"></div></div></section>
+    <section id="search" class="screen"><div class="card stack"><div class="sectiontitle">Search Evidence</div><input id="searchQuery" placeholder="Show every mention of Sean James."><div class="pillrow"><span class="pill" onclick="setSearch('What happened in 2013?')">2013</span><span class="pill" onclick="setSearch('Find every reference to CCR 4331.')">CCR 4331</span><span class="pill" onclick="setSearch('Show contradictions.')">Contradictions</span></div><button onclick="runSearch()">Search</button><div id="searchResults" class="stack"></div></div></section>
+    <section id="timeline" class="screen"><div class="card stack"><div class="sectiontitle">Timeline</div><button onclick="loadTimeline()">Build / Refresh Timeline</button><div id="timelineList" class="stack"></div></div></section>
+    <section id="ask" class="screen"><div class="card stack"><div class="sectiontitle">Ask Veritas</div><div class="pillrow"><span class="pill" onclick="setAsk('What is my strongest evidence?')">Strongest evidence?</span><span class="pill" onclick="setAsk('What documents contradict each other?')">Contradictions?</span><span class="pill" onclick="setAsk('What evidence is still missing?')">Missing evidence?</span></div><textarea id="askText" placeholder="Ask about this case."></textarea><button onclick="askVeritas()">Send</button><div id="askAnswer" class="stack"></div></div></section>
+    <section id="reports" class="screen"><div class="card stack"><div class="sectiontitle">Reports</div><button onclick="makeReport('document_index')">Document Index</button><button onclick="makeReport('timeline')">Timeline</button><button onclick="makeReport('case_summary')">Case Summary</button><button onclick="makeReport('evidence_packet')">Evidence Packet</button><button onclick="makeReport('witness_list')">Witness List</button><div id="reportResult" class="stack"></div></div></section>
   </main>
   <nav class="bottomnav"><button onclick="showScreen('home')" class="active">Home</button><button onclick="requireCase('case')">Case</button><button onclick="requireCase('search')">Search</button><button onclick="requireCase('ask')">Ask</button><button onclick="requireCase('reports')">Reports</button></nav>
 <script>
