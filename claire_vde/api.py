@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from claire_are.config import AREConfig
 from claire_are.core import AREStore
@@ -11,6 +11,7 @@ from claire_vde.evidence import AdmissionGate, EvidenceDraft, evidence_to_dict
 from claire_vde.federal_register import FederalRegisterCollector, FederalRegisterCollectorConfig
 from claire_vde.ledger import OpportunityHypothesis, OpportunityLedger
 from claire_vde.pipeline import VentureDiscoveryEngine
+from claire_vde.reconciliation import reconcile_orphaned_evidence
 from claire_vde.q_insight_venture import QInsightField
 from claire_vde.recognition_rail import RecognitionRail
 from claire_vde.schemas import CollectorRunRequest, EvidenceDraftRequest, FederalRegisterRunRequest, OpportunityCreateRequest, OutcomeRequest
@@ -133,7 +134,12 @@ def projections() -> dict:
 @app.post("/v1/venture/opportunities")
 def create_opportunity(req: OpportunityCreateRequest) -> dict:
     ledger = OpportunityLedger(store, repository)
-    return ledger.create_hypothesis(OpportunityHypothesis(**req.model_dump()))
+    try:
+        return ledger.create_hypothesis(OpportunityHypothesis(**req.model_dump()))
+    except ValueError as exc:
+        if str(exc).startswith("replayed_evidence"):
+            raise HTTPException(status_code=409, detail=str(exc))
+        raise
 
 
 @app.post("/v1/venture/opportunities/{opportunity_id}/outcomes")
@@ -149,3 +155,8 @@ def append_outcome(opportunity_id: str, req: OutcomeRequest) -> dict:
 @app.get("/v1/venture/opportunities")
 def list_opportunities(opportunity_id: str | None = None) -> dict:
     return {"events": OpportunityLedger(store, repository).list_events(opportunity_id)}
+
+
+@app.post("/v1/venture/reconcile-orphans")
+def reconcile_orphans() -> dict:
+    return reconcile_orphaned_evidence(store, repository)

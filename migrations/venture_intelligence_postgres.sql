@@ -42,17 +42,37 @@ CREATE TABLE IF NOT EXISTS collector_runs (
     finished_at DOUBLE PRECISION NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS admission_claims (
+    content_hash TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    are_hash TEXT NOT NULL DEFAULT '',
+    updated_at DOUBLE PRECISION NOT NULL,
+    last_error TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS reconciliation_state (
+    name TEXT PRIMARY KEY,
+    last_sequence BIGINT NOT NULL DEFAULT 0,
+    updated_at DOUBLE PRECISION NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS opportunity_events (
+    ledger_seq BIGSERIAL UNIQUE,
     event_id TEXT PRIMARY KEY,
     opportunity_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
     payload_json JSONB NOT NULL,
     truth_hash TEXT NOT NULL,
+    previous_hash TEXT NOT NULL DEFAULT '0',
+    event_hash TEXT NOT NULL DEFAULT '',
     created_at DOUBLE PRECISION NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_opportunity_events_opportunity
-    ON opportunity_events(opportunity_id, created_at);
+    ON opportunity_events(opportunity_id, ledger_seq);
+
+CREATE INDEX IF NOT EXISTS idx_opportunity_events_ledger_seq
+    ON opportunity_events(ledger_seq);
 
 CREATE TABLE IF NOT EXISTS projection_events (
     event_id TEXT PRIMARY KEY,

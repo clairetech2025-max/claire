@@ -27,6 +27,7 @@ class CollectorRunRequest(BaseModel):
 class OpportunityCreateRequest(BaseModel):
     hypothesis: str = Field(..., min_length=1, max_length=4000)
     evidence_ids: list[str] = Field(default_factory=list)
+    evidence_content_hashes: list[str] = Field(default_factory=list)
     confidence: float = Field(..., ge=0.0, le=1.0)
     probability: float = Field(..., ge=0.0, le=1.0)
     assumptions: list[str] = Field(default_factory=list)

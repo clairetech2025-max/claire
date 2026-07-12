@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from claire_are.core import AREStore
 from claire_vde.collectors import JsonlEvidenceCollector, NotConfiguredCollector
 from claire_vde.federal_register import FederalRegisterCollector, FederalRegisterCollectorConfig
 from claire_vde.pipeline import VentureDiscoveryEngine
+from claire_vde.reconciliation import reconcile_orphaned_evidence
 from claire_vde.storage import VentureRepository
 
 
@@ -45,7 +47,19 @@ def run_once() -> dict:
         store.stop()
 
 
+def reconcile_once() -> dict:
+    store = AREStore(AREConfig.from_env())
+    repo = VentureRepository()
+    try:
+        return reconcile_orphaned_evidence(store, repo)
+    finally:
+        store.stop()
+
+
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "reconcile-orphans":
+        print(reconcile_once(), flush=True)
+        return
     interval = float(os.environ.get("CLAIRE_VDE_WORKER_INTERVAL_SECONDS", "0"))
     while True:
         result = run_once()

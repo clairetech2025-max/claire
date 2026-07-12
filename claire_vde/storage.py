@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sqlite3
 import time
@@ -53,17 +54,31 @@ CREATE TABLE IF NOT EXISTS collector_runs (
     finished_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS admission_claims (
+    content_hash TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    are_hash TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL,
+    last_error TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS reconciliation_state (
+    name TEXT PRIMARY KEY,
+    last_sequence INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS opportunity_events (
+    ledger_seq INTEGER NOT NULL UNIQUE,
     event_id TEXT PRIMARY KEY,
     opportunity_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     truth_hash TEXT NOT NULL,
+    previous_hash TEXT NOT NULL DEFAULT '0',
+    event_hash TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL
 );
-
-CREATE INDEX IF NOT EXISTS idx_opportunity_events_opportunity
-    ON opportunity_events(opportunity_id, created_at);
 
 CREATE TABLE IF NOT EXISTS projection_events (
     event_id TEXT PRIMARY KEY,
@@ -91,6 +106,54 @@ class VentureRepository:
     def _init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._migrate_opportunity_events(conn)
+
+    def _migrate_opportunity_events(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(opportunity_events)").fetchall()
+        }
+        additions = []
+        if "ledger_seq" not in columns:
+            additions.append("ALTER TABLE opportunity_events ADD COLUMN ledger_seq INTEGER")
+        if "previous_hash" not in columns:
+            additions.append("ALTER TABLE opportunity_events ADD COLUMN previous_hash TEXT NOT NULL DEFAULT '0'")
+        if "event_hash" not in columns:
+            additions.append("ALTER TABLE opportunity_events ADD COLUMN event_hash TEXT NOT NULL DEFAULT ''")
+        for statement in additions:
+            conn.execute(statement)
+        if "ledger_seq" not in columns or "previous_hash" not in columns or "event_hash" not in columns:
+            rows = conn.execute(
+                "SELECT event_id, opportunity_id, event_type, payload_json, truth_hash, created_at FROM opportunity_events ORDER BY created_at ASC, event_id ASC"
+            ).fetchall()
+            previous_hash = "0"
+            for seq, row in enumerate(rows, start=1):
+                payload = json.loads(row["payload_json"])
+                event_hash = self._ledger_event_hash(
+                    ledger_seq=seq,
+                    event_id=row["event_id"],
+                    opportunity_id=row["opportunity_id"],
+                    event_type=row["event_type"],
+                    payload=payload,
+                    truth_hash=row["truth_hash"],
+                    previous_hash=previous_hash,
+                    created_at=float(row["created_at"]),
+                )
+                conn.execute(
+                    """
+                    UPDATE opportunity_events
+                    SET ledger_seq = ?, previous_hash = ?, event_hash = ?
+                    WHERE event_id = ?
+                    """,
+                    (seq, previous_hash, event_hash, row["event_id"]),
+                )
+                previous_hash = event_hash
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_opportunity_events_ledger_seq_unique ON opportunity_events(ledger_seq)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_opportunity_events_opportunity ON opportunity_events(opportunity_id, ledger_seq)"
+        )
 
     def get_evidence_by_checksum(self, checksum: str) -> AdmittedEvidence | None:
         with self.connect() as conn:
@@ -150,6 +213,71 @@ class VentureRepository:
                 ),
             )
 
+    def upsert_admission_claim(self, *, content_hash: str, status: str, are_hash: str = "", last_error: str = "") -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO admission_claims (content_hash, status, are_hash, updated_at, last_error)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(content_hash) DO UPDATE SET
+                    status = excluded.status,
+                    are_hash = excluded.are_hash,
+                    updated_at = excluded.updated_at,
+                    last_error = excluded.last_error
+                """,
+                (content_hash, status, are_hash, time.time(), last_error),
+            )
+
+    def get_admission_claim(self, content_hash: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT content_hash, status, are_hash, updated_at, last_error FROM admission_claims WHERE content_hash = ?",
+                (content_hash,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "content_hash": row["content_hash"],
+            "status": row["status"],
+            "are_hash": row["are_hash"],
+            "updated_at": row["updated_at"],
+            "last_error": row["last_error"],
+        }
+
+    def list_admission_claims(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT content_hash, status, are_hash, updated_at, last_error FROM admission_claims ORDER BY updated_at ASC"
+            ).fetchall()
+        return [
+            {
+                "content_hash": row["content_hash"],
+                "status": row["status"],
+                "are_hash": row["are_hash"],
+                "updated_at": row["updated_at"],
+                "last_error": row["last_error"],
+            }
+            for row in rows
+        ]
+
+    def get_reconciliation_checkpoint(self, name: str) -> int:
+        with self.connect() as conn:
+            row = conn.execute("SELECT last_sequence FROM reconciliation_state WHERE name = ?", (name,)).fetchone()
+        return int(row["last_sequence"]) if row else 0
+
+    def set_reconciliation_checkpoint(self, name: str, last_sequence: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO reconciliation_state (name, last_sequence, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    last_sequence = excluded.last_sequence,
+                    updated_at = excluded.updated_at
+                """,
+                (name, int(last_sequence), time.time()),
+            )
+
     def list_evidence(self, limit: int = 100) -> list[AdmittedEvidence]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -207,14 +335,40 @@ class VentureRepository:
         truth_hash: str,
         created_at: float | None = None,
     ) -> None:
+        created_at = created_at or time.time()
         with self.connect() as conn:
+            last_row = conn.execute(
+                "SELECT ledger_seq, event_hash FROM opportunity_events ORDER BY ledger_seq DESC LIMIT 1"
+            ).fetchone()
+            ledger_seq = int(last_row["ledger_seq"]) + 1 if last_row else 1
+            previous_hash = str(last_row["event_hash"]) if last_row else "0"
+            event_hash = self._ledger_event_hash(
+                ledger_seq=ledger_seq,
+                event_id=event_id,
+                opportunity_id=opportunity_id,
+                event_type=event_type,
+                payload=payload,
+                truth_hash=truth_hash,
+                previous_hash=previous_hash,
+                created_at=created_at,
+            )
             conn.execute(
                 """
                 INSERT INTO opportunity_events (
-                    event_id, opportunity_id, event_type, payload_json, truth_hash, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    ledger_seq, event_id, opportunity_id, event_type, payload_json, truth_hash, previous_hash, event_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (event_id, opportunity_id, event_type, json.dumps(payload, sort_keys=True), truth_hash, created_at or time.time()),
+                (
+                    ledger_seq,
+                    event_id,
+                    opportunity_id,
+                    event_type,
+                    json.dumps(payload, sort_keys=True),
+                    truth_hash,
+                    previous_hash,
+                    event_hash,
+                    created_at,
+                ),
             )
 
     def list_opportunity_events(self, opportunity_id: str | None = None) -> list[dict[str, Any]]:
@@ -223,20 +377,54 @@ class VentureRepository:
         if opportunity_id:
             query += " WHERE opportunity_id = ?"
             params = (opportunity_id,)
-        query += " ORDER BY created_at ASC"
+        query += " ORDER BY ledger_seq ASC"
         with self.connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [
             {
+                "ledger_seq": row["ledger_seq"],
                 "event_id": row["event_id"],
                 "opportunity_id": row["opportunity_id"],
                 "event_type": row["event_type"],
                 "payload": json.loads(row["payload_json"]),
                 "truth_hash": row["truth_hash"],
+                "previous_hash": row["previous_hash"],
+                "event_hash": row["event_hash"],
                 "created_at": row["created_at"],
             }
             for row in rows
         ]
+
+    def verify_opportunity_ledger(self) -> dict[str, Any]:
+        previous_hash = "0"
+        rows = self.list_opportunity_events()
+        for index, row in enumerate(rows):
+            expected_hash = self._ledger_event_hash(
+                ledger_seq=int(row["ledger_seq"]),
+                event_id=str(row["event_id"]),
+                opportunity_id=str(row["opportunity_id"]),
+                event_type=str(row["event_type"]),
+                payload=row["payload"],
+                truth_hash=str(row["truth_hash"]),
+                previous_hash=previous_hash,
+                created_at=float(row["created_at"]),
+            )
+            if str(row["previous_hash"]) != previous_hash:
+                return {
+                    "valid": False,
+                    "reason": "previous_hash_mismatch",
+                    "index": index,
+                    "event_id": row["event_id"],
+                }
+            if str(row["event_hash"]) != expected_hash:
+                return {
+                    "valid": False,
+                    "reason": "event_hash_mismatch",
+                    "index": index,
+                    "event_id": row["event_id"],
+                }
+            previous_hash = expected_hash
+        return {"valid": True, "records": len(rows), "previous_hash": previous_hash}
 
     def append_projection_event(self, *, event_id: str, title: str, payload: dict[str, Any], truth_hash: str) -> None:
         with self.connect() as conn:
@@ -244,6 +432,30 @@ class VentureRepository:
                 "INSERT INTO projection_events (event_id, title, payload_json, truth_hash, created_at) VALUES (?, ?, ?, ?, ?)",
                 (event_id, title, json.dumps(payload, sort_keys=True), truth_hash, time.time()),
             )
+
+    def _ledger_event_hash(
+        self,
+        *,
+        ledger_seq: int,
+        event_id: str,
+        opportunity_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        truth_hash: str,
+        previous_hash: str,
+        created_at: float,
+    ) -> str:
+        body = {
+            "ledger_seq": int(ledger_seq),
+            "event_id": str(event_id),
+            "opportunity_id": str(opportunity_id),
+            "event_type": str(event_type),
+            "payload": payload,
+            "truth_hash": str(truth_hash),
+            "previous_hash": str(previous_hash),
+            "created_at": float(created_at),
+        }
+        return hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
     def _evidence_from_row(self, row: sqlite3.Row) -> AdmittedEvidence:
         return AdmittedEvidence(

@@ -18,6 +18,7 @@ class OpportunityHypothesis:
     probability: float
     assumptions: list[str] = field(default_factory=list)
     falsification_conditions: list[str] = field(default_factory=list)
+    evidence_content_hashes: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -29,6 +30,9 @@ class OpportunityLedger:
         self.repository = repository
 
     def create_hypothesis(self, hypothesis: OpportunityHypothesis) -> dict[str, Any]:
+        for content_hash in hypothesis.evidence_content_hashes:
+            if self._has_replayed_content_hash(content_hash):
+                raise ValueError(f"replayed_evidence:{content_hash}")
         opportunity_id = "opp_" + uuid.uuid4().hex[:16]
         return self._append(
             opportunity_id=opportunity_id,
@@ -36,6 +40,7 @@ class OpportunityLedger:
             payload={
                 "hypothesis": hypothesis.hypothesis,
                 "evidence_ids": list(hypothesis.evidence_ids),
+                "evidence_content_hashes": list(hypothesis.evidence_content_hashes),
                 "confidence": float(hypothesis.confidence),
                 "probability": float(hypothesis.probability),
                 "assumptions": list(hypothesis.assumptions),
@@ -64,6 +69,22 @@ class OpportunityLedger:
 
     def list_events(self, opportunity_id: str | None = None) -> list[dict[str, Any]]:
         return self.repository.list_opportunity_events(opportunity_id)
+
+    def verify_ledger_chain(self) -> dict[str, Any]:
+        return self.repository.verify_opportunity_ledger()
+
+    def _has_replayed_content_hash(self, content_hash: str) -> bool:
+        content_hash = str(content_hash or "")
+        if not content_hash:
+            return False
+        for event in self.repository.list_opportunity_events():
+            if event.get("event_type") != "hypothesis_created":
+                continue
+            payload = event.get("payload") or {}
+            hashes = payload.get("evidence_content_hashes") or []
+            if content_hash in {str(item or "") for item in hashes}:
+                return True
+        return False
 
     def _append(self, *, opportunity_id: str, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         event_id = "ople_" + uuid.uuid4().hex[:16]
