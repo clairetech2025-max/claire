@@ -40,10 +40,12 @@ def _draft(req: EvidenceDraftRequest) -> EvidenceDraft:
 @app.get("/v1/venture/health")
 def health() -> dict:
     verify = store.verify()
+    backend = repository.describe_backend()
     return {
         "status": "ok" if verify.get("valid") else "degraded",
         "truth_spine": verify,
-        "database": str(repository.db_path),
+        "backend": backend["backend"],
+        "database": backend["locator"],
         "doctrine": "ARE Truth Spine is authority; metadata and indexes are downstream.",
     }
 

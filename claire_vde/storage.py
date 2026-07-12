@@ -3,15 +3,18 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import sqlite3
 import time
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from claire_vde.evidence import AdmittedEvidence
 
 
-SCHEMA_SQL = """
+SQLITE_SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
 
 CREATE TABLE IF NOT EXISTS admitted_evidence (
@@ -89,30 +92,239 @@ CREATE TABLE IF NOT EXISTS projection_events (
 );
 """
 
+POSTGRES_MIGRATION_PATH = Path(__file__).resolve().parents[1] / "migrations" / "venture_intelligence_postgres.sql"
+SQLITE_PLACEHOLDER_RE = re.compile(r"\?")
+
+
+def _split_sql_script(script: str) -> list[str]:
+    statements: list[str] = []
+    for chunk in script.split(";"):
+        statement = chunk.strip()
+        if not statement:
+            continue
+        lines = [line for line in statement.splitlines() if not line.lstrip().startswith("--")]
+        cleaned = "\n".join(lines).strip()
+        if cleaned:
+            statements.append(cleaned)
+    return statements
+
+
+def _render_sql(sql: str, backend: str) -> str:
+    if backend == "postgresql":
+        return SQLITE_PLACEHOLDER_RE.sub("%s", sql)
+    return sql
+
+
+def _load_postgres_schema_sql() -> str:
+    return POSTGRES_MIGRATION_PATH.read_text(encoding="utf-8")
+
+
+def _coerce_json_value(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return default
+        try:
+            return json.loads(text)
+        except Exception:
+            return default
+    return default
+
+
+@dataclass
+class _ConnectionProxy:
+    conn: Any
+    backend: str
+
+    def execute(self, sql: str, params: Any | None = None) -> Any:
+        rendered = _render_sql(sql, self.backend)
+        if params is None:
+            return self.conn.execute(rendered)
+        return self.conn.execute(rendered, params)
+
+    def executemany(self, sql: str, params_seq: Any) -> Any:
+        rendered = _render_sql(sql, self.backend)
+        return self.conn.executemany(rendered, params_seq)
+
+    def executescript(self, script: str) -> None:
+        if self.backend == "sqlite":
+            self.conn.executescript(script)
+            return
+        for statement in _split_sql_script(script):
+            self.execute(statement)
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self.conn, item)
+
+
+class _SQLiteBackend:
+    kind = "sqlite"
+
+    def __init__(self, db_path: str | Path) -> None:
+        self.db_path = Path(db_path).resolve()
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def locator(self) -> str:
+        return str(self.db_path)
+
+    @contextmanager
+    def connect(self) -> Iterator[_ConnectionProxy]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield _ConnectionProxy(conn=conn, backend=self.kind)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def init_schema(self) -> None:
+        with self.connect() as conn:
+            conn.executescript(SQLITE_SCHEMA_SQL)
+
+    def column_names(self, table: str) -> set[str]:
+        with self.connect() as conn:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        return {str(row["name"]) for row in rows}
+
+    def close(self) -> None:
+        return None
+
+
+class _PostgresBackend:
+    kind = "postgresql"
+
+    def __init__(self, database_url: str) -> None:
+        self.database_url = database_url
+        try:
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+        except ImportError as exc:  # pragma: no cover - dependency enforced by runtime build
+            raise RuntimeError("PostgreSQL backend requires psycopg[binary,pool]") from exc
+
+        self._dict_row = dict_row
+        self._pool = ConnectionPool(
+            conninfo=self.database_url,
+            min_size=1,
+            max_size=4,
+            timeout=5.0,
+            kwargs={
+                "row_factory": self._dict_row,
+                "autocommit": False,
+                "prepare_threshold": 0,
+            },
+        )
+
+    @property
+    def locator(self) -> str:
+        return _redact_database_url(self.database_url)
+
+    @contextmanager
+    def connect(self) -> Iterator[_ConnectionProxy]:
+        with self._pool.connection() as conn:
+            conn.row_factory = self._dict_row
+            yield _ConnectionProxy(conn=conn, backend=self.kind)
+
+    def init_schema(self) -> None:
+        with self.connect() as conn:
+            conn.executescript(_load_postgres_schema_sql())
+
+    def column_names(self, table: str) -> set[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = ?
+                ORDER BY ordinal_position
+                """,
+                (table,),
+            ).fetchall()
+        return {str(row["column_name"]) for row in rows}
+
+    def close(self) -> None:
+        self._pool.close()
+
+
+def _redact_database_url(database_url: str) -> str:
+    from urllib.parse import urlsplit, urlunsplit
+
+    split = urlsplit(database_url)
+    if "@" not in split.netloc:
+        return database_url
+    userinfo, hostinfo = split.netloc.rsplit("@", 1)
+    if ":" in userinfo:
+        username, _password = userinfo.split(":", 1)
+        redacted = f"{username}:***"
+    else:
+        redacted = userinfo
+    return urlunsplit((split.scheme, f"{redacted}@{hostinfo}", split.path, split.query, split.fragment))
+
 
 class VentureRepository:
     """Subordinate Venture Intelligence metadata store."""
 
     def __init__(self, db_path: str | Path | None = None) -> None:
-        self.db_path = Path(db_path or os.environ.get("CLAIRE_VDE_DB_PATH", "data/venture_intelligence.sqlite")).resolve()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        database_url = os.environ.get("CLAIRE_VDE_DATABASE_URL", "").strip() or None
+        sqlite_path = Path(db_path or os.environ.get("CLAIRE_VDE_DB_PATH", "data/venture_intelligence.sqlite")).resolve()
+        if database_url and db_path is None:
+            self._backend = _PostgresBackend(database_url)
+            self.database_url = database_url
+            self.db_path = None
+        else:
+            self._backend = _SQLiteBackend(sqlite_path)
+            self.database_url = None
+            self.db_path = sqlite_path
         self._init_schema()
 
-    def connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    @property
+    def backend_name(self) -> str:
+        return self._backend.kind
+
+    @property
+    def backend_locator(self) -> str:
+        return self._backend.locator
+
+    def describe_backend(self) -> dict[str, str]:
+        return {"backend": self.backend_name, "locator": self.backend_locator}
+
+    def connect(self):
+        return self._backend.connect()
 
     def _init_schema(self) -> None:
-        with self.connect() as conn:
-            conn.executescript(SCHEMA_SQL)
-            self._migrate_opportunity_events(conn)
+        deadline = time.monotonic() + 30.0 if self.backend_name == "postgresql" else time.monotonic()
+        last_error: Exception | None = None
+        while True:
+            try:
+                self._backend.init_schema()
+                with self.connect() as conn:
+                    self._migrate_opportunity_events(conn)
+                return
+            except Exception as exc:
+                last_error = exc
+                if self.backend_name != "postgresql" or time.monotonic() >= deadline:
+                    raise
+                time.sleep(1.0)
+        if last_error is not None:  # pragma: no cover - defensive
+            raise last_error
 
     def _migrate_opportunity_events(self, conn: sqlite3.Connection) -> None:
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(opportunity_events)").fetchall()
-        }
+        if self.backend_name == "postgresql":
+            columns = self._backend.column_names("opportunity_events")
+        else:
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(opportunity_events)").fetchall()
+            }
         additions = []
         if "ledger_seq" not in columns:
             additions.append("ALTER TABLE opportunity_events ADD COLUMN ledger_seq INTEGER")
@@ -128,7 +340,7 @@ class VentureRepository:
             ).fetchall()
             previous_hash = "0"
             for seq, row in enumerate(rows, start=1):
-                payload = json.loads(row["payload_json"])
+                payload = _coerce_json_value(row["payload_json"], {})
                 event_hash = self._ledger_event_hash(
                     ledger_seq=seq,
                     event_id=row["event_id"],
@@ -165,7 +377,7 @@ class VentureRepository:
             rows = conn.execute("SELECT * FROM admitted_evidence ORDER BY admitted_at DESC").fetchall()
         for row in rows:
             try:
-                metadata = json.loads(row["metadata_json"] or "{}")
+                metadata = _coerce_json_value(row["metadata_json"], {})
             except Exception:
                 metadata = {}
             if str(metadata.get("source_record_id") or "") == str(source_record_id or ""):
@@ -177,7 +389,7 @@ class VentureRepository:
             rows = conn.execute("SELECT * FROM admitted_evidence ORDER BY admitted_at DESC").fetchall()
         for row in rows:
             try:
-                metadata = json.loads(row["metadata_json"] or "{}")
+                metadata = _coerce_json_value(row["metadata_json"], {})
             except Exception:
                 metadata = {}
             if str(metadata.get("content_hash") or "") == str(content_hash or ""):
@@ -188,11 +400,12 @@ class VentureRepository:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT OR IGNORE INTO admitted_evidence (
+                INSERT INTO admitted_evidence (
                     are_hash, checksum, title, text, source, collector, plane,
                     value, precision, confidence, provenance_url, entity_refs_json,
                     metadata_json, admitted_at, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(checksum) DO NOTHING
                 """,
                 (
                     evidence.are_hash,
@@ -431,7 +644,7 @@ class VentureRepository:
                 "event_id": row["event_id"],
                 "opportunity_id": row["opportunity_id"],
                 "event_type": row["event_type"],
-                "payload": json.loads(row["payload_json"]),
+                "payload": _coerce_json_value(row["payload_json"], {}),
                 "truth_hash": row["truth_hash"],
                 "previous_hash": row["previous_hash"],
                 "event_hash": row["event_hash"],
@@ -515,7 +728,7 @@ class VentureRepository:
             are_hash=str(row["are_hash"]),
             checksum=str(row["checksum"]),
             provenance_url=str(row["provenance_url"] or ""),
-            entity_refs=list(json.loads(row["entity_refs_json"] or "[]")),
-            metadata=dict(json.loads(row["metadata_json"] or "{}")),
+            entity_refs=list(_coerce_json_value(row["entity_refs_json"], [])),
+            metadata=dict(_coerce_json_value(row["metadata_json"], {})),
             admitted_at=float(row["admitted_at"]),
         )

@@ -406,3 +406,30 @@ def test_fresh_claim_cannot_be_stolen_before_stale_window():
 
         assert repo.try_claim_admission(content_hash, stale_after_s=3600.0) is False
         assert repo.get_admission_claim_status(content_hash) == "claiming"
+
+
+def test_postgres_jsonb_rows_decode_native_python_values():
+    with tempfile.TemporaryDirectory() as td:
+        repo = VentureRepository(Path(td) / "venture.sqlite")
+        row = {
+            "title": "Native JSONB row",
+            "text": "Body",
+            "source": "federal_register",
+            "collector": "federal_register",
+            "plane": "regulatory_pressure",
+            "value": 0.3,
+            "precision": 1.0,
+            "confidence": 0.8,
+            "are_hash": "are_hash_1",
+            "checksum": "checksum_1",
+            "provenance_url": "https://example.test",
+            "entity_refs_json": ["Agency A", "Agency B"],
+            "metadata_json": {"source_record_id": "2026-00001", "content_hash": "content_hash_1"},
+            "admitted_at": 123.45,
+        }
+
+        evidence = repo._evidence_from_row(row)
+
+        assert evidence.entity_refs == ["Agency A", "Agency B"]
+        assert evidence.metadata["source_record_id"] == "2026-00001"
+        assert evidence.metadata["content_hash"] == "content_hash_1"

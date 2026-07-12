@@ -9,10 +9,9 @@ services:
       - .env.venture.example
     environment:
       CLAIRE_ARE_ROOT: /data/are
-      CLAIRE_VDE_DB_PATH: /data/venture/venture_intelligence.sqlite
+      CLAIRE_VDE_DATABASE_URL: postgresql://claire:claire_local_dev_only@postgres:5432/claire_venture
     volumes:
       - venture_are:/data/are
-      - venture_sqlite:/data/venture
     depends_on:
       - postgres
       - redis
@@ -70,7 +69,6 @@ services:
 
 volumes:
   venture_are:
-  venture_sqlite:
   venture_postgres:
   venture_redis:
   venture_minio:

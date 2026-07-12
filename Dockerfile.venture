@@ -8,6 +8,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY claire_are ./claire_are
 COPY claire_vde ./claire_vde
+COPY migrations ./migrations
 
 RUN pip install --no-cache-dir -e .
 

@@ -12,10 +12,25 @@ dependencies = [
   "uvicorn",
   "pydantic",
   "requests",
+  "psycopg[binary,pool]>=3.2,<4",
 ]
 
 [project.optional-dependencies]
 demo = ["gradio"]
 
 [tool.setuptools.packages.find]
-include = ["claire_are*"]
+include = ["claire_are*", "claire_vde*"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "veritas"]
+norecursedirs = [
+  ".git",
+  ".pytest_cache",
+  "creator_venv",
+  "llama.cpp",
+  "models",
+  "private_repo_payloads",
+  "venv",
+  "venv_clean",
+  "writer_mode",
+]
