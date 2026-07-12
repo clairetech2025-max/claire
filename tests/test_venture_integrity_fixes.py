@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -119,6 +120,11 @@ def _process_claim_worker(db_path: str, queue, content_hash: str) -> None:
     except Exception as exc:
         claims.mark_admission_error(content_hash, str(exc))
         queue.put(("error", str(exc)))
+
+
+def _stale_takeover_worker(db_path: str, content_hash: str, stale_after_s: float, queue) -> None:
+    repo = VentureRepository(db_path)
+    queue.put(repo.try_claim_admission(content_hash, stale_after_s=stale_after_s))
 
 
 def test_orphan_reconciliation_repairs_missing_subordinate_row_and_keeps_single_are_event():
@@ -351,3 +357,52 @@ def test_cross_process_admission_claim_allows_only_one_writer():
         ok_results = [item for item in results if item[0] == "ok"]
         assert len(ok_results) == 1
         assert repo.get_admission_claim_status(content_hash) == "committed"
+
+
+def test_stale_claim_can_be_taken_over_by_only_one_contender():
+    with tempfile.TemporaryDirectory() as td:
+        db_path = str(Path(td) / "claims.sqlite")
+        repo = VentureRepository(db_path)
+        content_hash = "stale_takeover_hash"
+        old_ts = 0.0
+        with repo.connect() as conn:
+            conn.execute(
+                "INSERT INTO admission_claims (content_hash, status, updated_at) VALUES (?, 'claiming', ?)",
+                (content_hash, old_ts),
+            )
+
+        queue = multiprocessing.Queue()
+        procs = [
+            multiprocessing.Process(
+                target=_stale_takeover_worker,
+                args=(db_path, content_hash, 0.1, queue),
+            )
+            for _ in range(10)
+        ]
+        for proc in procs:
+            proc.start()
+        for proc in procs:
+            proc.join(timeout=10)
+
+        results = []
+        while not queue.empty():
+            results.append(queue.get())
+
+        assert len(results) == 10
+        assert sum(1 for item in results if item is True) == 1
+        assert repo.get_admission_claim_status(content_hash) == "claiming"
+
+
+def test_fresh_claim_cannot_be_stolen_before_stale_window():
+    with tempfile.TemporaryDirectory() as td:
+        db_path = str(Path(td) / "claims.sqlite")
+        repo = VentureRepository(db_path)
+        content_hash = "fresh_claim_hash"
+        with repo.connect() as conn:
+            conn.execute(
+                "INSERT INTO admission_claims (content_hash, status, updated_at) VALUES (?, 'claiming', ?)",
+                (content_hash, time.time()),
+            )
+
+        assert repo.try_claim_admission(content_hash, stale_after_s=3600.0) is False
+        assert repo.get_admission_claim_status(content_hash) == "claiming"

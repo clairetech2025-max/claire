@@ -228,16 +228,31 @@ class VentureRepository:
                 (content_hash, status, are_hash, time.time(), last_error),
             )
 
-    def try_claim_admission(self, content_hash: str) -> bool:
+    def try_claim_admission(self, content_hash: str, *, stale_after_s: float = 30.0) -> bool:
+        now = time.time()
+        cutoff = now - max(0.0, float(stale_after_s))
         with self.connect() as conn:
             try:
                 conn.execute(
                     "INSERT INTO admission_claims (content_hash, status, updated_at) VALUES (?, 'claiming', ?)",
-                    (content_hash, time.time()),
+                    (content_hash, now),
                 )
                 return True
             except sqlite3.IntegrityError:
-                return False
+                result = conn.execute(
+                    """
+                    UPDATE admission_claims
+                    SET status = 'claiming',
+                        are_hash = '',
+                        updated_at = ?,
+                        last_error = ''
+                    WHERE content_hash = ?
+                      AND status = 'claiming'
+                      AND updated_at < ?
+                    """,
+                    (now, content_hash, cutoff),
+                )
+                return bool(result.rowcount)
 
     def mark_admission_committed(self, content_hash: str, are_hash: str) -> None:
         self.upsert_admission_claim(content_hash=content_hash, status="committed", are_hash=are_hash)

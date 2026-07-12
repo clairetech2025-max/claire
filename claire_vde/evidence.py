@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from claire_vde.storage import VentureRepository
 
 VDE_LANE = "business"
+ADMISSION_CLAIM_STALE_AFTER_S = 30.0
+ADMISSION_CLAIM_WAIT_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -118,7 +120,7 @@ class AdmissionGate:
                     return existing
             won_claim = True
             if self.repository:
-                won_claim = self.repository.try_claim_admission(checksum)
+                won_claim = self.repository.try_claim_admission(checksum, stale_after_s=ADMISSION_CLAIM_STALE_AFTER_S)
             if not won_claim:
                 existing_are = self._find_existing_are_admission(checksum)
                 if existing_are:
@@ -127,7 +129,7 @@ class AdmissionGate:
                         self.repository.mark_admission_committed(checksum, existing_are.are_hash)
                     return existing_are
                 if self.repository:
-                    status = self.repository.wait_for_admission_resolution(checksum)
+                    status = self.repository.wait_for_admission_resolution(checksum, timeout=ADMISSION_CLAIM_WAIT_TIMEOUT_S)
                     if status in {"committed", "error"}:
                         existing = self.repository.get_evidence_by_checksum(checksum)
                         if existing:
@@ -137,7 +139,16 @@ class AdmissionGate:
                             self.repository.insert_evidence(existing_are)
                             self.repository.mark_admission_committed(checksum, existing_are.are_hash)
                             return existing_are
-                raise RuntimeError(f"content_hash {checksum} is claimed by another writer")
+                    won_claim = self.repository.try_claim_admission(checksum, stale_after_s=ADMISSION_CLAIM_STALE_AFTER_S)
+                    if won_claim:
+                        existing_are = self._find_existing_are_admission(checksum)
+                        if existing_are:
+                            self.repository.insert_evidence(existing_are)
+                            self.repository.mark_admission_committed(checksum, existing_are.are_hash)
+                            return existing_are
+                        won_claim = True
+                if not won_claim:
+                    raise RuntimeError(f"content_hash {checksum} is claimed by another writer")
             try:
                 existing_are = self._find_existing_are_admission(checksum)
                 if existing_are:
