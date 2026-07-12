@@ -19,6 +19,8 @@ from urllib.parse import quote_plus
 from datetime import datetime, timedelta
 from pathlib import Path
 
+_VERITAS_BUILD_SHA = None
+
 from archimedes_demo import (
     archimedes_artifacts,
     archimedes_fields,
@@ -40,6 +42,22 @@ try:
     from zoneinfo import ZoneInfo
 except Exception:
     ZoneInfo = None
+
+
+def _veritas_build_sha() -> str:
+    global _VERITAS_BUILD_SHA
+    if _VERITAS_BUILD_SHA is not None:
+        return _VERITAS_BUILD_SHA
+    try:
+        _VERITAS_BUILD_SHA = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        _VERITAS_BUILD_SHA = "unknown"
+    return _VERITAS_BUILD_SHA
 
 try:
     from claire_scholar import is_scholar_query, scholar_reply
@@ -1003,6 +1021,7 @@ TMF_SNAPSHOTS = str(CLAIRE_RUNTIME_DATA_DIR / "conversation_tmf.jsonl")
 MEMORY_VAULT = str(CLAIRE_RUNTIME_DATA_DIR / "memory_vault.jsonl")
 UPLOAD_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "uploads")
 VERITAS_LEGAL_STATE_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "veritas_legal_gui")
+VERITAS_MOBILE_STATE_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "veritas_mobile")
 MAX_INGEST_UPLOAD_BYTES = int(os.environ.get("CLAIRE_MAX_INGEST_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
 UPLOAD_DISK_SAFETY_BYTES = int(os.environ.get("CLAIRE_UPLOAD_DISK_SAFETY_BYTES", str(256 * 1024 * 1024)))
 UPLOAD_WRITE_CHUNK_BYTES = int(os.environ.get("CLAIRE_UPLOAD_WRITE_CHUNK_BYTES", str(4 * 1024 * 1024)))
@@ -14415,6 +14434,564 @@ def _veritas_parser_output_path(run_state_dir: Path, source_path: Path) -> Path:
     return run_state_dir / "parser_output" / f"{stem}_{digest}.jsonl"
 
 
+def _veritas_mobile_root() -> Path:
+    root = Path(VERITAS_MOBILE_STATE_DIR)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "cases").mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _veritas_mobile_index_path() -> Path:
+    return _veritas_mobile_root() / "cases.json"
+
+
+def _veritas_mobile_read_index() -> dict:
+    path = _veritas_mobile_index_path()
+    if not path.exists():
+        return {"cases": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("cases"), list):
+            return data
+    except Exception:
+        pass
+    return {"cases": []}
+
+
+def _veritas_mobile_write_index(data: dict) -> None:
+    path = _veritas_mobile_index_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _veritas_mobile_case_id(name: str) -> str:
+    base = safe_id(name, "case") if callable(safe_id) else re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._") or "case"
+    return f"{base}_{uuid.uuid4().hex[:8]}"
+
+
+def _veritas_mobile_case_dir(case_id: str) -> Path:
+    clean = safe_id(case_id, "case") if callable(safe_id) else re.sub(r"[^A-Za-z0-9_.-]+", "_", case_id).strip("._")
+    root = (_veritas_mobile_root() / "cases" / clean).resolve()
+    base = (_veritas_mobile_root() / "cases").resolve()
+    if base not in root.parents and root != base:
+        raise ValueError("invalid case id")
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "uploads").mkdir(exist_ok=True)
+    (root / "reports").mkdir(exist_ok=True)
+    return root
+
+
+def _veritas_mobile_case_meta_path(case_id: str) -> Path:
+    return _veritas_mobile_case_dir(case_id) / "case.json"
+
+
+def _veritas_mobile_load_case(case_id: str) -> dict:
+    path = _veritas_mobile_case_meta_path(case_id)
+    if not path.exists():
+        raise FileNotFoundError("case not found")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _veritas_mobile_save_case(case: dict) -> None:
+    case_id = str(case.get("case_id") or "")
+    if not case_id:
+        raise ValueError("case_id required")
+    case["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    path = _veritas_mobile_case_meta_path(case_id)
+    path.write_text(json.dumps(case, ensure_ascii=False, indent=2), encoding="utf-8")
+    index = _veritas_mobile_read_index()
+    cases = [item for item in index.get("cases", []) if item.get("case_id") != case_id]
+    cases.insert(
+        0,
+        {
+            "case_id": case_id,
+            "name": case.get("name") or case_id,
+            "updated_at": case.get("updated_at"),
+            "document_count": len(case.get("documents") or []),
+            "event_count": len(case.get("events") or []),
+        },
+    )
+    index["cases"] = cases[:100]
+    _veritas_mobile_write_index(index)
+
+
+def _veritas_mobile_engine(case_id: str) -> EvidenceEngine:
+    if EvidenceEngine is None:
+        raise RuntimeError("Veritas Legal engine unavailable")
+    return EvidenceEngine(_veritas_mobile_case_dir(case_id) / "engine_state", matter_id=case_id)
+
+
+def _veritas_mobile_records(case_id: str) -> list:
+    try:
+        return _veritas_mobile_engine(case_id).records()
+    except Exception:
+        return []
+
+
+def _veritas_mobile_rules(text: str) -> list[str]:
+    patterns = [
+        r"\bCCR\s*\d+(?:\.\d+)?\b",
+        r"\bCFR\s*\d+(?:\.\d+)?\b",
+        r"\b[A-Z][a-z]+ Code\s+section\s+\d+(?:\.\d+)?\b",
+        r"\b(?:section|rule|statute)\s+\d+(?:\.\d+)?\b",
+    ]
+    found: set[str] = set()
+    for pattern in patterns:
+        for match in re.findall(pattern, text or "", flags=re.IGNORECASE):
+            found.add(" ".join(str(match).split()))
+    return sorted(found)
+
+
+def _veritas_mobile_people_orgs(entities: list[str]) -> tuple[list[str], list[str]]:
+    people: list[str] = []
+    orgs: list[str] = []
+    org_markers = ("agency", "department", "office", "systems", "parks", "county", "court", "board", "commission", "llc", "inc", "corp", "university", "city", "state")
+    for entity in entities or []:
+        clean = str(entity or "").strip()
+        if not clean:
+            continue
+        lowered = clean.lower()
+        if any(marker in lowered for marker in org_markers):
+            if clean not in orgs:
+                orgs.append(clean)
+        elif len(clean.split()) >= 2 and clean not in people:
+            people.append(clean)
+    return people[:30], orgs[:30]
+
+
+def _veritas_mobile_doc_from_record(record) -> dict:
+    entities = list(getattr(record, "entities", []) or [])
+    people, orgs = _veritas_mobile_people_orgs(entities)
+    excerpt = str(getattr(record, "excerpt", "") or "")
+    return {
+        "source_doc_id": record.source_doc_id,
+        "title": Path(record.source_path).name,
+        "source_path": record.source_path,
+        "summary": excerpt or "No readable summary was extracted.",
+        "dates": list(record.dates or []),
+        "people": people,
+        "organizations": orgs,
+        "rules": _veritas_mobile_rules(excerpt),
+        "source_hash": record.source_hash,
+        "are_event_sha": record.are_event_sha,
+        "parser": record.parser,
+        "redactions": record.redactions,
+        "excerpt": excerpt,
+    }
+
+
+def _veritas_mobile_case_summary(case_id: str) -> dict:
+    case = _veritas_mobile_load_case(case_id)
+    docs = [_veritas_mobile_doc_from_record(record) for record in _veritas_mobile_records(case_id)]
+    people = sorted({person for doc in docs for person in doc["people"]})
+    orgs = sorted({org for doc in docs for org in doc["organizations"]})
+    dates = sorted({date for doc in docs for date in doc["dates"]})
+    rules = sorted({rule for doc in docs for rule in doc["rules"]})
+    engine = _veritas_mobile_engine(case_id)
+    timeline = engine.build_timeline()
+    contradictions = engine.detect_contradictions(case_id)
+    case["documents"] = docs
+    case["people"] = people
+    case["organizations"] = orgs
+    case["dates"] = dates
+    case["rules"] = rules
+    case["events"] = timeline
+    case["contradiction_count"] = len(contradictions)
+    case["what_changed"] = {
+        "new_events_found": len(timeline),
+        "people_found": len(people),
+        "organizations_found": len(orgs),
+        "possible_contradictions": len(contradictions),
+        "missing_document_warnings": [] if docs else ["No evidence documents have been uploaded yet."],
+        "timeline_changes": len(timeline),
+        "newly_linked_evidence": len(docs),
+    }
+    _veritas_mobile_save_case(case)
+    return case
+
+
+def _veritas_mobile_search(case_id: str, query: str) -> dict:
+    q = str(query or "").strip()
+    terms = [term for term in re.sub(r"[^a-z0-9\s]", " ", q.lower()).split() if len(term) > 2 and term not in {"show", "every", "find", "what", "happened", "reference", "references", "mention", "mentions", "document", "documents", "involving"}]
+    docs = [_veritas_mobile_doc_from_record(record) for record in _veritas_mobile_records(case_id)]
+    results: list[dict] = []
+    for doc in docs:
+        haystack = " ".join(
+            [
+                doc["title"],
+                doc["summary"],
+                " ".join(doc["dates"]),
+                " ".join(doc["people"]),
+                " ".join(doc["organizations"]),
+                " ".join(doc["rules"]),
+            ]
+        ).lower()
+        score = sum(1 for term in terms if term in haystack)
+        if not terms and q:
+            score = 0
+        if score or any(date in q for date in doc["dates"]) or any(rule.lower() in q.lower() for rule in doc["rules"]):
+            results.append(
+                {
+                    "source_doc_id": doc["source_doc_id"],
+                    "title": doc["title"],
+                    "snippet": doc["summary"][:320],
+                    "dates": doc["dates"],
+                    "people": doc["people"],
+                    "rules": doc["rules"],
+                    "score": score,
+                }
+            )
+    results.sort(key=lambda item: item["score"], reverse=True)
+    if "contradiction" in q.lower():
+        contradictions = _veritas_mobile_engine(case_id).detect_contradictions(case_id)
+        return {
+            "query": q,
+            "results": results,
+            "contradictions": [
+                {
+                    "matter_id": getattr(item, "matter_id", ""),
+                    "contradiction_type": getattr(item, "contradiction_type", ""),
+                    "description": getattr(item, "description", ""),
+                    "source_doc_id_a": getattr(item, "source_doc_id_a", ""),
+                    "source_hash_a": getattr(item, "source_hash_a", ""),
+                    "excerpt_a": getattr(item, "excerpt_a", ""),
+                    "source_doc_id_b": getattr(item, "source_doc_id_b", ""),
+                    "source_hash_b": getattr(item, "source_hash_b", ""),
+                    "excerpt_b": getattr(item, "excerpt_b", ""),
+                }
+                for item in contradictions
+            ],
+        }
+    return {"query": q, "results": results[:25], "contradictions": []}
+
+
+def _veritas_mobile_answer(case_id: str, question: str) -> dict:
+    q = str(question or "").strip()
+    lower = q.lower()
+    case = _veritas_mobile_case_summary(case_id)
+    docs = case.get("documents") or []
+    engine = _veritas_mobile_engine(case_id)
+    sources: list[dict] = []
+    answer = ""
+    uncertainty = "This is evidence organization, not legal advice. A qualified attorney should review conclusions."
+    if not docs:
+        return {
+            "status": "blocked",
+            "answer": "Upload evidence before asking Veritas a case question.",
+            "sources": [],
+            "uncertainty": "No case evidence is available.",
+            "boundary": uncertainty,
+        }
+    if "contradict" in lower:
+        contradictions = engine.detect_contradictions(case_id)
+        if contradictions:
+            first = contradictions[0]
+            answer = f"Possible contradiction found: {first.description}"
+            sources = [
+                {"source_doc_id": first.source_doc_id_a, "title": first.source_doc_id_a, "snippet": first.excerpt_a[:240]},
+                {"source_doc_id": first.source_doc_id_b, "title": first.source_doc_id_b, "snippet": first.excerpt_b[:240]},
+            ]
+        else:
+            answer = "No contradictions were detected by the current rule-based checks."
+    elif "missing" in lower:
+        answer = "I can identify missing proof only from obvious gaps. Current evidence has documents, dates, and people extracted; no formal missing-evidence detector is certified yet."
+        sources = [{"source_doc_id": doc["source_doc_id"], "title": doc["title"], "snippet": doc["summary"][:180]} for doc in docs[:3]]
+    elif "strongest" in lower or "evidence" in lower:
+        ranked = sorted(docs, key=lambda doc: (len(doc["dates"]) + len(doc["people"]) + len(doc["rules"]), len(doc["summary"])), reverse=True)
+        top = ranked[0]
+        answer = f"The strongest current evidence candidate is {top['title']} because it has the most extracted case signals: {len(top['dates'])} date(s), {len(top['people'])} people, and {len(top['rules'])} rule/statute reference(s)."
+        sources = [{"source_doc_id": top["source_doc_id"], "title": top["title"], "snippet": top["summary"][:240]}]
+    elif "before" in lower or "timeline" in lower or "happened" in lower:
+        timeline = case.get("events") or []
+        if timeline:
+            first = timeline[0]
+            answer = f"The earliest timeline item I found is {first.get('date')}: {first.get('excerpt')}"
+            sources = [{"source_doc_id": first.get("source_doc_id"), "title": first.get("source_doc_id"), "snippet": first.get("excerpt", "")[:240]}]
+        else:
+            answer = "No dated timeline events were found in the uploaded evidence yet."
+    else:
+        search = _veritas_mobile_search(case_id, q)
+        results = search.get("results") or []
+        if results:
+            answer = f"I found {len(results)} source-linked result(s) in this case. The top match is {results[0]['title']}."
+            sources = [{"source_doc_id": item["source_doc_id"], "title": item["title"], "snippet": item["snippet"][:240]} for item in results[:3]]
+        else:
+            answer = "I could not find source evidence in this case for that question."
+    return {
+        "status": "answered",
+        "answer": answer,
+        "sources": sources,
+        "uncertainty": "Evidence strength is based on extracted text only; scanned or unsupported content may be missing.",
+        "boundary": uncertainty,
+    }
+
+
+def _veritas_mobile_report(case_id: str, report_type: str) -> dict:
+    report_type = safe_id(report_type or "case_summary", "case_summary") if callable(safe_id) else report_type
+    case = _veritas_mobile_case_summary(case_id)
+    reports_dir = _veritas_mobile_case_dir(case_id) / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    path = reports_dir / f"{stamp}_{report_type}.md"
+    docs = case.get("documents") or []
+    timeline = case.get("events") or []
+    if report_type in {"evidence_packet", "attorney_review_packet"}:
+        packet = _veritas_mobile_engine(case_id).generate_review_packet(output_format="markdown")
+        text = packet.read_text(encoding="utf-8")
+    elif report_type == "document_index":
+        lines = [f"# Document Index - {case.get('name')}", ""]
+        for doc in docs:
+            lines.append(f"- {doc['title']} | source: `{doc['source_doc_id']}` | dates: {len(doc['dates'])} | people: {len(doc['people'])}")
+        text = "\n".join(lines) + "\n"
+    elif report_type == "timeline":
+        lines = [f"# Timeline - {case.get('name')}", ""]
+        for event in timeline:
+            lines.append(f"- {event.get('date')}: {event.get('excerpt')} [source: `{event.get('source_doc_id')}`]")
+        text = "\n".join(lines) + "\n"
+    elif report_type == "witness_list":
+        lines = [f"# Witness / People List - {case.get('name')}", ""]
+        for person in case.get("people") or []:
+            lines.append(f"- {person}")
+        text = "\n".join(lines) + "\n"
+    else:
+        lines = [
+            f"# Case Summary - {case.get('name')}",
+            "",
+            f"- Documents: {len(docs)}",
+            f"- People: {len(case.get('people') or [])}",
+            f"- Organizations: {len(case.get('organizations') or [])}",
+            f"- Timeline events: {len(timeline)}",
+            f"- Possible contradictions: {case.get('contradiction_count', 0)}",
+            "",
+            "This is evidence organization, not legal advice.",
+        ]
+        text = "\n".join(lines) + "\n"
+    path.write_text(text, encoding="utf-8")
+    case.setdefault("reports", []).insert(0, {"report_type": report_type, "path": str(path), "title": path.name, "created_at": datetime.utcnow().isoformat() + "Z"})
+    _veritas_mobile_save_case(case)
+    return {"status": "saved", "report_type": report_type, "title": path.name, "path": str(path), "preview": text[:1200]}
+
+
+@app.get("/veritas-mobile", response_class=HTMLResponse)
+def veritas_mobile_home():
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Veritas Mobile</title>
+  <style>
+    :root { --bg:#f6f7fb; --panel:#ffffff; --text:#101828; --muted:#667085; --line:#d0d5dd; --blue:#155eef; --green:#067647; --red:#b42318; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,sans-serif; font-size:16px; padding-bottom:86px; }
+    header { position:sticky; top:0; z-index:5; background:var(--panel); border-bottom:1px solid var(--line); padding:14px 16px; }
+    h1 { margin:0; font-size:26px; line-height:1.1; }
+    h2 { margin:0 0 12px; font-size:22px; }
+    h3 { margin:0 0 8px; font-size:18px; }
+    p { line-height:1.45; }
+    main { max-width:620px; margin:0 auto; padding:16px; }
+    .sub { color:var(--muted); font-size:15px; margin-top:4px; }
+    .screen { display:none; }
+    .screen.active { display:block; }
+    .stack { display:grid; gap:12px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:0 1px 2px rgba(16,24,40,.05); }
+    button, .button { width:100%; min-height:52px; border:0; border-radius:13px; padding:14px 16px; font-size:17px; font-weight:750; background:var(--blue); color:white; text-align:left; touch-action:manipulation; }
+    button.secondary { background:#eef4ff; color:#1849a9; border:1px solid #b2ccff; }
+    button.light { background:white; color:var(--text); border:1px solid var(--line); }
+    button.warn { background:#fff6ed; color:#b54708; border:1px solid #fedf89; }
+    button:disabled { background:#eaecf0; color:#98a2b3; border:1px solid #d0d5dd; }
+    input, textarea, select { width:100%; min-height:52px; border:1px solid var(--line); border-radius:12px; padding:12px; font-size:17px; background:white; color:var(--text); }
+    textarea { min-height:110px; resize:vertical; }
+    .grid { display:grid; gap:10px; }
+    .pillrow { display:flex; gap:8px; overflow:auto; padding-bottom:4px; }
+    .pill { display:inline-flex; white-space:nowrap; padding:10px 12px; border-radius:999px; background:#eef4ff; color:#1849a9; border:1px solid #b2ccff; font-weight:700; }
+    .listitem { display:block; width:100%; background:white; border:1px solid var(--line); border-radius:13px; padding:14px; color:var(--text); text-align:left; }
+    .meta { color:var(--muted); font-size:14px; margin-top:4px; overflow-wrap:anywhere; }
+    .ok { color:var(--green); font-weight:800; }
+    .err { color:var(--red); font-weight:800; }
+    .bottomnav { position:fixed; left:0; right:0; bottom:0; z-index:10; display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--line); border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom); }
+    .bottomnav button { border-radius:0; min-height:64px; padding:8px 4px; font-size:13px; text-align:center; background:white; color:#344054; border:0; }
+    .bottomnav button.active { color:var(--blue); font-weight:900; }
+    details { background:#f9fafb; border:1px solid var(--line); border-radius:12px; padding:12px; }
+    summary { font-weight:800; min-height:44px; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; }
+    .hidden { display:none !important; }
+  </style>
+</head>
+<body>
+  <header><h1>Veritas</h1><div id="caseLabel" class="sub">No case open</div><div class="sub">Veritas build: __VERITAS_BUILD_SHA__</div></header>
+  <main>
+    <section id="home" class="screen active">
+      <div class="stack">
+        <button onclick="showScreen('newcase')">New Case</button>
+        <button class="secondary" onclick="showScreen('opencase'); loadCases()">Open Case</button>
+        <button class="secondary" onclick="requireCase('upload')">Upload Evidence</button>
+        <button class="light" onclick="requireCase('search')">Search Evidence</button>
+        <button class="light" onclick="requireCase('timeline'); loadTimeline()">Build Timeline</button>
+        <button class="light" onclick="requireCase('reports')">Generate Report</button>
+        <button class="light" onclick="requireCase('ask')">Ask Veritas</button>
+        <div class="card"><h3>Recent Cases</h3><div id="recentCases" class="stack"><div class="meta">Loading...</div></div></div>
+      </div>
+    </section>
+    <section id="newcase" class="screen"><div class="card stack"><h2>New Case</h2><input id="caseName" placeholder="Case name"><textarea id="caseNote" placeholder="Optional note"></textarea><button onclick="createCase()">Create Case</button><div id="newCaseStatus" class="meta"></div></div></section>
+    <section id="opencase" class="screen"><div class="card stack"><h2>Open Case</h2><div id="caseList" class="stack"></div></div></section>
+    <section id="case" class="screen"><div class="stack"><div class="card"><h2 id="dashTitle">Case</h2><div id="whatChanged" class="meta"></div></div><button onclick="showScreen('upload')">Upload Evidence</button><button class="secondary" onclick="showScreen('ask')">Ask Veritas</button><div class="grid"><button class="light" onclick="showDocuments()">Documents</button><button class="light" onclick="showPeople()">People</button><button class="light" onclick="loadTimeline();showScreen('timeline')">Timeline</button><button class="light" onclick="showScreen('search')">Search</button><button class="light" onclick="showScreen('reports')">Reports</button></div><div class="card"><h3>Recent Activity</h3><div id="activity" class="meta">No activity yet.</div></div></div></section>
+    <section id="upload" class="screen"><div class="card stack"><h2>Upload Evidence</h2><div id="uploadCase" class="meta"></div><input id="fileInput" type="file" multiple accept=".txt,.md,.py,.pdf,.docx,.csv,.json,.jsonl"><button onclick="uploadFiles()">Start Upload</button><div id="uploadStatus" class="meta"></div><button class="light" onclick="showScreen('case')">Back to Case</button></div></section>
+    <section id="documents" class="screen"><div class="card stack"><h2>Documents</h2><div id="documentsList" class="stack"></div></div></section>
+    <section id="document" class="screen"><div id="documentView" class="stack"></div></section>
+    <section id="search" class="screen"><div class="card stack"><h2>Search Evidence</h2><input id="searchQuery" placeholder="Show every mention of Sean James."><div class="pillrow"><span class="pill" onclick="setSearch('What happened in 2013?')">2013</span><span class="pill" onclick="setSearch('Find every reference to CCR 4331.')">CCR 4331</span><span class="pill" onclick="setSearch('Show contradictions.')">Contradictions</span></div><button onclick="runSearch()">Search</button><div id="searchResults" class="stack"></div></div></section>
+    <section id="timeline" class="screen"><div class="card stack"><h2>Timeline</h2><button onclick="loadTimeline()">Build / Refresh Timeline</button><div id="timelineList" class="stack"></div></div></section>
+    <section id="ask" class="screen"><div class="card stack"><h2>Ask Veritas</h2><div class="pillrow"><span class="pill" onclick="setAsk('What is my strongest evidence?')">Strongest evidence?</span><span class="pill" onclick="setAsk('What documents contradict each other?')">Contradictions?</span><span class="pill" onclick="setAsk('What evidence is still missing?')">Missing evidence?</span></div><textarea id="askText" placeholder="Ask about this case."></textarea><button onclick="askVeritas()">Send</button><div id="askAnswer" class="stack"></div></div></section>
+    <section id="reports" class="screen"><div class="card stack"><h2>Reports</h2><button onclick="makeReport('document_index')">Document Index</button><button onclick="makeReport('timeline')">Timeline</button><button onclick="makeReport('case_summary')">Case Summary</button><button onclick="makeReport('evidence_packet')">Evidence Packet</button><button onclick="makeReport('witness_list')">Witness List</button><div id="reportResult" class="stack"></div></div></section>
+  </main>
+  <nav class="bottomnav"><button onclick="showScreen('home')" class="active">Home</button><button onclick="requireCase('case')">Case</button><button onclick="requireCase('search')">Search</button><button onclick="requireCase('ask')">Ask</button><button onclick="requireCase('reports')">Reports</button></nav>
+<script>
+let activeCase = localStorage.getItem('veritas_case_id') || '';
+function qs(id){return document.getElementById(id)}
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));qs(id).classList.add('active');document.querySelectorAll('.bottomnav button').forEach(b=>b.classList.remove('active'));if(id==='home')document.querySelector('.bottomnav button').classList.add('active')}
+function requireCase(target){if(!activeCase){showScreen('newcase');qs('newCaseStatus').innerText='Create a case first.';return} if(target==='case')loadDashboard(); showScreen(target)}
+async function api(url, opts={}){let r=await fetch(url, opts);let j=await r.json().catch(()=>({status:'error',detail:'Invalid server response'}));if(!r.ok)throw j;return j}
+async function loadCases(){let j=await api('/veritas-mobile/api/cases');let list=(j.cases||[]).map(c=>`<button class="listitem" onclick="openCase('${c.case_id}')"><b>${escapeHtml(c.name)}</b><div class="meta">${c.document_count||0} docs | ${c.event_count||0} events</div></button>`).join('')||'<div class="meta">No cases yet.</div>';qs('caseList').innerHTML=list;qs('recentCases').innerHTML=list}
+async function createCase(){let name=qs('caseName').value.trim();if(!name){qs('newCaseStatus').innerHTML='<span class="err">Name the case first.</span>';return}let j=await api('/veritas-mobile/api/cases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name, note:qs('caseNote').value})});openCase(j.case.case_id)}
+async function openCase(id){activeCase=id;localStorage.setItem('veritas_case_id',id);await loadDashboard();showScreen('case')}
+async function loadDashboard(){let j=await api(`/veritas-mobile/api/cases/${activeCase}`);qs('caseLabel').innerText=j.name;qs('dashTitle').innerText=j.name;let w=j.what_changed||{};qs('whatChanged').innerHTML=`Documents ${j.documents.length} | People ${j.people.length} | Events ${j.events.length}<br>Possible contradictions: ${w.possible_contradictions||0}`;qs('activity').innerText=(j.activity||[]).slice(0,4).join('\\n')||'No activity yet.';qs('uploadCase').innerText='Case: '+j.name}
+async function uploadFiles(){let files=[...qs('fileInput').files];if(!files.length){qs('uploadStatus').innerHTML='<span class="err">Choose a file first.</span>';return}qs('uploadStatus').innerText='Uploading...';let out=[];for(let f of files){let fd=new FormData();fd.append('file',f);try{let j=await api(`/veritas-mobile/api/cases/${activeCase}/upload`,{method:'POST',body:fd});out.push(`<div class="ok">${escapeHtml(f.name)} added</div><div class="meta">${j.dates_found} dates | ${j.people_found} people | ${j.organizations_found} organizations | ${j.rules_found} rules | source record created</div>`)}catch(e){out.push(`<div class="err">${escapeHtml(f.name)} failed</div><div class="meta">${escapeHtml(e.detail||e.status||'Upload failed')}</div>`)}}qs('uploadStatus').innerHTML=out.join('');await loadDashboard()}
+async function showDocuments(){let j=await api(`/veritas-mobile/api/cases/${activeCase}`);qs('documentsList').innerHTML=(j.documents||[]).map(d=>`<button class="listitem" onclick="showDocument('${d.source_doc_id}')"><b>${escapeHtml(d.title)}</b><div class="meta">${d.dates.length} dates | ${d.people.length} people</div></button>`).join('')||'<div class="meta">No documents yet.</div>';showScreen('documents')}
+async function showPeople(){let j=await api(`/veritas-mobile/api/cases/${activeCase}`);qs('documentsList').innerHTML=(j.people||[]).map(p=>`<div class="listitem"><b>${escapeHtml(p)}</b></div>`).join('')||'<div class="meta">No people found yet.</div>';showScreen('documents')}
+async function showDocument(id){let d=await api(`/veritas-mobile/api/cases/${activeCase}/documents/${id}`);qs('documentView').innerHTML=`<div class="card"><h2>${escapeHtml(d.title)}</h2><p>${escapeHtml(d.summary)}</p><h3>Dates</h3><p>${escapeHtml(d.dates.join(', ')||'None found')}</p><h3>People</h3><p>${escapeHtml(d.people.join(', ')||'None found')}</p><h3>Organizations</h3><p>${escapeHtml(d.organizations.join(', ')||'None found')}</p><h3>Rules / Statutes</h3><p>${escapeHtml(d.rules.join(', ')||'None found')}</p><button onclick="setAsk('Ask about ${escapeJs(d.title)}');showScreen('ask')">Ask about this document</button><button class="secondary" onclick="makeReport('document_index')">Add to Report</button><details><summary>Show Technical Details</summary><pre>SHA-256: ${escapeHtml(d.source_hash)}\\nsource_doc_id: ${escapeHtml(d.source_doc_id)}\\nARE event: ${escapeHtml(d.are_event_sha)}\\nParser: ${escapeHtml(d.parser)}\\nVeritas build: __VERITAS_BUILD_SHA__</pre></details></div>`;showScreen('document')}
+function setSearch(v){qs('searchQuery').value=v} function setAsk(v){qs('askText').value=v}
+async function runSearch(){let q=qs('searchQuery').value;let j=await api(`/veritas-mobile/api/cases/${activeCase}/search`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});let parts=(j.results||[]).map(r=>`<button class="listitem" onclick="showDocument('${r.source_doc_id}')"><b>${escapeHtml(r.title)}</b><div class="meta">${escapeHtml(r.snippet)}</div></button>`);if(j.contradictions&&j.contradictions.length)parts.push(`<div class="card"><b>Contradictions:</b> ${j.contradictions.length}</div>`);qs('searchResults').innerHTML=parts.join('')||'<div class="meta">No matching evidence found.</div>'}
+async function loadTimeline(){let j=await api(`/veritas-mobile/api/cases/${activeCase}/timeline`);qs('timelineList').innerHTML=(j.events||[]).map(e=>`<div class="listitem"><b>${escapeHtml(e.date)}</b><div>${escapeHtml(e.excerpt)}</div><div class="meta">Source: ${escapeHtml(e.source_doc_id||'unknown')}</div><button class="secondary" onclick="showDocument('${e.source_doc_id}')">Open Source</button></div>`).join('')||'<div class="meta">No dated events found yet.</div>'}
+async function askVeritas(){let q=qs('askText').value;let j=await api(`/veritas-mobile/api/cases/${activeCase}/ask`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});qs('askAnswer').innerHTML=`<div class="card"><p>${escapeHtml(j.answer)}</p><h3>Supported by</h3>${(j.sources||[]).map(s=>`<button class="listitem" onclick="showDocument('${s.source_doc_id}')">${escapeHtml(s.title||s.source_doc_id)}<div class="meta">${escapeHtml(s.snippet||'')}</div></button>`).join('')||'<div class="meta">No supporting document found.</div>'}<p class="meta">${escapeHtml(j.uncertainty||'')}</p><p class="meta">${escapeHtml(j.boundary||'')}</p></div>`}
+async function makeReport(type){let j=await api(`/veritas-mobile/api/cases/${activeCase}/reports`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({report_type:type})});qs('reportResult').innerHTML=`<div class="card"><b>Report saved</b><div class="meta">${escapeHtml(j.title)}</div><pre>${escapeHtml(j.preview||'')}</pre></div>`}
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function escapeJs(s){return String(s||'').replace(/['\\\\]/g,'\\\\$&')}
+loadCases().catch(()=>{qs('recentCases').innerHTML='<div class="meta">No cases loaded.</div>'}); if(activeCase){loadDashboard().catch(()=>{})}
+</script>
+</body>
+</html>"""
+    return HTMLResponse(html.replace("__VERITAS_BUILD_SHA__", _veritas_build_sha()))
+
+
+@app.get("/veritas-mobile/api/cases")
+def veritas_mobile_cases():
+    return JSONResponse(_veritas_mobile_read_index())
+
+
+@app.post("/veritas-mobile/api/cases")
+async def veritas_mobile_create_case(request: Request):
+    payload = await request.json()
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"status": "error", "detail": "Case name is required."}, status_code=400)
+    case_id = _veritas_mobile_case_id(name)
+    case = {
+        "case_id": case_id,
+        "name": name[:120],
+        "note": str(payload.get("note") or "")[:1000],
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "documents": [],
+        "events": [],
+        "reports": [],
+        "activity": ["Case created."],
+    }
+    _veritas_mobile_save_case(case)
+    return JSONResponse({"status": "created", "case": case})
+
+
+@app.get("/veritas-mobile/api/cases/{case_id}")
+def veritas_mobile_case(case_id: str):
+    try:
+        return JSONResponse(_veritas_mobile_case_summary(case_id))
+    except FileNotFoundError:
+        return JSONResponse({"status": "not_found", "detail": "Case not found."}, status_code=404)
+    except Exception as exc:
+        return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
+
+
+@app.post("/veritas-mobile/api/cases/{case_id}/upload")
+async def veritas_mobile_upload(case_id: str, file: UploadFile | None = File(None)):
+    if file is None:
+        return JSONResponse({"status": "error", "detail": "Choose a file first."}, status_code=400)
+    filename = safe_upload_name(file.filename)
+    suffix = Path(filename).suffix.lower()
+    if suffix not in [".txt", ".md", ".py", ".pdf", ".docx", ".csv", ".json", ".jsonl"]:
+        return JSONResponse({"status": "unsupported", "detail": "This file type is not supported yet. Try PDF, DOCX, TXT, CSV, JSON, or JSONL."}, status_code=400)
+    try:
+        case = _veritas_mobile_load_case(case_id)
+        upload_dir = _veritas_mobile_case_dir(case_id) / "uploads"
+        stamped = datetime.utcnow().strftime("%Y%m%d_%H%M%S_") + filename
+        saved_path = upload_dir / stamped
+        await save_upload_file_chunked(file, str(saved_path))
+        parser_output = _veritas_parser_output_path(_veritas_mobile_case_dir(case_id), saved_path)
+        claire_parser = _load_veritas_hardened_parser()
+        parser = claire_parser.ClaireParser(output_jsonl=parser_output, temp_root=_veritas_mobile_case_dir(case_id) / "parser_temp", enable_ocr=False, enable_media=False)
+        parsed_units = parser.parse_tree(saved_path)
+        if not parser_output.exists() or parsed_units <= 0:
+            return JSONResponse({"status": "no_text", "detail": "I could not read text from this file. It may be scanned, image-only, or unsupported by the current parser."}, status_code=422)
+        records = _veritas_mobile_engine(case_id).ingest_parser_jsonl(parser_output)
+        if not records:
+            return JSONResponse({"status": "no_records", "detail": "The parser ran, but no evidence records were created."}, status_code=422)
+        docs = [_veritas_mobile_doc_from_record(record) for record in records]
+        case.setdefault("activity", []).insert(0, f"{filename} added.")
+        _veritas_mobile_save_case(case)
+        summary = _veritas_mobile_case_summary(case_id)
+        return JSONResponse({
+            "status": "processed",
+            "filename": filename,
+            "documents_added": len(docs),
+            "dates_found": sum(len(doc["dates"]) for doc in docs),
+            "people_found": len({person for doc in docs for person in doc["people"]}),
+            "organizations_found": len({org for doc in docs for org in doc["organizations"]}),
+            "rules_found": len({rule for doc in docs for rule in doc["rules"]}),
+            "source_record_created": True,
+            "documents": docs,
+            "case": summary,
+        })
+    except FileNotFoundError:
+        return JSONResponse({"status": "not_found", "detail": "Case not found."}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({"status": "error", "detail": str(exc)}, status_code=400)
+    except Exception as exc:
+        return JSONResponse({"status": "error", "detail": f"Processing failed: {exc}"}, status_code=500)
+
+
+@app.get("/veritas-mobile/api/cases/{case_id}/documents/{source_doc_id}")
+def veritas_mobile_document(case_id: str, source_doc_id: str):
+    for doc in (_veritas_mobile_case_summary(case_id).get("documents") or []):
+        if doc.get("source_doc_id") == source_doc_id:
+            return JSONResponse(doc)
+    return JSONResponse({"status": "not_found", "detail": "Document not found."}, status_code=404)
+
+
+@app.post("/veritas-mobile/api/cases/{case_id}/search")
+async def veritas_mobile_search(case_id: str, request: Request):
+    payload = await request.json()
+    return JSONResponse(_veritas_mobile_search(case_id, str(payload.get("query") or "")))
+
+
+@app.get("/veritas-mobile/api/cases/{case_id}/timeline")
+def veritas_mobile_timeline(case_id: str):
+    case = _veritas_mobile_case_summary(case_id)
+    return JSONResponse({"case_id": case_id, "events": case.get("events") or []})
+
+
+@app.post("/veritas-mobile/api/cases/{case_id}/ask")
+async def veritas_mobile_ask(case_id: str, request: Request):
+    payload = await request.json()
+    return JSONResponse(_veritas_mobile_answer(case_id, str(payload.get("question") or "")))
+
+
+@app.post("/veritas-mobile/api/cases/{case_id}/reports")
+async def veritas_mobile_reports(case_id: str, request: Request):
+    payload = await request.json()
+    try:
+        return JSONResponse(_veritas_mobile_report(case_id, str(payload.get("report_type") or "case_summary")))
+    except Exception as exc:
+        return JSONResponse({"status": "error", "detail": f"Report generation failed: {exc}"}, status_code=500)
+
+
 @app.post("/veritas-legal/run")
 async def veritas_legal_run(request: Request):
     trace_id = _veritas_trace_id()
@@ -15448,13 +16025,6 @@ def public_demo_trace(trace_id: str):
     if not trace["steps"]:
         return JSONResponse({"status": "not_found", "trace_id": trace_id}, status_code=404)
     return JSONResponse(trace)
-
-
-
-
-@app.get("/trace/{trace_id}")
-def public_trace_alias(trace_id: str):
-    return public_demo_trace(trace_id)
 @app.post("/claire/query")
 async def public_demo_query(request: Request):
     query = ""
