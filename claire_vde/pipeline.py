@@ -37,9 +37,9 @@ class VentureDiscoveryEngine:
         self.sentinel = sentinel or VDESentinel()
         self.admitted: list[AdmittedEvidence] = []
 
-    def ingest_collector(self, collector: EvidenceCollector) -> dict[str, Any]:
+    def ingest_collector(self, collector: EvidenceCollector, run: CollectorRun | None = None) -> dict[str, Any]:
         started_at = time.time()
-        run = collector.collect()
+        run = run or collector.collect()
         admitted: list[AdmittedEvidence] = []
         errors = list(run.errors)
         for draft in run.evidence:
@@ -55,7 +55,14 @@ class VentureDiscoveryEngine:
             lane="audit",
             source="vde_pipeline",
             event_type="vde_collector_run",
-            metadata={"collector": run.collector, "admitted": len(admitted), "errors": errors, "next_cursor": run.next_cursor},
+            metadata={
+                "collector": run.collector,
+                "admitted": len(admitted),
+                "errors": errors,
+                "error_details": run.error_details,
+                "next_cursor": run.next_cursor,
+                "collector_metadata": run.metadata,
+            },
         )
         finished_at = time.time()
         if self.repository:

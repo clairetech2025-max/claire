@@ -10,6 +10,7 @@ Implemented now:
 
 - Modular collector boundary with explicit unsupported external collectors.
 - Incremental JSONL collector for normalized public-source evidence snapshots.
+- First live public collector: Federal Register regulatory-pressure ingestion.
 - Admission Gate with checksum dedupe before downstream orientation.
 - ARE-backed evidence admission.
 - SQLite local metadata repository for deterministic tests and local development.

@@ -3,6 +3,7 @@
 from claire_vde.collectors import EvidenceCollector, JsonlEvidenceCollector, NotConfiguredCollector, StaticEvidenceCollector
 from claire_vde.evidence import AdmissionGate, AdmittedEvidence, EvidenceDraft
 from claire_vde.fare import FAREProjector, VentureProjection
+from claire_vde.federal_register import FederalRegisterCollector, FederalRegisterCollectorConfig
 from claire_vde.ledger import OpportunityHypothesis, OpportunityLedger
 from claire_vde.pipeline import VentureDiscoveryEngine
 from claire_vde.q_insight_venture import QInsightField
@@ -16,6 +17,8 @@ __all__ = [
     "EvidenceCollector",
     "EvidenceDraft",
     "FAREProjector",
+    "FederalRegisterCollector",
+    "FederalRegisterCollectorConfig",
     "JsonlEvidenceCollector",
     "NotConfiguredCollector",
     "OpportunityHypothesis",

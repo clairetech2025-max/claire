@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from claire_vde.evidence import EvidenceDraft
@@ -39,6 +39,7 @@ COLLECTOR_NAMES = [
     "company_blogs",
     "technical_conferences",
     "vc_funding",
+    "federal_register",
 ]
 
 
@@ -48,6 +49,8 @@ class CollectorRun:
     evidence: list[EvidenceDraft]
     errors: list[str]
     next_cursor: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+    error_details: list[dict[str, object]] = field(default_factory=list)
 
 
 class EvidenceCollector(ABC):
@@ -70,7 +73,13 @@ class NotConfiguredCollector(EvidenceCollector):
         self.reason = reason
 
     def collect(self) -> CollectorRun:
-        return CollectorRun(collector=self.name, evidence=[], errors=[self.reason])
+        return CollectorRun(
+            collector=self.name,
+            evidence=[],
+            errors=[self.reason],
+            metadata={"status": "not_configured"},
+            error_details=[{"code": self.reason, "message": "collector not configured"}],
+        )
 
 
 class StaticEvidenceCollector(EvidenceCollector):
@@ -83,7 +92,13 @@ class StaticEvidenceCollector(EvidenceCollector):
         self._evidence = list(evidence)
 
     def collect(self) -> CollectorRun:
-        return CollectorRun(collector=self.name, evidence=list(self._evidence), errors=[], next_cursor=str(len(self._evidence)))
+        return CollectorRun(
+            collector=self.name,
+            evidence=list(self._evidence),
+            errors=[],
+            next_cursor=str(len(self._evidence)),
+            metadata={"source": "static"},
+        )
 
 
 class JsonlEvidenceCollector(EvidenceCollector):
@@ -108,6 +123,8 @@ class JsonlEvidenceCollector(EvidenceCollector):
                 evidence=[],
                 errors=[f"missing_source_file:{self.path}"],
                 next_cursor=str(self.cursor),
+                metadata={"source": str(self.path), "mode": "jsonl"},
+                error_details=[{"code": "missing_source_file", "path": str(self.path)}],
             )
         evidence: list[EvidenceDraft] = []
         errors: list[str] = []
@@ -122,8 +139,17 @@ class JsonlEvidenceCollector(EvidenceCollector):
                 evidence.append(EvidenceDraft(**json.loads(line)))
             except Exception as exc:
                 errors.append(f"line_{line_no}:{exc}")
-        return CollectorRun(collector=self.name, evidence=evidence, errors=errors, next_cursor=str(next_cursor))
+        return CollectorRun(
+            collector=self.name,
+            evidence=evidence,
+            errors=errors,
+            next_cursor=str(next_cursor),
+            metadata={"source": str(self.path), "mode": "jsonl"},
+            error_details=[{"code": "jsonl_parse_error", "message": err} for err in errors],
+        )
 
 
 def collector_registry() -> dict[str, str]:
-    return {name: "not_configured" for name in COLLECTOR_NAMES}
+    registry = {name: "not_configured" for name in COLLECTOR_NAMES}
+    registry["federal_register"] = "implemented"
+    return registry

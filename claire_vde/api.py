@@ -8,11 +8,12 @@ from claire_are.config import AREConfig
 from claire_are.core import AREStore
 from claire_vde.collectors import NotConfiguredCollector, StaticEvidenceCollector, collector_registry
 from claire_vde.evidence import AdmissionGate, EvidenceDraft, evidence_to_dict
+from claire_vde.federal_register import FederalRegisterCollector, FederalRegisterCollectorConfig
 from claire_vde.ledger import OpportunityHypothesis, OpportunityLedger
 from claire_vde.pipeline import VentureDiscoveryEngine
 from claire_vde.q_insight_venture import QInsightField
 from claire_vde.recognition_rail import RecognitionRail
-from claire_vde.schemas import CollectorRunRequest, EvidenceDraftRequest, OpportunityCreateRequest, OutcomeRequest
+from claire_vde.schemas import CollectorRunRequest, EvidenceDraftRequest, FederalRegisterRunRequest, OpportunityCreateRequest, OutcomeRequest
 from claire_vde.storage import VentureRepository
 
 
@@ -65,7 +66,41 @@ def run_static_collectors(req: CollectorRunRequest) -> dict:
 
 @app.post("/v1/venture/collectors/{collector_name}/run")
 def run_registered_collector(collector_name: str) -> dict:
+    if collector_name == "federal_register":
+        return run_federal_register(FederalRegisterRunRequest())
     return _engine().ingest_collector(NotConfiguredCollector(collector_name))
+
+
+@app.post("/v1/venture/federal-register/run")
+def run_federal_register(req: FederalRegisterRunRequest) -> dict:
+    config = FederalRegisterCollectorConfig(
+        query=req.query,
+        cutoff_date=req.cutoff_date,
+        per_page=req.per_page,
+        max_pages=req.max_pages,
+        user_agent=req.user_agent,
+        connect_timeout_s=req.connect_timeout_s,
+        read_timeout_s=req.read_timeout_s,
+        retries=req.retries,
+        backoff_base_s=req.backoff_base_s,
+        respectful_delay_s=req.respectful_delay_s,
+        version=req.version,
+    )
+    collector = FederalRegisterCollector(repository=repository, config=config, cursor=repository.get_collector_cursor("federal_register"))
+    run = collector.collect()
+    pipeline_result = _engine().ingest_collector(collector, run=run) if req.admit else None
+    return {
+        "collector_run": {
+            "collector": run.collector,
+            "errors": run.errors,
+            "error_details": run.error_details,
+            "next_cursor": run.next_cursor,
+            "metadata": run.metadata,
+            "evidence": [evidence_to_dict(item) for item in run.evidence],
+            "duplicates": run.metadata.get("duplicates", []),
+        },
+        "pipeline_result": pipeline_result,
+    }
 
 
 @app.get("/v1/venture/orientation")

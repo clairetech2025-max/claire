@@ -1,0 +1,39 @@
+{
+  "description": "Federal Register document search results page 2 for artificial intelligence",
+  "count": 1495,
+  "total_pages": 50,
+  "next_page_url": "https://www.federalregister.gov/api/v1/documents?conditions%5Bterm%5D=artificial+intelligence&format=json&order=newest&page=3&per_page=2",
+  "results": [
+    {
+      "title": "Proposed Information Collection; ATUS Artificial Intelligence (AI) Questions",
+      "type": "Notice",
+      "abstract": "The Bureau of Labor Statistics is soliciting comments concerning the proposed new collection, the American Time Use Survey (ATUS) Artificial Intelligence (AI) Questions.",
+      "document_number": "2026-13928",
+      "html_url": "https://www.federalregister.gov/documents/2026/07/10/2026-13928/proposed-information-collection-atus-artificial-intelligence-ai-questions",
+      "pdf_url": "https://www.govinfo.gov/content/pkg/FR-2026-07-10/pdf/2026-13928.pdf",
+      "public_inspection_pdf_url": "https://public-inspection.federalregister.gov/2026-13928.pdf?1783601109",
+      "publication_date": "2026-07-10",
+      "agencies": [
+        {
+          "raw_name": "DEPARTMENT OF LABOR",
+          "name": "Labor Department",
+          "id": 271,
+          "url": "https://www.federalregister.gov/agencies/labor-department",
+          "json_url": "https://www.federalregister.gov/api/v1/agencies/271",
+          "parent_id": null,
+          "slug": "labor-department"
+        },
+        {
+          "raw_name": "Bureau of Labor Statistics",
+          "name": "Labor Statistics Bureau",
+          "id": 272,
+          "url": "https://www.federalregister.gov/agencies/labor-statistics-bureau",
+          "json_url": "https://www.federalregister.gov/api/v1/agencies/272",
+          "parent_id": 271,
+          "slug": "labor-statistics-bureau"
+        }
+      ],
+      "excerpts": "The Bureau of Labor Statistics (BLS) is soliciting comments concerning the proposed new collection, the \"American Time Use Survey (ATUS) Artificial Intelligence (AI) Questions.\""
+    }
+  ]
+}

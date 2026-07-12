@@ -7,6 +7,7 @@ from pathlib import Path
 from claire_are.config import AREConfig
 from claire_are.core import AREStore
 from claire_vde.collectors import JsonlEvidenceCollector, NotConfiguredCollector
+from claire_vde.federal_register import FederalRegisterCollector, FederalRegisterCollectorConfig
 from claire_vde.pipeline import VentureDiscoveryEngine
 from claire_vde.storage import VentureRepository
 
@@ -26,6 +27,14 @@ def run_once() -> dict:
     collector_name = os.environ.get("CLAIRE_VDE_COLLECTOR", "sec")
     jsonl_path = os.environ.get("CLAIRE_VDE_JSONL_SOURCE")
     try:
+        if collector_name == "federal_register":
+            config = FederalRegisterCollectorConfig(
+                query=os.environ.get("CLAIRE_VDE_FR_QUERY", FederalRegisterCollectorConfig().query),
+                cutoff_date=os.environ.get("CLAIRE_VDE_FR_CUTOFF", FederalRegisterCollectorConfig().cutoff_date),
+                max_pages=int(os.environ.get("CLAIRE_VDE_FR_MAX_PAGES", "1")),
+            )
+            collector = FederalRegisterCollector(repository=repo, config=config, cursor=repo.get_collector_cursor("federal_register"))
+            return engine.ingest_collector(collector)
         if jsonl_path:
             cursor = repo.get_collector_cursor(collector_name)
             collector = JsonlEvidenceCollector(collector_name, Path(jsonl_path), cursor=cursor)

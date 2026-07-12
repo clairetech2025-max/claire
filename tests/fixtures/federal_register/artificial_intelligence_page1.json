@@ -1,0 +1,52 @@
+{
+  "description": "Federal Register document search results for artificial intelligence",
+  "count": 1495,
+  "total_pages": 50,
+  "next_page_url": "https://www.federalregister.gov/api/v1/documents?conditions%5Bterm%5D=artificial+intelligence&format=json&order=newest&page=2&per_page=2",
+  "results": [
+    {
+      "title": "Statistical Policy Directive No. 8: North American Industry Classification System (NAICS)-Request for Comments on Proposed Updates for 2027",
+      "type": "Notice",
+      "abstract": "The Office of Management and Budget (OMB) seeks public comment on the advisability of adopting the proposed North American Industry Classification System (NAICS) updates for 2027 recommended by its Economic Classification Policy Committee (ECPC).",
+      "document_number": "2026-14086",
+      "html_url": "https://www.federalregister.gov/documents/2026/07/13/2026-14086/statistical-policy-directive-no-8-north-american-industry-classification-system-naics-request-for",
+      "pdf_url": "https://www.govinfo.gov/content/pkg/FR-2026-07-13/pdf/2026-14086.pdf",
+      "public_inspection_pdf_url": null,
+      "publication_date": "2026-07-13",
+      "agencies": [
+        {
+          "raw_name": "OFFICE OF MANAGEMENT AND BUDGET",
+          "name": "Management and Budget Office",
+          "id": 280,
+          "url": "https://www.federalregister.gov/agencies/management-and-budget-office",
+          "json_url": "https://www.federalregister.gov/api/v1/agencies/280",
+          "parent_id": null,
+          "slug": "management-and-budget-office"
+        }
+      ],
+      "excerpts": "hospitality and events, veterinary services, mobile waste compaction, emergency restoration, advanced practice registered nurses, space transportation, fiber-reinforced polymer composites, remanufacturing, event equipment rental, computer and software technology, artificial intelligence"
+    },
+    {
+      "title": "FY 2026 Job Placement and Training-Native American Technology and Manufacturing Grant Pilot Program (IGNITE: Indigenous Growth in New & Innovative Trade Employment); Solicitation of Proposals",
+      "type": "Notice",
+      "abstract": "Through this notice, the Bureau of Indian Affairs announces a forthcoming FY 2026 grant pilot program for Tribal workforce development strategies preparing participants for employment in construction and infrastructure trades and emerging technology sectors, including advanced manufacturing, digital fabrication, artificial intelligence, drone and geospatial systems, and STEM-based workforce training.",
+      "document_number": "2026-14057",
+      "html_url": "https://www.federalregister.gov/documents/2026/07/13/2026-14057/fy-2026-job-placement-and-training-native-american-technology-and-manufacturing-grant-pilot-program",
+      "pdf_url": "https://www.govinfo.gov/content/pkg/FR-2026-07-13/pdf/2026-14057.pdf",
+      "public_inspection_pdf_url": null,
+      "publication_date": "2026-07-13",
+      "agencies": [
+        {
+          "raw_name": "BUREAU OF INDIAN AFFAIRS",
+          "name": "Indian Affairs Bureau",
+          "id": 999,
+          "url": "https://www.federalregister.gov/agencies/indian-affairs-bureau",
+          "json_url": "https://www.federalregister.gov/api/v1/agencies/999",
+          "parent_id": null,
+          "slug": "indian-affairs-bureau"
+        }
+      ],
+      "excerpts": "advanced manufacturing, digital fabrication, artificial intelligence, drone and geospatial systems, and STEM-based workforce training"
+    }
+  ]
+}

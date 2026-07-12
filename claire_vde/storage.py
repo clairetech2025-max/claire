@@ -97,6 +97,30 @@ class VentureRepository:
             row = conn.execute("SELECT * FROM admitted_evidence WHERE checksum = ?", (checksum,)).fetchone()
         return self._evidence_from_row(row) if row else None
 
+    def get_evidence_by_source_record_id(self, source_record_id: str) -> AdmittedEvidence | None:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM admitted_evidence ORDER BY admitted_at DESC").fetchall()
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except Exception:
+                metadata = {}
+            if str(metadata.get("source_record_id") or "") == str(source_record_id or ""):
+                return self._evidence_from_row(row)
+        return None
+
+    def get_evidence_by_content_hash(self, content_hash: str) -> AdmittedEvidence | None:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM admitted_evidence ORDER BY admitted_at DESC").fetchall()
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except Exception:
+                metadata = {}
+            if str(metadata.get("content_hash") or "") == str(content_hash or ""):
+                return self._evidence_from_row(row)
+        return None
+
     def insert_evidence(self, evidence: AdmittedEvidence) -> None:
         with self.connect() as conn:
             conn.execute(
