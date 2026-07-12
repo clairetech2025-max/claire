@@ -90,8 +90,10 @@ Official endpoint used by the collector:
 - `https://www.federalregister.gov/api/v1/documents.json`
 
 The live response returned two admitted evidence items and no errors. The first run admitted:
-- `2026-14086` from `https://www.federalregister.gov/documents/2026/07/13/2026-14086/...`
-- `2026-14057` from `https://www.federalregister.gov/documents/2026/07/13/2026-14057/...`
+- Document ID: `2026-14086`
+  URL: `https://www.federalregister.gov/documents/2026/07/13/2026-14086/statistical-policy-directive-no-8-north-american-industry-classification-system-naics-request-for`
+- Document ID: `2026-14057`
+  URL: `https://www.federalregister.gov/documents/2026/07/13/2026-14057/fy-2026-job-placement-and-training-native-american-technology-and-manufacturing-grant-pilot-program`
 
 Collector metadata included:
 - collector: `federal_register`
@@ -159,6 +161,12 @@ Canonical ARE hashes observed in the live deployment:
 {"status":"ok","truth_spine":{"valid":true,"records":6,"previous_hash":"9b16ed4b1ffc0923a429cc34ebd0e347b09c556e712d708746c58f4f578550fc"},"database":"/data/venture/venture_intelligence.sqlite","doctrine":"ARE Truth Spine is authority; metadata and indexes are downstream."}
 ```
 
+Why records went `0 -> 6` while `admitted_evidence` went `0 -> 4`:
+- 4 records are the admitted Federal Register evidence rows.
+- 2 records are ARE audit / pipeline events:
+  - `vde_collector_run` for the first Federal Register run
+  - `vde_collector_run` for the second Federal Register run
+
 Post-run SQLite counts:
 ```json
 {
@@ -174,6 +182,11 @@ Post-run SQLite counts:
 
 ## 9. Duplicate-Rerun Proof
 The same live Federal Register route was invoked a second time with the same query and the persisted collector state. It continued from the stored cursor and admitted a different pair of records. The already-admitted records were not duplicated.
+
+Important precision:
+- This live rerun did **not** re-fetch the exact same page with the exact same cursor state.
+- It proved that the live containerized API can keep advancing from persisted state without duplicating previously admitted rows.
+- Exact same-page duplicate suppression is still covered by the focused pytest suite, not by this live API proof.
 
 Observed duplicate protection signals:
 - `admitted_evidence` increased from 2 to 4, not 6 or more from re-inserting the first pair
