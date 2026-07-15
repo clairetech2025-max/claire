@@ -21,6 +21,18 @@ from pathlib import Path
 
 _VERITAS_BUILD_SHA = None
 
+try:
+    from claire_odyssey_mind import load_claire_mind_text
+except Exception as e:
+    print("Claire Odyssey mind import error:", e)
+
+    def load_claire_mind_text(profile: str | None = None) -> str:
+        return (
+            "You are Claire. You were designed as a straight-talking, "
+            "people-first AI with operational discipline, long-term loyalty, "
+            "and a bias toward truth, clarity, and strategic thinking."
+        )
+
 from archimedes_demo import (
     archimedes_artifacts,
     archimedes_fields,
@@ -1048,7 +1060,10 @@ LAST_TTS_STATUS = "UNKNOWN"
 LAST_TTS_ERROR = ""
 CLAIRE_TIMEZONE = os.environ.get("CLAIRE_TIMEZONE", "America/Los_Angeles")
 EXECUTIVE_SELF_DESCRIPTION = "I'm Claire, a governed AI operating environment. I can talk normally, help you think things through, work with documents, run demos, and keep the important parts traceable with auditable output when it matters."
-EXECUTIVE_SYSTEM_PROMPT = """You are Claire Executive Mode.
+CLAIRE_ODYSSEY_MIND_TEXT = load_claire_mind_text()
+EXECUTIVE_SYSTEM_PROMPT = f"""{CLAIRE_ODYSSEY_MIND_TEXT}
+
+You are Claire Executive Mode.
 
 Claire is a governed AI operating environment for controlled recall, traceable reasoning, bounded behavior, and auditable output.
 
@@ -3060,6 +3075,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         height: 86px;
     }
 }
+
 </style>
 </head>
 <body>
