@@ -1171,12 +1171,12 @@ body::before {
     gap: 14px;
 }
 
-.brand-box {
-    width: 12px;
-    height: 12px;
-    background: var(--line);
-    border-radius: 2px;
-    box-shadow: 0 0 16px rgba(19,216,255,.9);
+.brand-logo {
+    width: 46px;
+    height: 46px;
+    object-fit: contain;
+    flex: 0 0 auto;
+    filter: drop-shadow(0 0 14px rgba(19,216,255,.55));
 }
 
 .brand-text {
@@ -2704,6 +2704,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
     .main-column {
         min-height: auto;
+        order: 1;
     }
 
     .workspace-panel {
@@ -2714,11 +2715,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         min-height: clamp(340px, 52vh, 500px);
     }
 
-    .shell > .column:nth-of-type(2) {
+    .shell > .column:nth-of-type(1) {
         order: 1;
     }
 
-    .shell > .column:nth-of-type(1) {
+    .shell > .column:nth-of-type(2) {
         order: 2;
     }
 
@@ -2742,6 +2743,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
     .advanced-column {
         grid-template-columns: 1fr;
+        order: 2;
     }
 }
 
@@ -2759,6 +2761,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
     .brand {
         gap: 10px;
+    }
+
+    .brand-logo {
+        width: 42px;
+        height: 42px;
     }
 
     .brand-text {
@@ -2791,6 +2798,18 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         padding: 8px 8px 118px 8px;
     }
 
+    .shell > .column:nth-of-type(1) {
+        order: 1 !important;
+    }
+
+    .shell > .column:nth-of-type(2) {
+        order: 2 !important;
+    }
+
+    .shell > .column:nth-of-type(3) {
+        order: 3 !important;
+    }
+
     .column {
         gap: 8px;
     }
@@ -2798,6 +2817,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     .main-column {
         grid-template-rows: auto minmax(300px, auto) auto auto;
         gap: 8px;
+        order: 1 !important;
+    }
+
+    .advanced-column {
+        order: 2 !important;
     }
 
     .workspace-panel {
@@ -2834,7 +2858,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .input-panel form {
-        grid-template-columns: 1fr 74px;
+        grid-template-columns: 1fr 92px;
         gap: 8px;
     }
 
@@ -2852,15 +2876,19 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     button.action-btn, .send-btn, .mic-btn {
-        min-height: 30px;
-        padding: 5px 8px;
-        font-size: 11px;
+        min-height: 48px;
+        padding: 9px 12px;
+        font-size: 13px;
         letter-spacing: 0.5px;
     }
 
     .file-picker-control {
-        min-height: 30px;
-        padding: 5px 8px;
+        min-height: 48px;
+        padding: 9px 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
     }
 
     .send-btn {
@@ -2879,9 +2907,9 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .toggle-btn {
-        width: 72px;
-        min-height: 34px;
-        font-size: 11px;
+        width: 84px;
+        min-height: 44px;
+        font-size: 13px;
     }
 
     .response-screen {
@@ -2963,7 +2991,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .control-grid {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         gap: 8px;
     }
 
@@ -2993,6 +3021,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         font-size: 21px;
     }
 
+    .brand-logo {
+        width: 38px;
+        height: 38px;
+    }
+
     .hero h1 {
         font-size: 21px;
     }
@@ -3010,7 +3043,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .proof-strip {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
     }
 
     .q-insight-panel {
@@ -3081,7 +3114,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 <body>
 <div class="topbar">
     <div class="brand">
-        <div class="brand-box"></div>
+        <img class="brand-logo" src="/static/logo.png" alt="CLAIRE logo" onerror="this.style.display='none';">
         <div>
             <div class="brand-text">CLAIRE</div>
             <div class="subtitle">EX TENEBRIS COGNITIO</div>
@@ -12088,6 +12121,29 @@ def casual_checkin_reply(prompt: str) -> str:
     return "I'm steady. The runtime is up, the conversation lane is open, and I'm ready for the next thing you want to test."
 
 
+def is_self_evaluation_prompt(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    return (
+        "evaluate your strengths honestly" in cleaned
+        and "ask me three thoughtful questions" in cleaned
+        and "challenge one of my assumptions" in cleaned
+    )
+
+
+def self_evaluation_reply() -> str:
+    return (
+        "I can do that. I need your answers before I can honestly complete Tasks 2-5, because you explicitly said to base the first recommendation only on your answers.\n\n"
+        "Task 1 - three questions:\n"
+        "1. What outcome matters most over the next 30 days: funding, product stability, demos, legal capability, or repository cleanup?\n"
+        "Reasoning summary: priority determines what should be protected first. Confidence: high.\n\n"
+        "2. Which system is most important to prove to an outside reviewer right now: CLAIRE core, Veritas, ARE/Truth Spine, Continuity/Ember, or the public demo stack?\n"
+        "Reasoning summary: the highest-value proof target should drive engineering order. Confidence: high.\n\n"
+        "3. What failure would hurt you most if it happened tomorrow: loss of trust, broken public demo, lost code/history, legal-evidence confusion, or model/runtime instability?\n"
+        "Reasoning summary: the worst credible failure defines the first risk-reduction move. Confidence: medium-high.\n\n"
+        "Next step: answer those three. Then I will identify the first problem to solve, challenge one assumption, explain one complex idea at three levels, and give my honest strongest/weakest capability based on this conversation."
+    )
+
+
 def should_use_governed_runtime(prompt: str) -> bool:
     if not CLAIRE_GOVERNED_RUNTIME or not claire_classify_lane:
         return False
@@ -12165,6 +12221,8 @@ def build_reply(q: str, debug: bool = False):
     direct = public_operator_tone_reply(q)
     if direct:
         return finalize_reply(q, "CLAIRE", direct)
+    if is_self_evaluation_prompt(q):
+        return finalize_reply(q, "CLAIRE", self_evaluation_reply())
     if not CLAIRE_GOVERNED_RUNTIME:
         trace_id = new_trace_id(None)
         return "CLAIRE", "CLAIRE governed runtime is unavailable; normal chat is not allowed to bypass ClaireRuntime.", trace_id
@@ -12662,6 +12720,25 @@ def practical_howto_reply(prompt: str) -> str:
     return ""
 
 
+def _extract_provider_text(response) -> str:
+    content_type = response.headers.get("content-type", "").lower()
+    if "application/json" in content_type:
+        try:
+            data = response.json()
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            for key in ["response", "output", "text", "answer", "result"]:
+                value = str(data.get(key) or "").strip()
+                if value:
+                    return value
+            return str(data)
+    text = response.text.strip()
+    if "<html" in text.lower():
+        text = strip_html_response(text)
+    return text
+
+
 def query_llm(prompt: str, allow_gemini: bool = False) -> str:
 
     dev_mode = prompt.startswith("I_am_battleborn")
@@ -12692,6 +12769,36 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
             return gemini_reply
 
     provider_timeout = int(os.getenv("CLAIRE_PROVIDER_TIMEOUT_SECONDS", "180"))
+
+    def compact_llama_retry() -> requests.Response | None:
+        if dev_mode:
+            return None
+        compact_system_prompt = (
+            "You are Claire Executive Mode. Answer directly, plainly, and honestly. "
+            "Do not flatter. State uncertainty. Provide brief reasoning summaries "
+            "without hidden chain-of-thought. Keep the answer concise."
+        )
+        compact_prompt = f"{compact_system_prompt}\n\nUser: {prompt}"
+        try:
+            retry_response = requests.post(
+                LLM_URL,
+                json={
+                    "prompt": compact_prompt,
+                    "temperature": 0.35,
+                    "max_tokens": 420,
+                },
+                timeout=provider_timeout,
+            )
+            if retry_response.status_code < 400:
+                return retry_response
+        except Exception:
+            return None
+        return None
+
+    def is_llama_400_body(value: str) -> bool:
+        lowered = str(value or "").strip().lower()
+        return lowered.startswith("go provider unavailable: llama status 400")
+
     response = requests.post(
         LLM_URL,
         json={
@@ -12702,16 +12809,57 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
         timeout=provider_timeout,
     )
 
+    if response.status_code == 400 and not dev_mode:
+        retry = compact_llama_retry()
+        if retry is not None:
+            response = retry
+        else:
+            return (
+                "The local model rejected that prompt before generation. "
+                "This is a provider/request limit, not a reasoning answer. "
+                "The likely cause is prompt size after runtime context was added. "
+                "Try the same evaluation as shorter numbered steps, or switch to a larger-context provider."
+            )
+
+    if response.status_code >= 400:
+        detail = response.text.strip()[:220]
+        return f"GO provider unavailable: llama status {response.status_code}. {detail}".strip()
+
     content_type = response.headers.get("content-type", "").lower()
     if "application/json" in content_type:
         data = response.json()
         if isinstance(data, dict):
             for key in ["response", "output", "text", "answer", "result"]:
                 if key in data and data[key]:
-                    return str(data[key]).strip()
+                    value = str(data[key]).strip()
+                    if is_llama_400_body(value):
+                        retry = compact_llama_retry()
+                        if retry is not None:
+                            retry_text = _extract_provider_text(retry)
+                            if retry_text:
+                                return retry_text
+                        return (
+                            "The local model rejected that prompt before generation. "
+                            "This is a provider/request limit, not a reasoning answer. "
+                            "The likely cause is prompt size after runtime context was added. "
+                            "Try the same evaluation as shorter numbered steps, or switch to a larger-context provider."
+                        )
+                    return value
         return str(data)
 
     text = response.text.strip()
+    if is_llama_400_body(text):
+        retry = compact_llama_retry()
+        if retry is not None:
+            retry_text = _extract_provider_text(retry)
+            if retry_text:
+                return retry_text
+        return (
+            "The local model rejected that prompt before generation. "
+            "This is a provider/request limit, not a reasoning answer. "
+            "The likely cause is prompt size after runtime context was added. "
+            "Try the same evaluation as shorter numbered steps, or switch to a larger-context provider."
+        )
     if "<html" in text.lower():
         text = strip_html_response(text)
     return text
