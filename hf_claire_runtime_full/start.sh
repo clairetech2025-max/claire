@@ -19,6 +19,8 @@ export CLAIRE_PUBLIC_DEMO_BUILD="${CLAIRE_PUBLIC_DEMO_BUILD:-0}"
 export CLAIRE_CREATOR_MODE_ENABLED="${CLAIRE_CREATOR_MODE_ENABLED:-0}"
 export VERITAS_TRADING_MODE="${VERITAS_TRADING_MODE:-paper}"
 export VERITAS_ENABLE_LIVE_TRADING="${VERITAS_ENABLE_LIVE_TRADING:-false}"
+export CLAIRE_CORE_SHADOW_MODE="${CLAIRE_CORE_SHADOW_MODE:-true}"
+export CLAIRE_CORE_ENABLED="${CLAIRE_CORE_ENABLED:-false}"
 
 mkdir -p \
   "$CLAIRE_RUNTIME_DATA_DIR/are" \
@@ -30,43 +32,4 @@ mkdir -p \
 # Do not copy Azure .env, private ARE memory, DBs, logs, generated indexes, or legal files into this container.
 # Secrets must be supplied through Hugging Face Space secrets by name only.
 
-pids=()
-
-cleanup() {
-  for pid in "${pids[@]:-}"; do
-    if kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-    fi
-  done
-}
-trap cleanup EXIT INT TERM
-
-wait_for_url() {
-  local name="$1"
-  local url="$2"
-  local tries="${3:-60}"
-  for _ in $(seq 1 "$tries"); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
-      echo "$name ready: $url"
-      return 0
-    fi
-    sleep 1
-  done
-  echo "$name failed readiness: $url" >&2
-  return 1
-}
-
-/app/venv/bin/python -m uvicorn ARE_SERVER:app --host 127.0.0.1 --port 8002 &
-pids+=("$!")
-
-/app/venv/bin/python -m uvicorn claire_ingest_bridge:app --host 127.0.0.1 --port 8081 &
-pids+=("$!")
-
-/app/bin/claire-go &
-pids+=("$!")
-
-wait_for_url "ARE" "$ARE_URL/health"
-wait_for_url "Ingest" "$INGEST_BASE_URL/health"
-wait_for_url "GO" "$LLM_URL/health"
-
-exec /app/venv/bin/python -m uvicorn hf_runtime_adapter:app --host 0.0.0.0 --port "$PORT"
+exec /app/venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port "$PORT"

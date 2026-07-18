@@ -26,20 +26,33 @@ def should_exclude(path: Path, patterns: list[str]) -> bool:
     return False
 
 
-def copy_source(root: Path, source: str, target: Path, excludes: list[str]) -> None:
+def copy_source(
+    root: Path,
+    source: str,
+    target: Path,
+    excludes: list[str],
+    *,
+    flatten: bool = False,
+) -> None:
     source_path = Path(source)
     if not source_path.is_absolute():
         source_path = root / source_path
     if not source_path.exists():
         return
-    relative_name = source_path.name if source_path.is_dir() else source_path.name
-    destination = target / relative_name
+    destination = target / source_path.name
     if source_path.is_file():
+        rel = source_path.relative_to(root) if source_path.is_relative_to(root) else Path(source_path.name)
+        if should_exclude(rel, excludes):
+            return
+        if flatten:
+            destination = target / source_path.name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, destination)
         return
     for item in source_path.rglob("*"):
         rel = item.relative_to(root) if item.is_relative_to(root) else item.relative_to(source_path.parent)
+        if flatten:
+            rel = item.relative_to(source_path)
         if should_exclude(rel, excludes):
             continue
         dest = target / rel
@@ -61,8 +74,14 @@ def main() -> None:
     if args.output.exists():
         shutil.rmtree(args.output)
     args.output.mkdir(parents=True)
+    root_source = manifest.get("root_source_path")
+    if root_source:
+        copy_source(root, str(root_source), args.output, manifest.get("exclude", []), flatten=True)
     for source in manifest["source_paths"]:
         copy_source(root, source, args.output, manifest.get("exclude", []))
+    for pattern in manifest.get("source_globs", []):
+        for path in sorted(root.glob(pattern)):
+            copy_source(root, path.as_posix(), args.output, manifest.get("exclude", []))
     (args.output / "deployment.manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
