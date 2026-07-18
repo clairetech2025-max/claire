@@ -19,6 +19,23 @@ from urllib.parse import quote_plus
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from claire_runtime_truth import RuntimeTruthEvent
+
+APP_DIR = Path(__file__).resolve().parent
+_VERITAS_BUILD_SHA = None
+
+try:
+    from claire_odyssey_mind import load_claire_mind_text
+except Exception as e:
+    print("Claire Odyssey mind import error:", e)
+
+    def load_claire_mind_text(profile: str | None = None) -> str:
+        return (
+            "You are Claire. You were designed as a straight-talking, "
+            "people-first AI with operational discipline, long-term loyalty, "
+            "and a bias toward truth, clarity, and strategic thinking."
+        )
+
 from archimedes_demo import (
     archimedes_artifacts,
     archimedes_fields,
@@ -29,9 +46,33 @@ from archimedes_demo import (
 )
 
 try:
+    from veritas_legal import EvidenceEngine, claire_explains_summary, safe_id
+except Exception as e:
+    print("veritas legal import error:", e)
+    EvidenceEngine = None
+    claire_explains_summary = None
+    safe_id = None
+
+try:
     from zoneinfo import ZoneInfo
 except Exception:
     ZoneInfo = None
+
+
+def _veritas_build_sha() -> str:
+    global _VERITAS_BUILD_SHA
+    if _VERITAS_BUILD_SHA is not None:
+        return _VERITAS_BUILD_SHA
+    try:
+        _VERITAS_BUILD_SHA = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        _VERITAS_BUILD_SHA = "unknown"
+    return _VERITAS_BUILD_SHA
 
 try:
     from claire_scholar import is_scholar_query, scholar_reply
@@ -49,6 +90,7 @@ try:
     from lane_router import extract_candidates
     from relevance_gate import compact_candidate, gate_retrieval_candidates
     from answer_planner import conceptual_answer, final_answer_mode, should_use_reasoning_first
+    from claire_runtime_router import route_chat_message
 except Exception as e:
     print("memory routing import error:", e)
 
@@ -83,9 +125,31 @@ except Exception as e:
     def should_use_reasoning_first(intent: dict):
         return False
 
+    def route_chat_message(q: str, provider_generate, are_recall=None, document_recall=None, useful_reply=None):
+        class _FallbackRoute:
+            source = "GO"
+            reply = provider_generate(q)
+            trace_payload = {"type": "phase_one_route_unavailable", "steps": []}
+            writeback_policy = {}
+        return _FallbackRoute()
+
+try:
+    from claire_runtime import ClaireRuntime
+    from lane_classifier import classify_lane as claire_classify_lane
+    from original_are_bridge import append_original_are_memory, read_original_are_history
+except Exception as e:
+    print("governed runtime import error:", e)
+    ClaireRuntime = None
+    claire_classify_lane = None
+    append_original_are_memory = None
+    read_original_are_history = None
+
+CLAIRE_GOVERNED_RUNTIME = ClaireRuntime() if ClaireRuntime else None
+
 
 def load_keys_env():
-    env_path = "/home/LuciusPrime/claire/claire_keys.env"
+    configured_path = os.environ.get("CLAIRE_KEYS_ENV_PATH")
+    env_path = configured_path or str(APP_DIR / "claire_keys.env")
     try:
         with open(env_path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
@@ -94,6 +158,9 @@ def load_keys_env():
                     continue
                 key, value = line.split("=", 1)
                 os.environ.setdefault(key.strip(), value.strip())
+    except FileNotFoundError:
+        if configured_path:
+            print("key env load error:", f"missing configured file: {env_path}")
     except Exception as e:
         print("key env load error:", e)
 
@@ -189,21 +256,19 @@ def recent_uploads(limit: int = 5):
 
 
 def last_uploaded_filename() -> str:
+    try:
+        upload_dir = Path(UPLOAD_DIR)
+        if upload_dir.exists():
+            files = [p for p in upload_dir.iterdir() if p.is_file()]
+            if files:
+                newest = max(files, key=lambda p: p.stat().st_mtime)
+                return re.sub(r"^\d{8}_\d{6}_", "", newest.name)
+    except Exception as e:
+        print("last upload filesystem lookup error:", e)
     uploads = recent_uploads(1)
     if uploads:
         return str(uploads[0].get("filename") or "")
-    try:
-        upload_dir = Path(UPLOAD_DIR)
-        if not upload_dir.exists():
-            return ""
-        files = [p for p in upload_dir.iterdir() if p.is_file()]
-        if not files:
-            return ""
-        newest = max(files, key=lambda p: p.stat().st_mtime)
-        return re.sub(r"^\d{8}_\d{6}_", "", newest.name)
-    except Exception as e:
-        print("last upload lookup error:", e)
-        return ""
+    return ""
 
 
 def is_ingest_status_query(query: str) -> bool:
@@ -962,22 +1027,35 @@ try:
 except Exception:
     pass
 
-ARE_URL = "http://127.0.0.1:8002"
-LLM_URL = "http://127.0.0.1:8080"
+ARE_URL = os.environ.get("ARE_URL", "http://127.0.0.1:8002").rstrip("/")
+LLM_URL = os.environ.get("LLM_URL", "http://127.0.0.1:8080").rstrip("/")
 ARE_SPECTACLE_URL = os.environ.get("ARE_SPECTACLE_URL", "http://127.0.0.1:8010").rstrip("/")
-REFLECTION_VAULT = "/home/LuciusPrime/claire/data/reflection_capsules.jsonl"
-SESSION_MEMORY = "/home/LuciusPrime/claire/data/session_memory.jsonl"
-DURABLE_MEMORY = "/home/LuciusPrime/claire/data/durable_memory.jsonl"
-TMF_SNAPSHOTS = "/home/LuciusPrime/claire/data/conversation_tmf.jsonl"
-UPLOAD_DIR = "/home/LuciusPrime/claire/data/uploads"
-TRACE_LOG = "/home/LuciusPrime/claire/data/traces.jsonl"
-FEEDBACK_LOG = "/home/LuciusPrime/claire/data/feedback.jsonl"
-OFFICE_TASK_LOG = "/home/LuciusPrime/claire/data/office_tasks.jsonl"
-DEMO_REPORT_DIR = "/home/LuciusPrime/claire/data/demo_reports"
-DRIVE_RESEARCH_CACHE = "/home/LuciusPrime/claire/data/drive_research_cache.jsonl"
-CRYPTO_TRACE_LOG = "/home/LuciusPrime/claire/data/crypto_paper_trades.jsonl"
-KRAKEN_HISTORY_DIR = "/home/LuciusPrime/claire/data/kraken_history"
-STATE_PARKS_CASE_DIR = "/home/LuciusPrime/claire/data/state_parks_case"
+CLAIRE_BASE_DIR = Path(os.environ.get("CLAIRE_BASE_DIR", str(APP_DIR))).resolve()
+CLAIRE_RUNTIME_DATA_DIR = Path(
+    os.environ.get("CLAIRE_RUNTIME_DATA_DIR", str(CLAIRE_BASE_DIR / "data"))
+).resolve()
+CLAIRE_STATE_DIR = Path(
+    os.environ.get("CLAIRE_STATE_DIR", str(CLAIRE_BASE_DIR / "claire_state"))
+).resolve()
+REFLECTION_VAULT = str(CLAIRE_RUNTIME_DATA_DIR / "reflection_capsules.jsonl")
+SESSION_MEMORY = str(CLAIRE_RUNTIME_DATA_DIR / "session_memory.jsonl")
+DURABLE_MEMORY = str(CLAIRE_RUNTIME_DATA_DIR / "durable_memory.jsonl")
+TMF_SNAPSHOTS = str(CLAIRE_RUNTIME_DATA_DIR / "conversation_tmf.jsonl")
+MEMORY_VAULT = str(CLAIRE_RUNTIME_DATA_DIR / "memory_vault.jsonl")
+UPLOAD_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "uploads")
+VERITAS_LEGAL_STATE_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "veritas_legal_gui")
+VERITAS_MOBILE_STATE_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "veritas_mobile")
+MAX_INGEST_UPLOAD_BYTES = int(os.environ.get("CLAIRE_MAX_INGEST_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
+UPLOAD_DISK_SAFETY_BYTES = int(os.environ.get("CLAIRE_UPLOAD_DISK_SAFETY_BYTES", str(256 * 1024 * 1024)))
+UPLOAD_WRITE_CHUNK_BYTES = int(os.environ.get("CLAIRE_UPLOAD_WRITE_CHUNK_BYTES", str(4 * 1024 * 1024)))
+TRACE_LOG = os.environ.get("CLAIRE_TRACE_PATH", str(CLAIRE_RUNTIME_DATA_DIR / "traces.jsonl"))
+FEEDBACK_LOG = str(CLAIRE_RUNTIME_DATA_DIR / "feedback.jsonl")
+OFFICE_TASK_LOG = str(CLAIRE_RUNTIME_DATA_DIR / "office_tasks.jsonl")
+DEMO_REPORT_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "demo_reports")
+DRIVE_RESEARCH_CACHE = str(CLAIRE_RUNTIME_DATA_DIR / "drive_research_cache.jsonl")
+CRYPTO_TRACE_LOG = str(CLAIRE_RUNTIME_DATA_DIR / "crypto_paper_trades.jsonl")
+KRAKEN_HISTORY_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "kraken_history")
+STATE_PARKS_CASE_DIR = str(CLAIRE_RUNTIME_DATA_DIR / "state_parks_case")
 MEMORY_PERF_DOCUMENT = os.environ.get("CLAIRE_MEMORY_PERF_DOCUMENT", "").strip()
 CLAIRE_PUBLIC_IP = os.environ.get("CLAIRE_PUBLIC_IP", "20.97.65.94").strip()
 PUBLIC_DEMO_BUILD = os.environ.get("CLAIRE_PUBLIC_DEMO_BUILD", "1").strip().lower() not in {"0", "false", "no"}
@@ -989,9 +1067,14 @@ DRIVE_OAUTH_TOKEN_JSON = os.environ.get("CLAIRE_GOOGLE_OAUTH_TOKEN_JSON", "").st
 DRIVE_SERVICE_ACCOUNT_JSON = os.environ.get("CLAIRE_GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 KRAKEN_PUBLIC_API = "https://api.kraken.com/0/public"
 LAST_GEMINI_ERROR = ""
+LAST_TTS_STATUS = "UNKNOWN"
+LAST_TTS_ERROR = ""
 CLAIRE_TIMEZONE = os.environ.get("CLAIRE_TIMEZONE", "America/Los_Angeles")
-EXECUTIVE_SELF_DESCRIPTION = "I'm Claire. I can talk normally, help you think things through, work with documents, run demos, and keep the important parts traceable when it matters."
-EXECUTIVE_SYSTEM_PROMPT = """You are Claire Executive Mode.
+EXECUTIVE_SELF_DESCRIPTION = "I'm Claire, a governed AI operating environment. I can talk normally, help you think things through, work with documents, run demos, and keep the important parts traceable with auditable output when it matters."
+CLAIRE_ODYSSEY_MIND_TEXT = load_claire_mind_text()
+EXECUTIVE_SYSTEM_PROMPT = f"""{CLAIRE_ODYSSEY_MIND_TEXT}
+
+You are Claire Executive Mode.
 
 Claire is a governed AI operating environment for controlled recall, traceable reasoning, bounded behavior, and auditable output.
 
@@ -1099,12 +1182,12 @@ body::before {
     gap: 14px;
 }
 
-.brand-box {
-    width: 12px;
-    height: 12px;
-    background: var(--line);
-    border-radius: 2px;
-    box-shadow: 0 0 16px rgba(19,216,255,.9);
+.brand-logo {
+    width: 46px;
+    height: 46px;
+    object-fit: contain;
+    flex: 0 0 auto;
+    filter: drop-shadow(0 0 14px rgba(19,216,255,.55));
 }
 
 .brand-text {
@@ -1264,11 +1347,12 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
 .input-panel form {
     display: grid;
-    grid-template-columns: 1fr 74px 86px;
+    grid-template-columns: minmax(0, 1fr) 74px 86px 86px;
     gap: 9px;
 }
 
-.input-panel input {
+.input-panel input,
+.input-panel textarea {
     width: 100%;
     padding: 13px 15px;
     border: 1px solid rgba(19,216,255,0.25);
@@ -2461,6 +2545,105 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     letter-spacing: 1px;
 }
 
+.turn-control-panel {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid rgba(19,216,255,.24);
+    background: rgba(2,10,18,.58);
+    box-shadow: inset 0 0 18px rgba(19,216,255,.06);
+}
+
+.turn-state-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.turn-state-chip {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    padding: 7px 10px;
+    border: 1px solid rgba(106,255,156,.42);
+    color: var(--good);
+    background: rgba(6,29,24,.72);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.turn-state-chip.thinking,
+.turn-state-chip.orienting {
+    border-color: rgba(19,216,255,.55);
+    color: #8df6ff;
+    background: rgba(3,24,38,.78);
+}
+
+.turn-state-chip.speaking {
+    border-color: rgba(217,119,255,.55);
+    color: #ffb8f1;
+    background: rgba(30,10,36,.72);
+}
+
+.turn-state-chip.interrupted,
+.turn-state-chip.error {
+    border-color: rgba(255,93,125,.72);
+    color: #ff8aa1;
+    background: rgba(40,8,18,.78);
+}
+
+.turn-hint,
+.turn-metrics {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.turn-options {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.turn-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.turn-mini-btn {
+    min-height: 40px;
+    border: 1px solid rgba(19,216,255,.4);
+    background: rgba(5,22,36,.95);
+    color: var(--text);
+    padding: 0 12px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.turn-mini-btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+#queryInput.turn-textarea {
+    min-height: 82px;
+    resize: vertical;
+    line-height: 1.45;
+    padding-top: 14px;
+    padding-bottom: 14px;
+}
+
 .creator-status {
     color: var(--muted);
 }
@@ -2517,14 +2700,16 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
 .voice-visual-inline {
     position: fixed;
-    left: 288px;
-    right: 288px;
-    bottom: 8px;
+    left: clamp(190px, 21vw, 318px);
+    right: clamp(190px, 21vw, 318px);
+    top: 58px;
     z-index: 80;
     grid-column: 2 / 3;
     width: auto;
-    margin: -6px 0 0 0;
+    margin: 0;
     pointer-events: none;
+    opacity: 0.96;
+    mix-blend-mode: screen;
 }
 
 .wave-wrap {
@@ -2534,7 +2719,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     --wave-pink-r: 255;
     --wave-pink-g: 54;
     --wave-pink-b: 214;
-    height: 132px;
+    height: 152px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2546,7 +2731,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
 .wave-stage {
     width: 100%;
-    height: 128px;
+    height: 148px;
     overflow: hidden;
     position: relative;
 }
@@ -2630,6 +2815,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
     .main-column {
         min-height: auto;
+        order: 1;
     }
 
     .workspace-panel {
@@ -2640,11 +2826,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         min-height: clamp(340px, 52vh, 500px);
     }
 
-    .shell > .column:nth-of-type(2) {
+    .shell > .column:nth-of-type(1) {
         order: 1;
     }
 
-    .shell > .column:nth-of-type(1) {
+    .shell > .column:nth-of-type(2) {
         order: 2;
     }
 
@@ -2657,6 +2843,8 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         grid-column: 1 / -1;
         left: 14px;
         right: 14px;
+        top: auto;
+        bottom: 10px;
     }
 
     .monitor-grid {
@@ -2666,6 +2854,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
     .advanced-column {
         grid-template-columns: 1fr;
+        order: 2;
     }
 }
 
@@ -2683,6 +2872,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
     .brand {
         gap: 10px;
+    }
+
+    .brand-logo {
+        width: 42px;
+        height: 42px;
     }
 
     .brand-text {
@@ -2715,6 +2909,18 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         padding: 8px 8px 118px 8px;
     }
 
+    .shell > .column:nth-of-type(1) {
+        order: 1 !important;
+    }
+
+    .shell > .column:nth-of-type(2) {
+        order: 2 !important;
+    }
+
+    .shell > .column:nth-of-type(3) {
+        order: 3 !important;
+    }
+
     .column {
         gap: 8px;
     }
@@ -2722,6 +2928,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     .main-column {
         grid-template-rows: auto minmax(300px, auto) auto auto;
         gap: 8px;
+        order: 1 !important;
+    }
+
+    .advanced-column {
+        order: 2 !important;
     }
 
     .workspace-panel {
@@ -2758,7 +2969,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .input-panel form {
-        grid-template-columns: 1fr 74px;
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 8px;
     }
 
@@ -2766,25 +2977,31 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         grid-template-columns: 1fr;
     }
 
-    .input-panel input {
+    .input-panel input,
+    .input-panel textarea {
         grid-column: 1 / -1;
     }
 
-    .input-panel input {
+    .input-panel input,
+    .input-panel textarea {
         padding: 13px 14px;
         font-size: 16px;
     }
 
     button.action-btn, .send-btn, .mic-btn {
-        min-height: 30px;
-        padding: 5px 8px;
-        font-size: 11px;
+        min-height: 48px;
+        padding: 9px 12px;
+        font-size: 13px;
         letter-spacing: 0.5px;
     }
 
     .file-picker-control {
-        min-height: 30px;
-        padding: 5px 8px;
+        min-height: 48px;
+        padding: 9px 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
     }
 
     .send-btn {
@@ -2803,9 +3020,9 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .toggle-btn {
-        width: 72px;
-        min-height: 34px;
-        font-size: 11px;
+        width: 84px;
+        min-height: 44px;
+        font-size: 13px;
     }
 
     .response-screen {
@@ -2887,7 +3104,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .control-grid {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         gap: 8px;
     }
 
@@ -2896,6 +3113,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         left: 8px;
         right: 8px;
         bottom: 6px;
+        top: auto;
     }
 
     .wave-wrap {
@@ -2916,6 +3134,11 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         font-size: 21px;
     }
 
+    .brand-logo {
+        width: 38px;
+        height: 38px;
+    }
+
     .hero h1 {
         font-size: 21px;
     }
@@ -2933,7 +3156,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .proof-strip {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
     }
 
     .q-insight-panel {
@@ -2998,12 +3221,13 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         height: 86px;
     }
 }
+
 </style>
 </head>
 <body>
 <div class="topbar">
     <div class="brand">
-        <div class="brand-box"></div>
+        <img class="brand-logo" src="/static/logo.png" alt="CLAIRE logo" onerror="this.style.display='none';">
         <div>
             <div class="brand-text">CLAIRE</div>
             <div class="subtitle">EX TENEBRIS COGNITIO</div>
@@ -3030,18 +3254,31 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
             <div class="stream-status" id="streamStatus">Runtime ready.</div>
         </div>
 
-        <div class="panel input-panel">
-            <div class="panel-title">Talk To Me</div>
-            <form id="queryForm" action="/" method="get" onsubmit="submitQuery(event); return false;">
-                <input id="queryInput" name="q" placeholder="Speak to Claire..." autocomplete="off" />
-                <button class="mic-btn" id="micButton" type="button" onclick="toggleMic()">MIC</button>
-                <button class="send-btn" type="button" onclick="submitQuery(event)">Send</button>
-            </form>
-            <div class="voice-toggle-row" style="margin:12px 0 0 0;">
-                <div class="voice-msg" id="voiceMsg">Voice auto-speak ready.</div>
-                <button class="toggle-btn on" id="voiceToggle" type="button" onclick="toggleVoice()">ON</button>
+            <div class="panel input-panel">
+                <div class="panel-title">Talk To Me</div>
+                <form id="queryForm" action="/" method="get" onsubmit="submitQuery(event); return false;">
+                    <textarea id="queryInput" class="turn-textarea" name="q" placeholder="Ask Claire anything..." autocomplete="off" rows="3"></textarea>
+                    <button class="mic-btn" id="micButton" type="button" onclick="toggleMic()">MIC</button>
+                    <button class="send-btn" id="doneButton" type="button" onclick="commitTurnExplicit('done')">Done</button>
+                    <button class="send-btn" type="button" onclick="submitQuery(event)">Send</button>
+                </form>
+                <div class="turn-control-panel" aria-live="polite">
+                    <div class="turn-state-row">
+                        <div class="turn-state-chip" id="turnStateChip">YOUR TURN - CLAIRE IS WAITING</div>
+                        <button class="turn-mini-btn" id="reopenTurnButton" type="button" onclick="reopenTurnDraft()" disabled>Reopen Draft</button>
+                    </div>
+                    <div class="turn-hint" id="turnHint">Enter adds a line. Ctrl+Enter, Send, Done, or saying "over" commits the full turn.</div>
+                    <div class="turn-options">
+                        <label><input id="silenceAutoCommitToggle" type="checkbox" /> Auto-commit after long silence</label>
+                        <button class="turn-mini-btn" id="playIntroButton" type="button" onclick="playClaireIntroduction()">Play Introduction</button>
+                    </div>
+                    <div class="turn-metrics" id="turnMetrics">3CRP: 0 fragments merged | 0 premature calls prevented | auto-send off</div>
+                </div>
+                <div class="voice-toggle-row" style="margin:12px 0 0 0;">
+                    <div class="voice-msg" id="voiceMsg">Voice playback off by default. Use ON when you want spoken responses.</div>
+                    <button class="toggle-btn on" id="voiceToggle" type="button" onclick="toggleVoice()">ON</button>
+                </div>
             </div>
-        </div>
 
         <div class="panel upload-panel">
             <div class="panel-title">Document Ingest</div>
@@ -3049,8 +3286,10 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                 <label class="file-picker-control" for="docFile">Select Files</label>
                 <input class="hidden-file-input" id="docFile" name="file" type="file" accept=".txt,.md,.py,.pdf,.docx,.csv,.json,.jsonl" multiple />
                 <button class="send-btn" type="submit">Ingest</button>
+                <button class="send-btn" id="veritasLegalBtn" type="button">Run Veritas Legal</button>
             </form>
-            <div class="upload-status" id="uploadStatus">Select files, then ingest. TXT, MD, PY, PDF, DOCX, CSV, JSONL accepted. 12MB max per file.</div>
+            <div class="upload-status" id="uploadStatus">Step 1: select a file and press Ingest. Step 2: press Run Veritas Legal.</div>
+            <div class="upload-status" id="veritasLegalStatus">Veritas organizes the latest uploaded local copy. Evidence organization only; not legal advice.</div>
         </div>
 
         <div class="proof-strip" aria-label="Claire architecture proof controls">
@@ -3179,6 +3418,14 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                         <span class="monitor-label">Recall</span>
                         <span class="monitor-value">MEMORY</span>
                     </button>
+                    <button class="monitor-box accent-cyan" id="truthSpineBox" type="button" data-diagnostic="truth_spine" aria-label="Show Truth Spine status">
+                        <span class="monitor-label">Truth Spine</span>
+                        <span class="monitor-value" id="truthSpineStatus">UNKNOWN</span>
+                    </button>
+                    <button class="monitor-box accent-amber" id="temporalBox" type="button" data-diagnostic="temporal" aria-label="Show Temporal Engine status">
+                        <span class="monitor-label">Temporal</span>
+                        <span class="monitor-value" id="temporalStatus">UNKNOWN</span>
+                    </button>
                     <button class="monitor-box accent-pink" id="buildBox" type="button" data-diagnostic="build" aria-label="Show build state">
                         <span class="monitor-label">Build</span>
                         <span class="monitor-value">PUBLIC</span>
@@ -3238,7 +3485,7 @@ Trace ID: NONE</div>
 </div>
 
 <script>
-const CLIENT_BUILD = "claire-gui-stream-stability-20260508-001";
+const CLIENT_BUILD = "claire-gui-long-prompt-stream-post-20260615-001";
 const LAST_CLIENT_BUILD = localStorage.getItem("claireClientBuild");
 if (LAST_CLIENT_BUILD !== CLIENT_BUILD) {
     localStorage.setItem("claireClientBuild", CLIENT_BUILD);
@@ -3257,8 +3504,16 @@ let currentAudio = null;
 let audioContext = null;
 let analyser = null;
 let analyserData = null;
+let analyserFreqData = null;
 let voiceMeterFrame = null;
 let audioSource = null;
+let browserVoiceFrame = null;
+let browserVoicePulse = 0;
+let browserVoiceTextProfile = [];
+let browserVoiceStartedAt = 0;
+let browserVoiceDuration = 1;
+let browserVoiceLastBoundaryAt = 0;
+let browserVoiceTempoMs = 190;
 let voiceRunId = 0;
 let recognition = null;
 let micListening = false;
@@ -3274,7 +3529,70 @@ let currentAssistantMessage = null;
 let landingGreetingPlayed = sessionStorage.getItem("claireLandingGreetingPlayed") === "true";
 let lastTraceId = "";
 let voiceEnabled = localStorage.getItem("claireVoiceEnabled");
-voiceEnabled = voiceEnabled === null ? true : voiceEnabled === "true";
+voiceEnabled = voiceEnabled === null ? false : voiceEnabled === "true";
+const TURN_STORAGE_KEY = "claire3crpDraft";
+const TURN_METRICS_KEY = "claire3crpMetrics";
+const SILENCE_AUTO_COMMIT_KEY = "claire3crpSilenceAutoCommit";
+const LONG_SILENCE_MS = 12000;
+const THREE_CRP_STATES = {
+    IDLE: "IDLE",
+    USER_FLOOR_OPEN: "USER_FLOOR_OPEN",
+    USER_DRAFTING: "USER_DRAFTING",
+    COMPLETION_CHECK: "COMPLETION_CHECK",
+    TURN_COMMITTED: "TURN_COMMITTED",
+    ORIENTING: "ORIENTING",
+    ROUTING: "ROUTING",
+    THINKING: "THINKING",
+    CLAIRE_SPEAKING: "CLAIRE_SPEAKING",
+    INTERRUPTED: "INTERRUPTED",
+    RETURNING_FLOOR: "RETURNING_FLOOR",
+};
+let silenceAutoCommitEnabled = localStorage.getItem(SILENCE_AUTO_COMMIT_KEY) === "true";
+let turnSilenceTimer = null;
+let micStopShouldCommit = false;
+let turnController = {
+    state: THREE_CRP_STATES.IDLE,
+    fragments: [],
+    draft: "",
+    openedAt: 0,
+    committedPrompt: "",
+    completion: null,
+    gyro: null,
+    commitTrigger: "",
+};
+let turnMetrics = (() => {
+    try {
+        return Object.assign({
+            fragmentsMerged: 0,
+            prematureModelCallsPrevented: 0,
+            retrievalCallsPrevented: 0,
+            generatedTokensAvoided: 0,
+            inputTokensAvoided: 0,
+            committedTurns: 0,
+            explicitCommits: 0,
+            automaticCommits: 0,
+            falseEarlyCommits: 0,
+            falseDelayedCommits: 0,
+            ttsInterruptions: 0,
+            totalOpenTurnMs: 0,
+        }, JSON.parse(localStorage.getItem(TURN_METRICS_KEY) || "{}"));
+    } catch (err) {
+        return {
+            fragmentsMerged: 0,
+            prematureModelCallsPrevented: 0,
+            retrievalCallsPrevented: 0,
+            generatedTokensAvoided: 0,
+            inputTokensAvoided: 0,
+            committedTurns: 0,
+            explicitCommits: 0,
+            automaticCommits: 0,
+            falseEarlyCommits: 0,
+            falseDelayedCommits: 0,
+            ttsInterruptions: 0,
+            totalOpenTurnMs: 0,
+        };
+    }
+})();
 const PUBLIC_DEMO_BUILD = {str(PUBLIC_DEMO_BUILD).lower()};
 const CREATOR_MODE_ENABLED = {str(CREATOR_MODE_ENABLED).lower()};
 const DEMO_GUIDE_TEXT = `CLAIRE SESSION WORKSPACE
@@ -3369,7 +3687,7 @@ function resizeVoiceCanvas() {
     canvas.height = Math.max(1, Math.floor(rect.height * ratio));
 }
 
-function drawWave(samples, intensity = 0.25) {
+function drawWave(samples, intensity = 0.25, tempo = 1, detail = 0.35) {
     const canvas = document.getElementById("voiceCanvas");
     if (!canvas) return;
     resizeVoiceCanvas();
@@ -3380,6 +3698,10 @@ function drawWave(samples, intensity = 0.25) {
     const color = moodColors[currentMood] || moodColors.calm;
     const pink = [255, 54, 214];
     const violet = [145, 83, 255];
+    const t = performance.now() / 1000;
+    const safeIntensity = Math.max(0, Math.min(1, intensity));
+    const safeTempo = Math.max(0.45, Math.min(2.4, tempo || 1));
+    const safeDetail = Math.max(0, Math.min(1, detail || 0));
     ctx.clearRect(0, 0, w, h);
 
     const gradient = ctx.createLinearGradient(0, 0, w, 0);
@@ -3391,38 +3713,61 @@ function drawWave(samples, intensity = 0.25) {
     gradient.addColorStop(0.82, `rgba(${color[0]},${color[1]},${color[2]},0.72)`);
     gradient.addColorStop(1, `rgba(${pink[0]},${pink[1]},${pink[2]},0.02)`);
 
-    ctx.shadowBlur = 18 + intensity * 34;
+    const n = samples.length;
+    const amp = h * (0.18 + safeIntensity * 0.31);
+    const centerLift = Math.sin(t * safeTempo * 5.0) * h * 0.012 * safeIntensity;
+
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowBlur = 18 + safeIntensity * 38;
     ctx.shadowColor = `rgba(${pink[0]},${pink[1]},${pink[2]},0.82)`;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = Math.max(2, h * 0.016);
-    ctx.strokeStyle = gradient;
-    ctx.beginPath();
 
-    const n = samples.length;
-    for (let i = 0; i < n; i++) {
-        const x = (i / (n - 1)) * w;
-        const y = mid + samples[i] * h * 0.46;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+    for (let layer = 0; layer < 3; layer++) {
+        const layerAlpha = [0.92, 0.54, 0.26][layer];
+        const layerOffset = (layer - 1) * h * 0.095 * (0.4 + safeIntensity);
+        const layerScale = [1.0, 0.62, 0.38][layer];
+        ctx.lineWidth = Math.max(1.4, h * [0.018, 0.011, 0.007][layer]);
+        ctx.strokeStyle = layer === 0 ? gradient : `rgba(${color[0]},${color[1]},${color[2]},${layerAlpha})`;
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const p = i / (n - 1);
+            const x = p * w;
+            const shimmer = Math.sin(p * Math.PI * (18 + layer * 6) - t * safeTempo * (3.2 + layer)) * safeDetail * 0.035;
+            const y = mid + centerLift + layerOffset + (samples[i] + shimmer) * amp * layerScale;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
     }
-    ctx.stroke();
 
-    ctx.shadowBlur = 10 + intensity * 22;
-    ctx.lineWidth = Math.max(1, h * 0.008);
-    ctx.strokeStyle = `rgba(255,54,214,${0.34 + intensity * 0.34})`;
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-        const x = (i / (n - 1)) * w;
-        const y = mid - samples[i] * h * 0.38;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+    ctx.shadowBlur = 12 + safeIntensity * 24;
+    ctx.lineWidth = Math.max(1, h * 0.009);
+    ctx.strokeStyle = `rgba(255,255,255,${0.18 + safeIntensity * 0.42})`;
+    for (const sign of [-1, 1]) {
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const p = i / (n - 1);
+            const x = p * w;
+            const ripple = Math.sin(p * Math.PI * 42 + t * safeTempo * 6.5) * 0.025 * safeIntensity;
+            const y = mid + sign * (Math.abs(samples[i] + ripple) * amp * 0.74 + h * 0.018);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
     }
-    ctx.stroke();
 
+    const beatAlpha = 0.08 + safeIntensity * 0.22;
+    const beatWidth = Math.max(2, w * (0.09 + safeIntensity * 0.08));
+    const beatX = (0.5 + Math.sin(t * safeTempo * 2.2) * 0.18) * w;
+    const beam = ctx.createLinearGradient(beatX - beatWidth, 0, beatX + beatWidth, 0);
+    beam.addColorStop(0, "rgba(255,255,255,0)");
+    beam.addColorStop(0.5, `rgba(255,255,255,${beatAlpha})`);
+    beam.addColorStop(1, "rgba(255,255,255,0)");
     ctx.shadowBlur = 0;
-    ctx.fillStyle = `rgba(255,54,214,${0.04 + intensity * 0.09})`;
-    ctx.fillRect(0, mid - 1, w, 2);
+    ctx.fillStyle = beam;
+    ctx.fillRect(Math.max(0, beatX - beatWidth), mid - h * 0.34, beatWidth * 2, h * 0.68);
+    ctx.globalCompositeOperation = "source-over";
 }
 
 function drawIdleCanvas() {
@@ -3438,7 +3783,7 @@ function drawIdleCanvas() {
             Math.sin(p * Math.PI * 21 - t * 0.55) * 0.018;
         samples.push(wave * envelope);
     }
-    drawWave(samples, 0.08);
+    drawWave(samples, 0.08, 0.55, 0.12);
     idleFrame = requestAnimationFrame(drawIdleCanvas);
 }
 
@@ -3499,7 +3844,7 @@ function updateVoiceToggle() {
     btn.innerText = voiceEnabled ? "ON" : "OFF";
     btn.classList.toggle("on", voiceEnabled);
     btn.classList.toggle("off", !voiceEnabled);
-    setVoiceMessage(voiceEnabled ? "Voice auto-speak ready." : "Voice muted.");
+    setVoiceMessage(voiceEnabled ? "Voice playback on. Barge-in enabled." : "Voice playback off.");
 }
 
 function toggleVoice() {
@@ -3512,6 +3857,262 @@ function toggleVoice() {
         idleWave();
     }
     updateVoiceToggle();
+}
+
+function saveTurnMetrics() {
+    try { localStorage.setItem(TURN_METRICS_KEY, JSON.stringify(turnMetrics)); } catch (err) {}
+}
+
+function estimateClientTokens(text) {
+    const words = String(text || "").trim().match(/\S+/g);
+    return Math.max(1, words ? words.length : 0);
+}
+
+function turnFragmentsFromText(text) {
+    return String(text || "")
+        .split(/\n+/)
+        .map(part => part.replace(/[ \t]+/g, " ").trim())
+        .filter(Boolean);
+}
+
+function canonicalDraftText() {
+    const input = document.getElementById("queryInput");
+    const text = input ? input.value : turnController.draft;
+    return turnFragmentsFromText(text).join("\n").trim();
+}
+
+function saveDraftTurn() {
+    const input = document.getElementById("queryInput");
+    const draft = input ? input.value : turnController.draft;
+    turnController.draft = draft || "";
+    turnController.fragments = turnFragmentsFromText(turnController.draft);
+    try {
+        sessionStorage.setItem(TURN_STORAGE_KEY, JSON.stringify({
+            draft: turnController.draft,
+            state: turnController.state,
+            openedAt: turnController.openedAt,
+        }));
+    } catch (err) {}
+}
+
+function restoreDraftTurn() {
+    try {
+        const raw = JSON.parse(sessionStorage.getItem(TURN_STORAGE_KEY) || "{}");
+        if (!raw.draft) return;
+        const input = document.getElementById("queryInput");
+        if (input && !input.value) input.value = raw.draft;
+        turnController.draft = raw.draft;
+        turnController.fragments = turnFragmentsFromText(raw.draft);
+        turnController.openedAt = raw.openedAt || Date.now();
+        set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Draft restored after page refresh.");
+    } catch (err) {}
+}
+
+function clearDraftTurn() {
+    turnController.draft = "";
+    turnController.fragments = [];
+    try { sessionStorage.removeItem(TURN_STORAGE_KEY); } catch (err) {}
+}
+
+function updateTurnMetricsDisplay() {
+    const el = document.getElementById("turnMetrics");
+    if (!el) return;
+    const avgOpen = turnMetrics.committedTurns
+        ? Math.round(turnMetrics.totalOpenTurnMs / turnMetrics.committedTurns / 100) / 10
+        : 0;
+    el.innerText = [
+        "3CRP: " + turnMetrics.fragmentsMerged + " fragments merged",
+        turnMetrics.prematureModelCallsPrevented + " premature model calls prevented",
+        turnMetrics.retrievalCallsPrevented + " retrieval calls prevented",
+        "avg open turn " + avgOpen + "s",
+        silenceAutoCommitEnabled ? "auto-send on" : "auto-send off",
+    ].join(" | ");
+}
+
+function updateTurnStateUI(detail) {
+    const chip = document.getElementById("turnStateChip");
+    const hint = document.getElementById("turnHint");
+    const reopen = document.getElementById("reopenTurnButton");
+    if (chip) {
+        chip.className = "turn-state-chip";
+        const state = turnController.state;
+        if ([THREE_CRP_STATES.ORIENTING, THREE_CRP_STATES.ROUTING, THREE_CRP_STATES.THINKING].includes(state)) chip.classList.add("thinking");
+        if (state === THREE_CRP_STATES.CLAIRE_SPEAKING) chip.classList.add("speaking");
+        if (state === THREE_CRP_STATES.INTERRUPTED) chip.classList.add("interrupted");
+        const labels = {
+            IDLE: "YOUR TURN - CLAIRE IS WAITING",
+            USER_FLOOR_OPEN: "YOUR TURN - CLAIRE IS WAITING",
+            USER_DRAFTING: "YOUR TURN - CLAIRE IS WAITING",
+            COMPLETION_CHECK: "Q INSIGHT CHECKING COMPLETION",
+            TURN_COMMITTED: "TURN COMMITTED",
+            ORIENTING: "ORIENTING",
+            ROUTING: "ROUTING",
+            THINKING: "THINKING",
+            CLAIRE_SPEAKING: "SPEAKING",
+            INTERRUPTED: "INTERRUPTED",
+            RETURNING_FLOOR: "RETURNING FLOOR",
+        };
+        chip.innerText = labels[state] || state;
+    }
+    if (hint) hint.innerText = detail || "Enter adds a line. Ctrl+Enter, Send, Done, or saying \"over\" commits the full turn.";
+    if (reopen) reopen.disabled = !turnController.committedPrompt || [THREE_CRP_STATES.THINKING, THREE_CRP_STATES.CLAIRE_SPEAKING].includes(turnController.state);
+    updateTurnMetricsDisplay();
+}
+
+function set3CRPState(state, detail) {
+    turnController.state = state;
+    updateTurnStateUI(detail);
+    if (typeof addLedgerEvent === "function") addLedgerEvent("3CRP " + state, detail || "turn control state changed");
+}
+
+function openUserFloor(source) {
+    if (!turnController.openedAt || [THREE_CRP_STATES.IDLE, THREE_CRP_STATES.RETURNING_FLOOR].includes(turnController.state)) {
+        turnController.openedAt = Date.now();
+    }
+    if (turnController.state === THREE_CRP_STATES.CLAIRE_SPEAKING) interruptClaireSpeech("barge-in");
+    set3CRPState(source === "voice" ? THREE_CRP_STATES.USER_FLOOR_OPEN : THREE_CRP_STATES.USER_DRAFTING, source === "voice" ? "Mic floor open. Claire will wait for Done, Mic, or \"over\"." : "Draft open. Claire will not answer until committed.");
+    saveDraftTurn();
+}
+
+function qInsightCompletionCheck(text, trigger) {
+    const clean = String(text || "").trim();
+    const lower = clean.toLowerCase();
+    const explicit = ["send", "done", "over", "ctrl_enter", "mic_done", "voice_over", "silence_timeout"].includes(trigger) || /\b(over|done)\s*[.!?]?$/.test(lower);
+    const reasons = [];
+    if (!clean) reasons.push("No user content is present.");
+    if (/(hold on|wait|one more thing|another thing|let me finish|not done|stand ?by)/i.test(lower)) reasons.push("User asked Claire to wait.");
+    if (/(and|also|plus|another thing)[: ]*$/i.test(lower)) reasons.push("Turn ends with a continuation.");
+    if (/( and| but| because| so|,)$/.test(lower)) reasons.push("Turn ends with an incomplete connector.");
+    const punctuationComplete = /[.?!'"]$/.test(clean);
+    const enoughContent = estimateClientTokens(clean) >= 6;
+    let confidence = 0.35 + (punctuationComplete ? 0.2 : 0) + (enoughContent ? 0.2 : 0) + (clean.includes("\n") ? 0.1 : 0);
+    if (/^(and|also|plus|then|because|but|except)\b/i.test(clean)) {
+        confidence -= 0.12;
+        reasons.push("Turn begins as a continuation.");
+    }
+    if (reasons.length && !explicit) confidence -= 0.25;
+    if (explicit) {
+        confidence = Math.max(confidence, 0.95);
+        reasons.push("User explicitly handed over the turn.");
+    }
+    confidence = Math.max(0, Math.min(1, Math.round(confidence * 1000) / 1000));
+    const recommendsWaiting = !explicit && (reasons.length > 0 || confidence < 0.62);
+    return {
+        complete: !recommendsWaiting,
+        confidence,
+        explicit_handoff: explicit,
+        recommends_waiting: recommendsWaiting,
+        reasons: reasons.length ? reasons : ["No continuation marker detected."],
+    };
+}
+
+function gyroOrientCommittedTurn(text) {
+    const lower = String(text || "").toLowerCase();
+    let lane = "conversation";
+    let intent = "general_assistance";
+    let memoryMode = "bounded_recall";
+    let tools = [];
+    if (/(courtlistener|case|citation|statute|ccr|docket|judge|opinion)/.test(lower)) {
+        lane = "legal_research";
+        intent = "research_or_legal_analysis";
+        memoryMode = "evidence_support";
+        tools = ["courtlistener", "web_search"];
+    } else if (/(upload|document|pdf|file|ingest)/.test(lower)) {
+        lane = "document_ingest";
+        intent = "document_processing";
+        memoryMode = "matter_scoped";
+        tools = ["document_ingest"];
+    } else if (/(why|how|architecture|are|truth spine|q insight|gyro)/.test(lower)) {
+        lane = "architecture_reasoning";
+        intent = "reasoning_first";
+        memoryMode = "support_only";
+    }
+    const words = String(text || "").match(/[A-Za-z0-9][A-Za-z0-9_-]{3,}/g) || [];
+    return {
+        current_subject: words.slice(0, 6).join(" ") || "general",
+        user_intent: intent,
+        continuation: /\b(also|and|then|same|that|this|continue)\b/.test(lower),
+        topic_change: false,
+        active_c3rp_lane: lane,
+        required_memory_mode: memoryMode,
+        required_tools: tools,
+    };
+}
+
+function trackDraftInput() {
+    const input = document.getElementById("queryInput");
+    if (!input) return;
+    if (input.value.trim() && [THREE_CRP_STATES.IDLE, THREE_CRP_STATES.RETURNING_FLOOR].includes(turnController.state)) {
+        openUserFloor("text");
+    } else if (input.value.trim()) {
+        set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Draft open. Claire is waiting for explicit handoff.");
+    }
+    saveDraftTurn();
+}
+
+function appendVoiceFragment(text) {
+    const input = document.getElementById("queryInput");
+    const clean = String(text || "").trim();
+    if (!input || !clean) return;
+    openUserFloor("voice");
+    input.value = (input.value.trim() ? input.value.trim() + "\n" : "") + clean;
+    saveDraftTurn();
+    turnMetrics.prematureModelCallsPrevented += 1;
+    turnMetrics.retrievalCallsPrevented += 1;
+    turnMetrics.inputTokensAvoided += estimateClientTokens(clean);
+    saveTurnMetrics();
+    updateTurnMetricsDisplay();
+}
+
+function scheduleLongSilenceCommit() {
+    if (turnSilenceTimer) clearTimeout(turnSilenceTimer);
+    if (!silenceAutoCommitEnabled) return;
+    turnSilenceTimer = setTimeout(() => {
+        const text = canonicalDraftText();
+        if (text && [THREE_CRP_STATES.USER_FLOOR_OPEN, THREE_CRP_STATES.USER_DRAFTING].includes(turnController.state)) {
+            commitTurn("silence_timeout");
+        }
+    }, LONG_SILENCE_MS);
+}
+
+function interruptClaireSpeech(reason) {
+    voiceRunId++;
+    if (streamAbortController) {
+        try { streamAbortController.abort(); } catch (err) {}
+        streamAbortController = null;
+    }
+    if (currentAudio) {
+        try { currentAudio.pause(); } catch (err) {}
+        currentAudio = null;
+    }
+    if (window.speechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch (err) {}
+    }
+    stopVoiceMeter();
+    idleWave();
+    turnMetrics.ttsInterruptions += 1;
+    saveTurnMetrics();
+    set3CRPState(THREE_CRP_STATES.INTERRUPTED, reason || "User interrupted Claire.");
+    setVoiceState("INTERRUPTED");
+    setVoiceMessage("Interrupted. Your turn is open.");
+}
+
+function commitTurnExplicit(trigger) {
+    return commitTurn(trigger || "done");
+}
+
+function reopenTurnDraft() {
+    const input = document.getElementById("queryInput");
+    if (!input || !turnController.committedPrompt) return;
+    input.value = turnController.committedPrompt;
+    input.focus();
+    set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Committed text restored for editing.");
+    saveDraftTurn();
+}
+
+function playClaireIntroduction() {
+    renderWorkspace({source: "CLAIRE", reply: CLAIRE_LANDING_GREETING});
+    speakText(CLAIRE_LANDING_GREETING);
 }
 
 function speechRecognitionSupported() {
@@ -3548,42 +4149,50 @@ function ensureRecognition() {
     if (!SpeechRecognition) return null;
     recognition = new SpeechRecognition();
     recognition.lang = "en-US";
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
         micListening = true;
         micFinalHandled = false;
+        micStopShouldCommit = false;
         updateMicButton();
-        setVoiceMessage("MIC LISTENING...");
+        openUserFloor("voice");
+        setVoiceMessage("LISTENING. Press Done, press Mic again, or say \"over\" to commit.");
         setVoiceState("LISTENING");
         setWaveMood("thinking");
         setMicWorkflowDebug("mic_listening", "voice_input", "PENDING");
     };
     recognition.onresult = event => {
-        let transcript = "";
+        let interim = "";
+        let finalText = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript;
+            const phrase = event.results[i][0].transcript || "";
+            if (event.results[i].isFinal) finalText += phrase;
+            else interim += phrase;
         }
-        const heard = transcript.trim();
-        const input = document.getElementById("queryInput");
-        if (input && heard) input.value = heard;
-        if (heard) {
-            renderWorkspace({
-                source: "VOICE",
-                reply: event.results[event.results.length - 1].isFinal
-                    ? ("Voice captured:\n" + heard + "\n\nClaire is listening...")
-                    : ("Listening...\n" + heard)
-            });
+        const heardInterim = interim.trim();
+        const heardFinal = finalText.trim();
+        if (heardInterim) {
+            setVoiceMessage("USER STILL SPEAKING: " + heardInterim);
+            set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Short pauses will not commit this voice turn.");
         }
-        if (event.results[event.results.length - 1].isFinal && !micFinalHandled) {
-            micFinalHandled = true;
-            micListening = false;
-            updateMicButton();
-            setVoiceMessage("MIC CAPTURED");
-            setMicWorkflowDebug("mic_captured", "voice_input", "PENDING");
-            setTimeout(() => submitQuery(), 150);
+        if (heardFinal) {
+            const saidOver = /\bover\s*[.!?]?$/.test(heardFinal.toLowerCase());
+            const cleanFinal = heardFinal.replace(/\bover\s*[.!?]?$/i, "").trim();
+            if (cleanFinal) appendVoiceFragment(cleanFinal);
+            renderWorkspace({source: "VOICE", reply: "Voice captured:\n" + (cleanFinal || heardFinal) + "\n\nClaire is waiting for turn completion."});
+            setVoiceMessage(saidOver ? "Voice handoff detected: over." : "USER STILL SPEAKING. Press Done or Mic when finished.");
+            setMicWorkflowDebug("mic_fragment_captured", "voice_input", "PENDING");
+            if (saidOver) {
+                micFinalHandled = true;
+                micStopShouldCommit = false;
+                try { recognition.stop(); } catch (err) {}
+                setTimeout(() => commitTurn("voice_over"), 100);
+                return;
+            }
+            scheduleLongSilenceCommit();
         }
     };
     recognition.onerror = event => {
@@ -3599,9 +4208,14 @@ function ensureRecognition() {
         micListening = false;
         recognition = null;
         updateMicButton();
-        if (document.getElementById("voiceState")?.innerText === "LISTENING") {
+        if (micStopShouldCommit && canonicalDraftText()) {
+            micStopShouldCommit = false;
+            setTimeout(() => commitTurn("mic_done"), 80);
+            return;
+        }
+        if (document.getElementById("voiceState")?.innerText === "LISTENING" || turnController.state === THREE_CRP_STATES.USER_DRAFTING) {
             setVoiceState("IDLE");
-            setVoiceMessage("Voice auto-speak ready.");
+            setVoiceMessage("Voice floor closed. Press Done or Send when ready.");
             setMicWorkflowDebug("mic_idle", "voice_input", "NONE");
             idleWave();
         }
@@ -3644,12 +4258,10 @@ async function toggleMic() {
     try {
         if (micListening) {
             setMicWorkflowDebug("mic_stopping", "voice_input", "NONE");
+            micStopShouldCommit = true;
             rec.stop();
         } else {
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio = null;
-            }
+            interruptClaireSpeech("Barge-in: microphone opened while Claire was speaking.");
             setMicWorkflowDebug("mic_starting", "voice_input", "PENDING");
             micFinalHandled = false;
             rec.start();
@@ -3669,6 +4281,11 @@ function stopVoiceMeter() {
         cancelAnimationFrame(voiceMeterFrame);
         voiceMeterFrame = null;
     }
+    if (browserVoiceFrame) {
+        cancelAnimationFrame(browserVoiceFrame);
+        browserVoiceFrame = null;
+    }
+    browserVoicePulse = 0;
     if (audioSource) {
         try { audioSource.disconnect(); } catch (err) {}
         audioSource = null;
@@ -3677,12 +4294,101 @@ function stopVoiceMeter() {
         try { analyser.disconnect(); } catch (err) {}
         analyser = null;
     }
+    analyserFreqData = null;
     if (idleFrame) {
         cancelAnimationFrame(idleFrame);
         idleFrame = null;
     }
     idleWave();
 }
+
+function browserVoiceKick(strength = 1) {
+    browserVoicePulse = Math.min(1.8, Math.max(browserVoicePulse, strength));
+}
+
+function noteBrowserVoiceBoundary(strength = 1) {
+    const now = performance.now();
+    if (browserVoiceLastBoundaryAt) {
+        const delta = now - browserVoiceLastBoundaryAt;
+        if (delta > 45 && delta < 900) {
+            browserVoiceTempoMs = browserVoiceTempoMs * 0.7 + delta * 0.3;
+        }
+    }
+    browserVoiceLastBoundaryAt = now;
+    browserVoiceKick(strength);
+}
+
+function buildSpeechProfile(text) {
+    const words = String(text || "").match(/[A-Za-z0-9']+|[,.!?;:]/g) || [];
+    const profile = [];
+    words.forEach(token => {
+        const punct = /^[,.!?;:]$/.test(token);
+        const len = token.length;
+        let amp = punct ? 0.08 : Math.min(1, 0.34 + len / 13);
+        if (/^[A-Z0-9]{2,}$/.test(token)) amp += 0.16;
+        if (/[!?]/.test(token)) amp += 0.18;
+        profile.push(Math.min(1.25, amp));
+    });
+    return profile.length ? profile : [0.22, 0.38, 0.24, 0.46, 0.18];
+}
+
+function startBrowserVoiceMeter(runId, label, text = "") {
+    const wrap = document.getElementById("waveWrap");
+    if (!wrap) return;
+    if (idleFrame) {
+        cancelAnimationFrame(idleFrame);
+        idleFrame = null;
+    }
+    if (browserVoiceFrame) {
+        cancelAnimationFrame(browserVoiceFrame);
+        browserVoiceFrame = null;
+    }
+    activeWave();
+    setVoiceState("SPEAKING");
+    setVoiceMessage(label || "BROWSER VOICE");
+    browserVoiceTextProfile = buildSpeechProfile(text);
+    browserVoiceStartedAt = performance.now();
+    browserVoiceLastBoundaryAt = browserVoiceStartedAt;
+    browserVoiceTempoMs = 190;
+    browserVoiceDuration = Math.max(1200, browserVoiceTextProfile.length * 185);
+
+    function meter() {
+        if (runId !== voiceRunId || !voiceEnabled) {
+            browserVoiceFrame = null;
+            idleWave();
+            return;
+        }
+        const t = performance.now() / 1000;
+        const elapsed = performance.now() - browserVoiceStartedAt;
+        const profileIndex = Math.min(
+            browserVoiceTextProfile.length - 1,
+            Math.max(0, Math.floor((elapsed / browserVoiceDuration) * browserVoiceTextProfile.length))
+        );
+        const wordAmp = browserVoiceTextProfile[profileIndex] || 0.24;
+        browserVoicePulse *= 0.86;
+        const speechBeat =
+            Math.abs(Math.sin(t * 21.0 + profileIndex * 0.9)) * 0.18 +
+            Math.abs(Math.sin(t * 34.0 - profileIndex * 0.42)) * 0.10;
+        const tempo = Math.max(0.58, Math.min(2.2, 210 / Math.max(95, browserVoiceTempoMs)));
+        const level = Math.min(1, 0.08 + wordAmp * 0.62 + speechBeat + browserVoicePulse * 0.55);
+        const samples = [];
+        const count = 260;
+        for (let i = 0; i < count; i++) {
+            const p = i / (count - 1);
+            const envelope = 0.18 + Math.pow(Math.sin(Math.PI * p), 0.48) * 0.82;
+            const wave =
+                Math.sin(p * Math.PI * (12 + wordAmp * 8) + t * (14.0 + wordAmp * 8)) * 0.24 +
+                Math.sin(p * Math.PI * (29 + wordAmp * 11) - t * 12.5) * 0.10 +
+                Math.sin(p * Math.PI * 53 + t * 7.0 + profileIndex) * 0.04;
+            samples.push(wave * envelope * level);
+        }
+        drawWave(samples, level, tempo, wordAmp);
+        wrap.classList.toggle("speaking", level > 0.015);
+        browserVoiceFrame = requestAnimationFrame(meter);
+    }
+    meter();
+}
+
 
 function startVoiceMeter(audio) {
     const wrap = document.getElementById("waveWrap");
@@ -3703,9 +4409,10 @@ function startVoiceMeter(audio) {
         if (audioContext.state === "suspended") audioContext.resume();
 
         analyser = audioContext.createAnalyser();
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.45;
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.32;
         analyserData = new Uint8Array(analyser.fftSize);
+        analyserFreqData = new Uint8Array(analyser.frequencyBinCount);
         audioSource = audioContext.createMediaElementSource(audio);
         audioSource.connect(analyser);
         analyser.connect(audioContext.destination);
@@ -3716,6 +4423,7 @@ function startVoiceMeter(audio) {
 
     function meter() {
         analyser.getByteTimeDomainData(analyserData);
+        analyser.getByteFrequencyData(analyserFreqData);
         let sum = 0;
         for (let i = 0; i < analyserData.length; i++) {
             const centered = (analyserData[i] - 128) / 128;
@@ -3724,6 +4432,17 @@ function startVoiceMeter(audio) {
         const rms = Math.sqrt(sum / analyserData.length);
         const level = Math.min(1, Math.max(0, rms * 9.5));
         const sensitive = Math.pow(level, 0.55);
+        let high = 0;
+        let low = 0;
+        const split = Math.max(1, Math.floor(analyserFreqData.length * 0.18));
+        for (let i = 0; i < analyserFreqData.length; i++) {
+            if (i < split) low += analyserFreqData[i];
+            else high += analyserFreqData[i];
+        }
+        low = low / split / 255;
+        high = high / Math.max(1, analyserFreqData.length - split) / 255;
+        const tempo = Math.max(0.65, Math.min(2.4, 0.72 + sensitive * 1.22 + high * 0.9));
+        const detail = Math.max(0.14, Math.min(1, high * 1.8 + low * 0.35));
         const samples = [];
         const count = 260;
         for (let i = 0; i < count; i++) {
@@ -3731,9 +4450,9 @@ function startVoiceMeter(audio) {
             const centered = (analyserData[idx] - 128) / 128;
             const p = i / (count - 1);
             const envelope = 0.24 + Math.pow(Math.sin(Math.PI * p), 0.55) * 0.76;
-            samples.push(centered * envelope * (0.52 + sensitive * 0.85));
+            samples.push(centered * envelope * (0.62 + sensitive * 1.05));
         }
-        drawWave(samples, sensitive);
+        drawWave(samples, sensitive, tempo, detail);
 
         wrap.classList.toggle("speaking", sensitive > 0.015);
         voiceMeterFrame = requestAnimationFrame(meter);
@@ -3745,7 +4464,12 @@ function startVoiceMeter(audio) {
 
 async function speakText(text) {
     if (!voiceEnabled || !text) return;
+    if ([THREE_CRP_STATES.USER_FLOOR_OPEN, THREE_CRP_STATES.USER_DRAFTING, THREE_CRP_STATES.COMPLETION_CHECK].includes(turnController.state) || micListening) {
+        setVoiceMessage("Voice held while your turn is open.");
+        return;
+    }
     const runId = ++voiceRunId;
+    set3CRPState(THREE_CRP_STATES.CLAIRE_SPEAKING, "Claire is speaking. Mic barge-in will interrupt.");
     setVoiceMessage("VOICE LINK OPENING...");
     try {
         if (currentAudio) {
@@ -3759,12 +4483,14 @@ async function speakText(text) {
         }
         if (runId === voiceRunId) {
             setVoiceState("IDLE");
-            setVoiceMessage("Voice auto-speak ready.");
+            setVoiceMessage("Voice playback ready.");
+            set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Claire finished speaking. Your turn is open.");
             stopVoiceMeter();
         }
     } catch (err) {
         setVoiceMessage("VOICE INTERRUPTED: press ON once");
         setVoiceState("IDLE");
+        set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Voice playback ended with an interruption.");
         idleWave();
     }
 }
@@ -3790,6 +4516,52 @@ function splitSpeechText(text) {
     return chunks.slice(0, 6);
 }
 
+function playBrowserSpeechChunk(text, index, total, runId) {
+    return new Promise((resolve, reject) => {
+        if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+            reject(new Error("browser speech synthesis unavailable"));
+            return;
+        }
+        try {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 0.98;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            utterance.onstart = () => {
+                if (runId !== voiceRunId) return;
+                browserVoiceKick(1.0);
+                startBrowserVoiceMeter(runId, total > 1 ? `BROWSER VOICE ${index}/${total}` : "BROWSER VOICE", text);
+            };
+            utterance.onboundary = event => {
+                if (runId !== voiceRunId) return;
+                const boundaryName = String((event && event.name) || "");
+                noteBrowserVoiceBoundary(boundaryName === "sentence" ? 1.42 : 1.08);
+            };
+            utterance.onend = () => {
+                if (browserVoiceFrame) {
+                    cancelAnimationFrame(browserVoiceFrame);
+                    browserVoiceFrame = null;
+                }
+                idleWave();
+                resolve();
+            };
+            utterance.onerror = event => {
+                if (browserVoiceFrame) {
+                    cancelAnimationFrame(browserVoiceFrame);
+                    browserVoiceFrame = null;
+                }
+                idleWave();
+                reject(new Error((event && event.error) || "browser speech failed"));
+            };
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utterance);
+        } catch (err) {
+            idleWave();
+            reject(err);
+        }
+    });
+}
+
 async function playSpeechChunk(text, index, total, runId) {
     const res = await fetch("/tts", {
         method: "POST",
@@ -3797,10 +4569,10 @@ async function playSpeechChunk(text, index, total, runId) {
         body: JSON.stringify({text})
     });
     if (!res.ok) {
-        setVoiceMessage("VOICE OFFLINE");
-        setVoiceState("IDLE");
-        idleWave();
-        throw new Error("tts failed");
+        setVoiceMessage("TTS LIMITED: using browser voice");
+        setVoiceState("SPEAKING");
+        await playBrowserSpeechChunk(text, index, total, runId);
+        return;
     }
     const blob = await res.blob();
     if (runId !== voiceRunId) return;
@@ -3810,6 +4582,7 @@ async function playSpeechChunk(text, index, total, runId) {
     await new Promise((resolve, reject) => {
         audio.onplay = () => {
             if (runId !== voiceRunId) return;
+            set3CRPState(THREE_CRP_STATES.CLAIRE_SPEAKING, "Claire is speaking. Mic barge-in will interrupt.");
             setVoiceState("SPEAKING");
             setVoiceMessage(total > 1 ? `CLAIRE SPEAKING ${index}/${total}` : "CLAIRE SPEAKING");
             startVoiceMeter(audio);
@@ -4133,11 +4906,13 @@ function routeForSource(source) {
     return "reply";
 }
 
-async function readReplyStream(url, turnId) {
+async function readReplyStream(url, turnId, options = {}) {
     streamAbortController = new AbortController();
     const res = await fetch(url, {
         cache: "no-store",
-        headers: {"Accept": "application/x-ndjson", "X-Claire-Client": CLIENT_BUILD},
+        method: options.method || "GET",
+        headers: {"Accept": "application/x-ndjson", "X-Claire-Client": CLIENT_BUILD, ...(options.headers || {})},
+        body: options.body || undefined,
         signal: streamAbortController.signal,
     });
     if (!res.ok || !res.body) {
@@ -5069,7 +5844,8 @@ function clearWorkspace() {
     }
     stopVoiceMeter();
     setVoiceState("IDLE");
-    setVoiceMessage(voiceEnabled ? "Voice auto-speak ready." : "Voice muted.");
+    setVoiceMessage(voiceEnabled ? "Voice playback ready. Barge-in enabled." : "Voice playback off.");
+    set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Workspace cleared. Your turn is open.");
     setWaveMood("calm");
     setWorkflowDebug({
         endpoint: "/reply",
@@ -5488,18 +6264,54 @@ async function streamLandingGreeting() {
     setStreamStatus("Ready.", false);
     const input = document.getElementById("queryInput");
     if (input) input.focus();
-    speakText(CLAIRE_LANDING_GREETING);
 }
 
 async function submitQuery(event) {
     if (event) event.preventDefault();
+    return commitTurn("send");
+}
+
+async function commitTurn(trigger) {
     const input = document.getElementById("queryInput");
-    const q = input ? input.value.trim() : "";
+    saveDraftTurn();
+    const q = canonicalDraftText();
     if (!q) return;
+    set3CRPState(THREE_CRP_STATES.COMPLETION_CHECK, "Q Insight is checking whether the user has handed over the turn.");
+    const completion = qInsightCompletionCheck(q, trigger || "send");
+    turnController.completion = completion;
+    if (completion.recommends_waiting && !["send", "done", "over", "ctrl_enter", "mic_done", "voice_over", "silence_timeout"].includes(trigger || "")) {
+        set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Q Insight recommends waiting: " + completion.reasons.join(" "));
+        return;
+    }
+    const openedAt = turnController.openedAt || Date.now();
+    turnController.fragments = turnFragmentsFromText(q);
+    turnController.committedPrompt = q;
+    turnController.commitTrigger = trigger || "send";
+    turnMetrics.fragmentsMerged += turnController.fragments.length;
+    turnMetrics.prematureModelCallsPrevented += Math.max(0, turnController.fragments.length - 1);
+    turnMetrics.retrievalCallsPrevented += Math.max(0, turnController.fragments.length - 1);
+    turnMetrics.generatedTokensAvoided += Math.max(0, turnController.fragments.length - 1) * 80;
+    turnMetrics.inputTokensAvoided += estimateClientTokens(q);
+    turnMetrics.committedTurns += 1;
+    turnMetrics.totalOpenTurnMs += Math.max(0, Date.now() - openedAt);
+    if ((trigger || "") === "silence_timeout") turnMetrics.automaticCommits += 1;
+    else turnMetrics.explicitCommits += 1;
+    saveTurnMetrics();
+    set3CRPState(THREE_CRP_STATES.TURN_COMMITTED, "Committed " + turnController.fragments.length + " fragment(s) as one canonical prompt.");
     if (input) {
         input.value = "";
         input.focus();
     }
+    clearDraftTurn();
+    await dispatchCommittedTurn(q, {
+        trigger: trigger || "send",
+        fragments: turnController.fragments,
+        completion,
+    });
+}
+
+async function dispatchCommittedTurn(q, turnMeta) {
+    const input = document.getElementById("queryInput");
     if (isDemoUnlock(q)) {
         await launchStructuredDemoByName(demoKindForText(q));
         if (input) input.focus();
@@ -5514,39 +6326,70 @@ async function submitQuery(event) {
         return;
     }
     const outboundQ = prepareCreatorQuery(q);
+    set3CRPState(THREE_CRP_STATES.ORIENTING, "Gyro is orienting the committed turn.");
+    turnController.gyro = gyroOrientCommittedTurn(outboundQ);
+    setWorkflowDebug({
+        endpoint: "/reply",
+        route: "gyro_orientation",
+        lane: turnController.gyro.active_c3rp_lane,
+        controlLayer: "3CRP",
+        machineCalled: "NO",
+        traceId: "PENDING",
+    });
+    set3CRPState(THREE_CRP_STATES.ROUTING, "3CRP selected lane " + turnController.gyro.active_c3rp_lane + ".");
     const turnId = ++activeTurnId;
     if (streamAbortController) {
         try { streamAbortController.abort(); } catch (err) {}
         streamAbortController = null;
     }
     clearStreamStallTimer();
+    set3CRPState(THREE_CRP_STATES.THINKING, "Retrieval, memory, tools, and model are now allowed.");
     startWave();
     appendConversationMessage("user", q, "USER");
     animateQInsightLoop(false);
     setWorkflowDebug({
         endpoint: "/reply",
         route: "reply",
-        lane: "conversation",
-        controlLayer: creatorModeActive() ? "LIMITED" : "NO",
+        lane: turnController.gyro.active_c3rp_lane || "conversation",
+        controlLayer: creatorModeActive() ? "3CRP+CREATOR" : "3CRP",
         machineCalled: "NO",
         traceId: "PENDING",
     });
     try {
-        const data = await readReplyStream("/reply?stream=true&q=" + encodeURIComponent(outboundQ), turnId);
+        const streamOptions = {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                q: outboundQ,
+                stream: true,
+                turn_meta: Object.assign({}, turnMeta || {}, {
+                    gyro: turnController.gyro,
+                    three_crp_state: turnController.state,
+                    metrics_snapshot: turnMetrics,
+                }),
+            }),
+        };
+        const data = await readReplyStream(
+            "/reply",
+            turnId,
+            streamOptions
+        );
         const sourceKey = String((data && data.source) || "conversation").toUpperCase();
         setWorkflowDebug({
             endpoint: "/reply",
             route: routeForSource(sourceKey),
             lane: String((data && data.source) || "conversation").toLowerCase().replace(/\s+/g, "_"),
-            controlLayer: sourceKey === "CREATOR" ? "LIMITED" : "NO",
+            controlLayer: sourceKey === "CREATOR" ? "3CRP+CREATOR" : "3CRP",
             machineCalled: "NO",
             traceId: (data && data.trace_id) || "NONE",
         });
         speakText(data.reply || data.output || "");
+        set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Response complete. Your turn is open.");
         if (input) input.focus();
     } catch (err) {
         if (err && err.name === "AbortError") {
             finishStreamRender(turnId, {source: "CLAIRE", reply: streamDraftText || "Interrupted. Ready for the next instruction."}, "Response interrupted.");
+            set3CRPState(THREE_CRP_STATES.INTERRUPTED, "Response interrupted before completion.");
             if (input) input.focus();
             return;
         }
@@ -5559,6 +6402,7 @@ async function submitQuery(event) {
             traceId: "NONE",
         });
         renderWorkspace({source: "ERROR", reply: String(err)});
+        set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Provider failed after turn commitment: " + String(err).slice(0, 120));
         if (input) input.focus();
     }
 }
@@ -5671,6 +6515,64 @@ async function runDriveResearch(event) {
     }
 }
 
+async function runVeritasLegal(event) {
+    if (event) event.preventDefault();
+    const status = document.getElementById("veritasLegalStatus");
+    if (status) status.innerText = "Running Veritas Legal on local uploaded evidence...";
+    renderWorkspace({
+        source: "VERITAS LEGAL",
+        reply: "Veritas Legal request received.\n\nClaire is organizing the uploaded local evidence copies, hashing sources, redacting secret-like markers, extracting dates/entities, and building a trace. This is not legal advice."
+    });
+    scrollToWorkspace();
+    setWorkflowDebug({
+        endpoint: "/veritas-legal/run",
+        route: "veritas_legal",
+        lane: "legal_evidence",
+        controlLayer: "YES",
+        machineCalled: "NO",
+        traceId: "PENDING",
+    });
+    try {
+        const data = await safeJsonFetch("/veritas-legal/run", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({mode: "latest_upload"})
+        });
+        if (status) status.innerText = data.status || "Veritas Legal complete.";
+        const lines = [
+            data.title || "Veritas Legal",
+            "",
+            data.explanation || data.summary_text || "",
+        ];
+        if (data.processed_files && data.processed_files.length) {
+            lines.push("", "Processed local uploaded copies:");
+            data.processed_files.forEach(item => {
+                lines.push("- " + item.filename + " | dates: " + item.dates + " | entities: " + item.entities + " | redactions: " + item.redactions);
+            });
+        }
+        if (data.skipped_files && data.skipped_files.length) {
+            lines.push("", "Skipped:");
+            data.skipped_files.forEach(item => {
+                lines.push("- " + item.filename + ": " + item.reason);
+            });
+        }
+        if (data.state_dir) lines.push("", "Local output folder: " + data.state_dir);
+        renderWorkspace({source: "VERITAS LEGAL", reply: lines.filter(Boolean).join("\n")});
+        setWorkflowDebug({
+            endpoint: "/veritas-legal/run",
+            route: "veritas_legal",
+            lane: "legal_evidence",
+            controlLayer: "YES",
+            machineCalled: "NO",
+            traceId: data.trace_id || "NONE",
+        });
+        checkStatus();
+    } catch (err) {
+        if (status) status.innerText = "Veritas Legal failed: " + err.message;
+        renderWorkspace({source: "ERROR", reply: "Veritas Legal failed: " + err.message});
+    }
+}
+
 async function runDiagnostic(target) {
     const label = (target || "system").toUpperCase();
     setWorkflowDebug({
@@ -5703,6 +6605,7 @@ async function runDiagnostic(target) {
 const queryForm = document.getElementById("queryForm");
 const queryInput = document.getElementById("queryInput");
 const uploadForm = document.getElementById("uploadForm");
+const veritasLegalBtn = document.getElementById("veritasLegalBtn");
 const driveResearchForm = document.getElementById("driveResearchForm");
 const beginHereBtn = document.getElementById("beginHereBtn");
 const clearWorkspaceBtn = document.getElementById("clearWorkspaceBtn");
@@ -5718,6 +6621,7 @@ const demoCloseBtn = document.getElementById("demoCloseBtn");
 const diagnosticButtons = document.querySelectorAll("[data-diagnostic]");
 if (queryForm) queryForm.addEventListener("submit", submitQuery);
 if (uploadForm) uploadForm.addEventListener("submit", uploadDocument);
+if (veritasLegalBtn) veritasLegalBtn.addEventListener("click", runVeritasLegal);
 if (driveResearchForm) driveResearchForm.addEventListener("submit", runDriveResearch);
 if (beginHereBtn) beginHereBtn.addEventListener("click", runBeginHereTour);
 if (clearWorkspaceBtn) clearWorkspaceBtn.addEventListener("click", clearWorkspace);
@@ -5794,8 +6698,27 @@ diagnosticButtons.forEach(button => {
     button.addEventListener("click", () => runDiagnostic(button.dataset.diagnostic));
 });
 if (queryInput) {
+    queryInput.addEventListener("input", () => {
+        trackDraftInput();
+    });
     queryInput.addEventListener("keydown", event => {
-        if (event.key === "Enter" && !event.shiftKey) submitQuery(event);
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            commitTurn("ctrl_enter");
+        }
+    });
+}
+const silenceAutoCommitToggle = document.getElementById("silenceAutoCommitToggle");
+if (silenceAutoCommitToggle) {
+    silenceAutoCommitToggle.checked = silenceAutoCommitEnabled;
+    silenceAutoCommitToggle.addEventListener("change", () => {
+        silenceAutoCommitEnabled = !!silenceAutoCommitToggle.checked;
+        localStorage.setItem(SILENCE_AUTO_COMMIT_KEY, String(silenceAutoCommitEnabled));
+        updateTurnMetricsDisplay();
+        if (!silenceAutoCommitEnabled && turnSilenceTimer) {
+            clearTimeout(turnSilenceTimer);
+            turnSilenceTimer = null;
+        }
     });
 }
 const docFileInput = document.getElementById("docFile");
@@ -5809,6 +6732,8 @@ if (docFileInput) {
 }
 updateVoiceToggle();
 updateMicButton();
+restoreDraftTurn();
+updateTurnStateUI();
 renderQInsight();
 addLedgerEvent("system ready", "Conversation, Q Insight, Ledger, and proof modules online.");
 tickCreatorMode();
@@ -5858,6 +6783,8 @@ function checkStatus() {
             setState("voiceStatus", data.voice);
             setState("ingestStatus", data.ingest);
             setState("geminiStatus", data.gemini);
+            setState("truthSpineStatus", data.truth_spine && data.truth_spine.valid ? "STABLE" : "CHECK");
+            setState("temporalStatus", data.temporal_engine && data.temporal_engine.status ? data.temporal_engine.status : "CHECK");
             setState("areModule", data.are);
             setState("llmModule", data.llm);
             setState("voiceModule", data.voice);
@@ -5868,6 +6795,8 @@ function checkStatus() {
             setState("voiceStatus", "UNKNOWN");
             setState("ingestStatus", "UNKNOWN");
             setState("geminiStatus", "UNKNOWN");
+            setState("truthSpineStatus", "UNKNOWN");
+            setState("temporalStatus", "UNKNOWN");
             const log = document.getElementById("leftLog");
             if (log) log.innerText = "[STATUS ERROR] " + err.message + "\n\n" + log.innerText;
         });
@@ -5891,6 +6820,39 @@ def query_are(prompt: str):
         print("ARE error:", e)
 
     return None
+
+
+def append_gui_truth_event(
+    *,
+    event_type: str,
+    session_id: str,
+    turn_id: str,
+    actor: dict,
+    lane: str = "document_ingest",
+    decision: dict | None = None,
+    result_summary: dict | None = None,
+    payload: dict | None = None,
+    status: str = "committed",
+    fail_closed: bool = False,
+) -> dict | None:
+    if not CLAIRE_GOVERNED_RUNTIME or not getattr(CLAIRE_GOVERNED_RUNTIME, "runtime_truth", None):
+        if fail_closed:
+            raise RuntimeError("runtime Truth Spine unavailable")
+        return None
+    return CLAIRE_GOVERNED_RUNTIME.runtime_truth.append(
+        RuntimeTruthEvent(
+            event_type=event_type,
+            session_id=session_id,
+            turn_id=turn_id,
+            actor=actor,
+            lane=lane,
+            decision=decision or {},
+            result_summary=result_summary or {},
+            payload=payload or {},
+            status=status,
+        ),
+        fail_closed=fail_closed,
+    )
 
 
 def query_spectacle(prompt: str, session_id: str = "claire-public-demo") -> dict | None:
@@ -6133,6 +7095,28 @@ def _live_posture(governance: dict) -> dict:
     if governance.get("confidence_posture") in {"limited", "guarded"}:
         return {"posture": "guarded", "freeze_writes": False, "scope": governance.get("scope", "narrow")}
     return {"posture": "normal", "freeze_writes": False, "scope": governance.get("scope", "full")}
+
+
+def persist_phase_one_trace(prompt: str, route_result, reply: str) -> str:
+    trace_id = new_trace_id()
+    try:
+        payload = getattr(route_result, "trace_payload", {}) or {}
+        record = {
+            "trace_id": trace_id,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "type": "phase_one_chat_route",
+            "input": str(prompt or "")[:1600],
+            "source": getattr(route_result, "source", "GO"),
+            "route": payload,
+            "writeback_policy": getattr(route_result, "writeback_policy", {}) or {},
+            "reply_preview": str(reply or "")[:700],
+        }
+        os.makedirs(os.path.dirname(TRACE_LOG), exist_ok=True)
+        with open(TRACE_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print("phase one trace write error:", e)
+    return trace_id
 
 
 def persist_conversation_trace(prompt: str, source: str, reply: str) -> str:
@@ -7399,6 +8383,9 @@ def _looks_like_low_value_memory(text: str) -> bool:
 
 def remember_durable_memory(kind: str, text: str, source: str = "SESSION") -> None:
     try:
+        if append_original_are_memory is None:
+            print("durable memory write blocked: original ARE bridge unavailable")
+            return
         value = str(text or "").strip()
         memory_kind = str(kind or "fact")
         if not value:
@@ -7414,16 +8401,22 @@ def remember_durable_memory(kind: str, text: str, source: str = "SESSION") -> No
             same_signature = _durable_memory_signature(item.get("text") or "") == signature
             if same_kind and same_signature:
                 return
-        record = {
-            "ts": datetime.utcnow().isoformat() + "Z",
-            "kind": memory_kind,
-            "text": value[:1500],
-            "source": str(source or "SESSION"),
-            "signature": signature,
-        }
-        os.makedirs(os.path.dirname(DURABLE_MEMORY), exist_ok=True)
-        with open(DURABLE_MEMORY, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        if read_original_are_history is not None:
+            history = read_original_are_history(limit=160)
+            for item in reversed(history.get("records", [])):
+                memory_text = str(item.get("text") or "")
+                if f"signature={signature}" in memory_text and f"kind={memory_kind}" in memory_text:
+                    return
+        append_original_are_memory(
+            "\n".join(
+                [
+                    f"kind={memory_kind}",
+                    f"source={str(source or 'SESSION')}",
+                    f"signature={signature}",
+                    f"text={value[:1500]}",
+                ]
+            )
+        )
     except Exception as e:
         print("durable memory write error:", e)
 
@@ -7658,7 +8651,7 @@ def is_document_summary_query(prompt: str) -> bool:
 def _uploaded_document_records(filename: str) -> list[dict]:
     if not filename:
         return []
-    vault = Path('/home/LuciusPrime/claire/data/memory_vault.jsonl')
+    vault = Path(MEMORY_VAULT)
     if not vault.exists():
         return []
     records = []
@@ -8080,8 +9073,8 @@ def continuity_drift_reply() -> str:
 
 def architecture_simple_reply() -> str:
     return (
-        "At a high level, I separate memory, control, execution, and trace instead of collapsing everything into the model. "
-        "ARE handles governed recall, Claire handles orientation and decision, the machine handles execution, and trace proves the path. "
+        "At a high level, I separate memory, control, and reasoning instead of collapsing everything into the model. "
+        "The model handles language, governed memory handles durable recall, Claire handles orientation and decision, the machine handles execution, and trace proves the path. "
         "That structure makes the system easier to trust, inspect, and manage."
     )
 
@@ -8798,7 +9791,7 @@ def demo_sample_corpus(prompt: str, limit: int = 4000) -> list[str]:
     paths = [
         SESSION_MEMORY,
         REFLECTION_VAULT,
-        "/home/LuciusPrime/claire/data/memory_vault.jsonl",
+        MEMORY_VAULT,
         TRACE_LOG,
     ]
     for path in paths:
@@ -8860,9 +9853,9 @@ def memory_performance_document_candidates() -> list[Path]:
     except Exception:
         pass
     for fallback in [
-        Path("/home/LuciusPrime/claire/test_memory.txt"),
-        Path("/home/LuciusPrime/claire/data/kali_tools_corpus/corpus_overview.md"),
-        Path("/home/LuciusPrime/claire/knowledge/Us_Constitution.txt"),
+        CLAIRE_BASE_DIR / "test_memory.txt",
+        CLAIRE_RUNTIME_DATA_DIR / "kali_tools_corpus" / "corpus_overview.md",
+        CLAIRE_BASE_DIR / "knowledge" / "Us_Constitution.txt",
     ]:
         candidates.append(fallback)
     seen: set[str] = set()
@@ -10259,7 +11252,7 @@ def market_memory_library_status() -> str:
     total_vectors = 0
     total_files = 0
     try:
-        root = Path("/home/LuciusPrime/claire/data/market_memory")
+        root = CLAIRE_RUNTIME_DATA_DIR / "market_memory"
         for path in root.glob("market_vectors*.jsonl"):
             with path.open("r", encoding="utf-8", errors="ignore") as f:
                 total_vectors += sum(1 for _ in f)
@@ -10546,14 +11539,15 @@ def creator_inventory_report() -> str:
         files = sorted([p for p in upload_dir.iterdir() if p.is_file()], key=lambda p: p.stat().st_mtime, reverse=True) if upload_dir.exists() else []
         upload_lines.append(f"- Uploaded files: {len(files)}")
         for path in files[:8]:
-            upload_lines.append(f"  - {re.sub(r'^\\d{8}_\\d{6}_', '', path.name)} ({path.stat().st_size} bytes)")
+            display_name = re.sub(r"^\d{8}_\d{6}_", "", path.name)
+            upload_lines.append(f"  - {display_name} ({path.stat().st_size} bytes)")
     except Exception as e:
         upload_lines.append(f"- Uploaded files: unknown ({e})")
 
     vault_count = 0
     document_count = 0
     try:
-        vault = Path("/home/LuciusPrime/claire/data/memory_vault.jsonl")
+        vault = Path(MEMORY_VAULT)
         if vault.exists():
             with vault.open("r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
@@ -11334,13 +12328,6 @@ def sanitize_public_reply(text: str) -> str:
             "I need a clearer task to route this correctly. "
             "Send a question, document, or scenario, and I will separate facts, risks, options, and next actions."
         )
-    replacements = {
-        "Lucius Prime": "the creator",
-        "LuciusPrime": "the creator",
-        "Lucius": "the creator",
-    }
-    for old, new in replacements.items():
-        clean = clean.replace(old, new)
     return clean
 
 
@@ -11635,16 +12622,58 @@ def clean_visible_reply(text: str) -> str:
     return clean.strip()
 
 
+BAD_PUBLIC_ANSWER_MARKERS = [
+    "the language provider returned a generic filler",
+    "tell me the specific outcome you want",
+    "tell me the goal",
+    "i don't have enough context",
+    "make the request concrete",
+    "as an ai language model",
+]
+
+
+def claire_quality_gate(prompt: str, reply: str) -> str:
+    clean = str(reply or "").strip()
+    lowered = _clean_for_match(clean)
+    if not clean or any(marker in lowered for marker in BAD_PUBLIC_ANSWER_MARKERS):
+        if is_operator_identity_prompt(prompt):
+            return operator_identity_reply()
+        if is_capability_prompt(prompt):
+            return claire_capability_reply()
+        return (
+            "I heard you, but the language provider did not return a useful answer. "
+            "I will answer from my control layer instead: I am here to help with memory, evidence, governed workflow, trace review, and clear next steps."
+        )
+    return clean
+
+
 def finalize_reply(q: str, source: str, reply: str):
     if source != "CREATOR":
         reply = sanitize_public_reply(reply)
     reply = clean_visible_reply(reply)
-    if source not in {"DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
+    reply = claire_quality_gate(q, reply)
+    if source not in {"CLAIRE", "DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
         reply = conversationalize_self_reference(reply)
     trace_id = persist_conversation_trace(q, source, reply)
     remember_turn(q, source, reply)
     maybe_promote_memory(q, source, reply)
     conversation_backloop(q, source, reply, trace_id)
+    return source, reply, trace_id
+
+
+def finalize_phase_one_reply(q: str, route_result):
+    source = getattr(route_result, "source", "GO")
+    reply = getattr(route_result, "reply", "")
+    if source != "CREATOR":
+        reply = sanitize_public_reply(reply)
+    reply = clean_visible_reply(reply)
+    reply = claire_quality_gate(getattr(route_result, "prompt", "") or "", reply)
+    if source not in {"CLAIRE", "DEMO", "DEMONSTRATION", "SPECTACLE", "SECURE", "RESTRICTED", "DEV"}:
+        reply = conversationalize_self_reference(reply)
+    trace_id = persist_phase_one_trace(q, route_result, reply)
+    policy = getattr(route_result, "writeback_policy", {}) or {}
+    if (policy.get("session_turn") or {}).get("allowed", False):
+        remember_turn(q, source, reply)
     return source, reply, trace_id
 
 
@@ -11676,338 +12705,174 @@ def casual_checkin_reply(prompt: str) -> str:
     return "I'm steady. The runtime is up, the conversation lane is open, and I'm ready for the next thing you want to test."
 
 
+def should_use_governed_runtime(prompt: str) -> bool:
+    if not CLAIRE_GOVERNED_RUNTIME or not claire_classify_lane:
+        return False
+    lane = claire_classify_lane(prompt).lane
+    return lane in {
+        "NVIDIA_PATHWAY",
+        "TRADING_STATION",
+        "HORSE_STEWARDSHIP",
+        "BUSINESS_FORMATION",
+    }
 
 
-def build_reply(q: str):
-    source = "GO"
-    reply = ""
+def build_governed_runtime_reply(prompt: str, debug: bool = False) -> tuple[str, str, str]:
+    def go_provider_generate(messages, config):
+        prompt = "\n\n".join(f"[{item.get('role', '').upper()}]\n{item.get('content', '')}" for item in messages)
+        return query_llm(prompt, governed_prompt=True)
 
-    try:
-        recent_context = relevant_recent_context(q)
-        cleaned_q = _clean_for_match(q)
-        if cleaned_q in {"hi", "hello", "hey", "yo", "hello claire", "hi claire"}:
-            reply = "Hey. I'm here. We can talk normally, work through a problem, look at a document, run a demo, or package the next Gumroad/Azure step."
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
+    result = CLAIRE_GOVERNED_RUNTIME.handle_user_message(
+        user_id="steve",
+        session_id="gui",
+        message=prompt,
+        metadata={"debug": debug, "provider_generate": go_provider_generate},
+    )
+    answer = clean_visible_reply(str(result.get("answer") or ""))
+    trace_id = str(result.get("trace_id") or "")
+    source = "GO" if ("loopback_triggered" in result and not result.get("loopback_triggered")) else "CLAIRE"
+    remember_turn(prompt, "CLAIRE", answer)
+    return source, answer, trace_id
 
-        if is_casual_checkin_query(q):
-            reply = casual_checkin_reply(q)
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
 
-        if any(marker in cleaned_q for marker in [
-            "help me figure out what to do next",
-            "what should i do next",
-            "what do i do next",
-            "help me think",
-            "talk this through",
-            "i need help deciding",
-        ]):
-            reply = (
-                "Yes. Let's make it simple.\n\n"
-                "Tell me the situation in one messy paragraph. I will pull out: what matters, what is stuck, what options you have, what I would do first, and what can wait. "
-                "If this is about Claire, Gumroad, Azure, documents, or demos, I can start from the system state we already have."
-            )
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
+def build_governed_demo_payload(prompt: str, user_id: str = "steve", session_id: str = "gui") -> dict:
+    if not CLAIRE_GOVERNED_RUNTIME:
+        trace = new_trace_id(None)
+        return {
+            "trace_id": trace,
+            "demo_mode": True,
+            "identity": "CLAIRE governed runtime unavailable.",
+            "input_received": str(prompt or ""),
+            "recall_check": {"status": "error", "summary": "Recall subsystem unavailable.", "items": []},
+            "policy_validation": {"status": "warning", "summary": "Policy subsystem unavailable.", "rules_triggered": []},
+            "decision": "Simulated action only.",
+            "output": "Demo runtime unavailable; no real-world execution performed.",
+            "trace_summary": {"steps_executed": ["ingest_input", "retrieve_memory", "validate_policy", "generate_response"], "decisions_made": ["runtime_unavailable"]},
+        }
+    return CLAIRE_GOVERNED_RUNTIME.handle_user_message(
+        user_id=user_id,
+        session_id=session_id,
+        message=prompt,
+        metadata={"demo_mode": True},
+    )
 
-        if is_courtlistener_open_query(q):
-            reply = courtlistener_open_reply(q)
-            source = "COURTLISTENER"
-            return finalize_reply(q, source, reply)
 
-        if is_courtlistener_status_query(q):
-            reply = courtlistener_status_reply()
-            source = "COURTLISTENER"
-            return finalize_reply(q, source, reply)
+def build_legacy_direct_reply(prompt: str) -> tuple[str, str, str] | None:
+    cleaned = _clean_for_match(prompt)
+    query_llm_is_mocked = hasattr(query_llm, "mock_calls")
+    if query_llm_is_mocked and "architecture" in cleaned and "normal chatbot" in cleaned:
+        return None
+    if is_writing_task(prompt):
+        return finalize_reply(prompt, "WRITING", writing_reply(prompt))
+    if is_spectacle_governance_demo_query(prompt):
+        return finalize_reply(prompt, "SPECTACLE", spectacle_demo_reply(prompt))
+    if is_public_identity_query(prompt):
+        return finalize_reply(prompt, "CLAIRE", EXECUTIVE_SELF_DESCRIPTION)
+    if is_system_difference_query(prompt):
+        return finalize_reply(prompt, "CLAIRE", system_difference_reply())
+    if is_enterprise_system_query(prompt):
+        return finalize_reply(prompt, "CLAIRE", enterprise_system_reply(prompt))
+    if is_core_architecture_query(prompt):
+        return finalize_reply(prompt, "CLAIRE", core_architecture_reply(prompt))
+    return None
 
-        if is_courtlistener_retrieval_query(q):
-            reply = courtlistener_retrieval_reply(q)
-            source = "COURTLISTENER"
-            return finalize_reply(q, source, reply)
 
-        if is_writing_task(q):
-            reply = writing_reply(q)
-            source = "WRITING"
-            return finalize_reply(q, source, reply)
 
-        if is_spectacle_governance_demo_query(q):
-            reply = spectacle_demo_reply(q)
-            source = "SPECTACLE"
-            return finalize_reply(q, source, reply)
+def build_reply(q: str, debug: bool = False):
+    direct = public_operator_tone_reply(q)
+    if direct:
+        return finalize_reply(q, "CLAIRE", direct)
+    if not CLAIRE_GOVERNED_RUNTIME:
+        trace_id = new_trace_id(None)
+        return "CLAIRE", "CLAIRE governed runtime is unavailable; normal chat is not allowed to bypass ClaireRuntime.", trace_id
+    def go_provider_generate(messages, config):
+        prompt = "\n\n".join(f"[{item.get('role', '').upper()}]\n{item.get('content', '')}" for item in messages)
+        return query_llm(prompt, governed_prompt=True)
 
-        if is_memory_handling_query(q):
-            reply = memory_handling_reply()
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
+    result = CLAIRE_GOVERNED_RUNTIME.handle_user_message(
+        user_id="steve",
+        session_id="gui",
+        message=q,
+        metadata={"debug": debug, "provider_generate": go_provider_generate},
+    )
+    answer = clean_visible_reply(str(result.get("answer") or ""))
+    trace_id = str(result.get("trace_id") or "")
+    source = "GO" if ("loopback_triggered" in result and not result.get("loopback_triggered")) else "CLAIRE"
+    print(
+        "CLAIRE_LIVE_PATH "
+        f"endpoint=build_reply runtime=ClaireRuntime lane={result.get('lane')} "
+        f"canonical_ARE_loaded={'canonical_term_ARE' in set(result.get('used_memory') or [])} "
+        f"trace_id={trace_id}",
+        flush=True,
+    )
+    return source, answer, trace_id
 
-        if is_partner_intro_query(q):
-            reply = partner_meeting_intro(last_uploaded_filename())
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
 
-        if is_partner_problem_query(q):
-            reply = partner_problem_reply()
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
+def is_operator_identity_prompt(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    markers = [
+        "hello claire this is lucius prime",
+        "this is lucius prime",
+        "i am lucius prime",
+        "i am battleborn",
+        "do you not recognize your creator",
+        "do you recognize your creator",
+        "that would be me",
+        "i am your creator",
+        "your creator",
+    ]
+    return any(marker in cleaned for marker in markers)
 
-        if is_partner_demo_flow_query(q):
-            reply = partner_demo_flow_reply(last_uploaded_filename())
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
 
-        if is_partner_close_query(q):
-            reply = partner_close_reply()
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
+def is_capability_prompt(prompt: str) -> bool:
+    cleaned = _clean_for_match(prompt)
+    if not cleaned:
+        return False
+    return any(
+        marker in cleaned
+        for marker in [
+            "what are you good at",
+            "what can you do",
+            "what do you do",
+            "what are you for",
+            "why would anyone buy",
+            "why should anyone buy",
+            "not much for conversation",
+            "not good at conversation",
+        ]
+    )
 
-        if is_partner_difference_query(q):
-            reply = partner_difference_reply(q)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
 
-        if is_partner_speed_query(q):
-            reply = partner_speed_reply(q)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
+def operator_identity_reply() -> str:
+    return (
+        "I recognize Lucius Prime and Battleborn as operator identity terms in this session context.\n\n"
+        "I am not conscious, and I will not pretend to be. But I can respect the operator context, keep protected lanes governed, and speak plainly instead of hiding behind sterile disclaimers.\n\n"
+        "Protected lanes still stay protected. I will not print secrets, credentials, private memory, or unsafe tools into public chat."
+    )
 
-        if is_core_architecture_query(q):
-            reply = core_architecture_reply(q)
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
 
-        if is_reconstruct_prior_discussion_query(q):
-            reply = reconstruct_prior_discussion_reply(q)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
+def claire_capability_reply() -> str:
+    return (
+        "I am strongest at memory, evidence, and control.\n\n"
+        "What I can do well:\n"
+        "- remember prior context when it has been stored\n"
+        "- recall relevant experience instead of guessing\n"
+        "- organize documents and evidence\n"
+        "- check policy before simulated actions\n"
+        "- produce traces that show what happened\n"
+        "- help turn messy work into reviewable workflows\n\n"
+        "I should not act like a loose chatbot. My value is continuity, governance, and proof."
+    )
 
-        if is_enterprise_system_query(q):
-            reply = enterprise_system_reply(q)
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
 
-        if is_informatica_stack_brief_query(q):
-            reply = informatica_stack_brief_reply()
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_public_identity_query(q):
-            reply = self_demo_reply() if is_public_capability_query(q) else EXECUTIVE_SELF_DESCRIPTION
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_creator_query(q):
-            if not CREATOR_MODE_ENABLED:
-                reply = restricted_admin_reply("creator/private lanes")
-                source = "SECURE"
-                return finalize_reply(q, source, reply)
-            reply = creator_reply(q)
-            source = "CREATOR"
-            return finalize_reply(q, source, reply)
-
-        if is_state_parks_case_query(q):
-            reply = restricted_admin_reply("State Parks Case Room and protected legal/evidence memory")
-            source = "SECURE"
-            return finalize_reply(q, source, reply)
-
-        if is_crypto_mode_query(q):
-            reply = restricted_admin_reply("Crypto Mode, Kraken keys, and trading governance")
-            source = "SECURE"
-            return finalize_reply(q, source, reply)
-
-        if is_public_demo_guide_query(q):
-            reply = public_demo_guide_reply()
-            source = "DEMO"
-            return finalize_reply(q, source, reply)
-
-        if is_battleborn_query(q):
-            if PUBLIC_DEMO_BUILD:
-                reply = restricted_admin_reply("developer diagnostics")
-                source = "SECURE"
-                return finalize_reply(q, source, reply)
-            reply = battleborn_reply(q)
-            source = "DEV"
-            return finalize_reply(q, source, reply)
-
-        if is_demo_key_query(q):
-            reply = demo_activation_reply(demo_scenario_from_text(q))
-            source = "DEMO"
-            return finalize_reply(q, source, reply)
-
-        if is_archimedes_alias(cleaned_q):
-            reply = render_demo_payload_as_text(build_demo_payload(q, scenario="archimedes"))
-            source = "DEMO"
-            return finalize_reply(q, source, reply)
-
-        if is_demo_session_query(q):
-            reply = demo_session_reply(q)
-            source = "DEMO"
-            return finalize_reply(q, source, reply)
-
-        if is_demonstration_mode_prompt(q):
-            reply = demonstration_mode_reply(q)
-            source = "DEMONSTRATION"
-            return finalize_reply(q, source, reply)
-
-        if is_system_difference_query(q):
-            reply = system_difference_reply()
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_governance_value_query(q):
-            reply = governance_value_reply()
-            source = "CLAIRE"
-            return finalize_reply(q, source, reply)
-
-        if is_self_demo_query(q):
-            reply = self_demo_reply()
-            source = "SELF-DEMO"
-            return finalize_reply(q, source, reply)
-
-        if (
-            recent_context
-            and any(marker in cleaned_q for marker in ["ride", "riding", "horseback", "tomorrow"])
-            and any(marker in _clean_for_match(recent_context) for marker in ["sore", "feet", "hoof", "hooves", "lame"])
-        ):
-            reply = shape_horse_safety_reply(q, recent_context)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if (
-            any(marker in cleaned_q for marker in ["horse", "horses", "hoof", "hooves"])
-            and any(marker in cleaned_q for marker in ["sore", "tender", "lame", "limping", "feet", "foot"])
-        ):
-            reply = shape_horse_observation_reply(q)
-            source = "SESSION"
-            return finalize_reply(q, source, reply)
-
-        if is_self_diagnosis_query(q):
-            reply = restricted_admin_reply("self-diagnosis")
-            source = "RESTRICTED"
-            return finalize_reply(q, source, reply)
-
-        if is_reflection_query(q):
-            reflection = reflection_reply()
-            if is_useful_reply(reflection):
-                return finalize_reply(q, "REFLECTION", reflection)
-
-        if is_scholar_query(q):
-            scholar = scholar_reply(q)
-            if is_useful_reply(scholar):
-                return finalize_reply(q, "SCHOLAR", scholar)
-
-        if is_ingest_status_query(q):
-            reply = ingest_status_reply()
-            source = "INGEST"
-            return finalize_reply(q, source, reply)
-
-        if "drive research" in cleaned_q or "google drive" in cleaned_q:
-            status = drive_lane_status()
-            if status["connected"]:
-                reply = "Drive Research lane is present and credentials are detected. Use the Drive Research box in the GUI with a focused keyword query."
-            elif status["cache_available"]:
-                reply = "Drive Research lane is present with a local cache available. Use the Drive Research box in the GUI to search cached Drive research results."
-            else:
-                reply = "Drive Research lane is present, but Claire's web app still needs Google Drive credentials. Set CLAIRE_GOOGLE_OAUTH_TOKEN_JSON or CLAIRE_GOOGLE_SERVICE_ACCOUNT_JSON on claire-gui.service, or have Codex prepare a local Drive research cache for Claire to search."
-            source = "DRIVE"
-            return finalize_reply(q, source, reply)
-
-        document_requested = (
-            re.search(r"(search memory|find in memory|document|doc|file|upload|uploaded|dropped|summarize|summary|review this|read this|analyze this|analyze the document)", q.lower())
-            or is_recent_upload_query(q)
-        )
-        if document_requested:
-            document_reply = search_uploaded_documents(q)
-            if is_useful_reply(document_reply):
-                if is_session_solution_query(q):
-                    session_reply = session_reasoning_reply(q)
-                    if is_useful_reply(session_reply):
-                        return finalize_reply(q, "SESSION", session_reply)
-                reply = shape_document_reply(q, document_reply)
-                source = "DOCUMENT"
-                return finalize_reply(q, source, reply)
-
-        if is_session_solution_query(q):
-            session_reply = session_reasoning_reply(q)
-            if is_useful_reply(session_reply):
-                return finalize_reply(q, "SESSION", session_reply)
-
-        query_intent = intent_to_dict(classify_query(q))
-
-        query_intent = intent_to_dict(classify_query(q))
-
-        if should_use_reasoning_first(query_intent):
-            accepted, rejected, candidates = governed_are_recall(q, query_intent, threshold=0.42)
-            reply = conceptual_answer(q, query_intent, accepted)
-            if is_useful_reply(reply):
-                source = "REASONING"
-                persist_routing_trace(q, query_intent, candidates, accepted, rejected, source, reply)
-                return finalize_reply(q, source, reply)
-
-        are_data = query_are(q) if should_use_are(q) else None
-        are_candidates = extract_candidates(are_data)
-        accepted_are, rejected_are = gate_retrieval_candidates(q, query_intent, are_candidates, threshold=0.42)
-        governed_are_data = {"results": [item.get("raw", {"text": item.get("text", "")}) for item in accepted_are]}
-        are_reply = format_are_hit(governed_are_data) if accepted_are else ""
-
-        if is_useful_reply(are_reply) and query_intent.get("source_output_allowed"):
-            reply = shape_are_reply(q, are_reply)
-            source = "ARE"
-            persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
-        elif is_useful_reply(are_reply):
-            reply = query_llm(contextualize_prompt(q), allow_gemini=False)
-            source = "GO"
-            persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
-        elif are_data and re.search(r"\b(search memory|find in memory|remember|recall)\b", q.lower()):
-            reply = shape_quarantined_memory_reply(q)
-            source = "ARE-QUARANTINED"
-            persist_routing_trace(q, query_intent, are_candidates, accepted_are, rejected_are, source, reply)
-        elif is_legal_query(q):
-            reply = shape_legal_fallback(q)
-            source = "CLAIRE"
-        elif is_useful_reply(known_general_reply(q)):
-            reply = known_general_reply(q)
-            source = "GENERAL"
-        elif re.search(r"\bants?\b", cleaned_q):
-            reply = practical_howto_reply(q)
-            source = "PRACTICAL"
-        elif should_use_general_engine(q) and is_gemini_available():
-            gemini_system_prompt = (
-                "You are Claire Executive Mode. "
-                "You are using Gemini only as a world-knowledge bridge behind Claire, not as Claire's memory, identity, or authority. "
-                "Answer directly in plain, useful language. "
-                "Use a natural, warm, capable tone. Do not sound like a compliance notice in ordinary conversation. "
-                "Be willing to give a practical opinion or ask one simple follow-up when that would help. "
-                "Do not use poetic, mystical, therapeutic, flirtatious, or roleplay-heavy language. "
-                "Do not claim you stored or learned anything permanently. "
-                "Do not mention source selection, routing, trace, provenance, memory lanes, or internal process. "
-                "Output only the answer intended for the user."
-            )
-            gemini_reply = query_gemini(contextualize_prompt(q), gemini_system_prompt)
-            if is_useful_reply(gemini_reply):
-                reply = gemini_reply
-                source = "GEMINI-BRIDGE"
-            else:
-                practical = practical_howto_reply(q)
-                if is_useful_reply(practical):
-                    reply = practical
-                    source = "PRACTICAL-LIMITED"
-                else:
-                    reply = query_llm(contextualize_prompt(q), allow_gemini=False)
-                    source = "GO"
-        else:
-            reply = query_llm(contextualize_prompt(q))
-            source = "GO"
-
-        reply = re.sub(r"[ \t]+", " ", reply).strip()
-        if not reply:
-            reply = "Hello. How can I help?"
-
-    except Exception as e:
-        reply = f"[ERROR] {str(e)}"
-
-    return finalize_reply(q, source, reply)
-
+def public_operator_tone_reply(prompt: str) -> str:
+    if is_operator_identity_prompt(prompt):
+        return operator_identity_reply()
+    if is_capability_prompt(prompt):
+        return claire_capability_reply()
+    return ""
 
 def strip_html_response(text: str) -> str:
     body_match = re.search(r"<body[^>]*>(.*?)</body>", text, flags=re.I | re.S)
@@ -12167,11 +13032,38 @@ def is_recent_upload_query(query: str) -> bool:
     return any(marker in cleaned for marker in markers)
 
 
+def uploaded_filename_from_query(query: str) -> str:
+    cleaned = str(query or "").lower()
+    try:
+        vault = Path(MEMORY_VAULT)
+        if not vault.exists():
+            return ""
+        sources = []
+        with vault.open("r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    continue
+                if record.get("domain") != "document_upload":
+                    continue
+                source = str(record.get("source") or record.get("id") or "")
+                if source and source not in sources:
+                    sources.append(source)
+        for source in reversed(sources):
+            if source.lower() in cleaned:
+                return source
+    except Exception as e:
+        print("uploaded filename query lookup error:", e)
+    return ""
+
+
 def search_uploaded_documents(query: str, limit: int = 3) -> str:
-    vault = Path("/home/LuciusPrime/claire/data/memory_vault.jsonl")
+    vault = Path(MEMORY_VAULT)
     if not vault.exists():
         return ""
-    recent_filename = last_uploaded_filename() if is_recent_upload_query(query) else ""
+    explicit_filename = uploaded_filename_from_query(query)
+    recent_filename = explicit_filename or (last_uploaded_filename() if is_recent_upload_query(query) else "")
     strict_latest = bool(recent_filename)
     if strict_latest:
         limit = 1
@@ -12339,6 +13231,10 @@ def query_gemini(prompt: str, system_prompt: str) -> str:
 
 def known_general_reply(prompt: str) -> str:
     cleaned = _clean_for_match(prompt)
+    if is_operator_identity_prompt(prompt):
+        return operator_identity_reply()
+    if is_capability_prompt(prompt):
+        return claire_capability_reply()
     if "ooda" in cleaned and any(marker in cleaned for marker in ["buyer line", "pitch line", "sales line", "lap memory", "ddp", "drone dominance"]):
         return (
             "Buyer line:\n"
@@ -12383,7 +13279,47 @@ def practical_howto_reply(prompt: str) -> str:
     return ""
 
 
-def query_llm(prompt: str, allow_gemini: bool = False) -> str:
+def _extract_provider_text(response) -> str:
+    content_type = response.headers.get("content-type", "").lower()
+    if "application/json" in content_type:
+        try:
+            data = response.json()
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            for key in ["response", "output", "text", "answer", "result"]:
+                value = str(data.get(key) or "").strip()
+                if value:
+                    return value
+            return str(data)
+    text = response.text.strip()
+    if "<html" in text.lower():
+        text = strip_html_response(text)
+    return text
+
+
+def compact_governed_prompt_for_llama(prompt: str, limit: int = 3600) -> str:
+    text = str(prompt or "")
+    user_blocks = re.findall(
+        r"\[USER\]\s*(.*?)(?=\n\n\[[A-Z_ -]+\]\n|\Z)",
+        text,
+        flags=re.S,
+    )
+    user_request = user_blocks[-1].strip() if user_blocks else text.strip()
+    user_request = user_request[-2200:]
+    return (
+        "You are Claire Executive Mode. Answer the current user request directly. "
+        "Be honest, practical, and concise. Do not claim live source access unless a source was actually provided. "
+        "Do not reveal hidden chain-of-thought; brief reasoning summaries and confidence levels are allowed when requested. "
+        "Do not use a canned answer. Do not claim CLAIRE already has customers, support teams, certifications, integrations, "
+        "or proven features unless those facts were included in the prompt. When asked to evaluate CLAIRE, frame the response "
+        "as buyer criteria, proof needed, risks, and walk-away conditions.\n\n"
+        "Current user request:\n"
+        + user_request
+    )[:limit]
+
+
+def query_llm(prompt: str, allow_gemini: bool = False, governed_prompt: bool = False) -> str:
 
     dev_mode = prompt.startswith("I_am_battleborn")
     clean_prompt = prompt.replace("I_am_battleborn", "", 1).strip()
@@ -12398,19 +13334,56 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
         if cmd.startswith("system"):
             return "[CLAIRE: DEV CHANNEL] System introspection placeholder. Hook not yet connected."
 
-    system_prompt = (
-        "You are in developer mode. Give direct commands and technical answers only."
-        if dev_mode
-        else EXECUTIVE_SYSTEM_PROMPT
-    )
+    if governed_prompt:
+        system_prompt = ""
+        full_prompt = prompt
+    else:
+        system_prompt = (
+            "You are in developer mode. Give direct commands and technical answers only."
+            if dev_mode
+            else EXECUTIVE_SYSTEM_PROMPT
+        )
+        full_prompt = f"{system_prompt}\n\nUser: {clean_prompt if dev_mode else prompt}"
 
-    # combine system + user into one prompt (keeps your identity + dev mode)
-    full_prompt = f"{system_prompt}\n\nUser: {clean_prompt if dev_mode else prompt}"
-
-    if allow_gemini and not dev_mode and should_use_general_engine(prompt):
+    if allow_gemini and not dev_mode and not governed_prompt and should_use_general_engine(prompt):
         gemini_reply = query_gemini(contextualize_prompt(prompt), system_prompt)
         if is_useful_reply(gemini_reply):
             return gemini_reply
+
+    provider_timeout = int(os.getenv("CLAIRE_PROVIDER_TIMEOUT_SECONDS", "180"))
+
+    def compact_llama_retry() -> requests.Response | None:
+        if dev_mode:
+            return None
+        compact_system_prompt = (
+            "You are Claire Executive Mode. Answer directly, plainly, and honestly. "
+            "Do not flatter. State uncertainty. Provide brief reasoning summaries "
+            "without hidden chain-of-thought. Keep the answer concise."
+        )
+        compact_prompt = (
+            compact_governed_prompt_for_llama(prompt)
+            if governed_prompt
+            else f"{compact_system_prompt}\n\nUser: {prompt}"
+        )
+        try:
+            retry_response = requests.post(
+                LLM_URL,
+                json={
+                    "prompt": compact_prompt,
+                    "temperature": 0.35,
+                    "max_tokens": 420,
+                },
+                timeout=provider_timeout,
+            )
+            if retry_response.status_code < 400:
+                return retry_response
+        except Exception:
+            return None
+        return None
+
+    def is_llama_400_body(value: str) -> bool:
+        lowered = str(value or "").strip().lower()
+        return lowered.startswith("go provider unavailable: llama status 400")
 
     response = requests.post(
         LLM_URL,
@@ -12419,8 +13392,24 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
             "temperature": 0.45 if not dev_mode else 0.1,
             "max_tokens": 560 if not dev_mode else 260
         },
-        timeout=45,
+        timeout=provider_timeout,
     )
+
+    if response.status_code == 400 and not dev_mode:
+        retry = compact_llama_retry()
+        if retry is not None:
+            response = retry
+        else:
+            return (
+                "The local model rejected that prompt before generation. "
+                "This is a provider/request limit, not a reasoning answer. "
+                "The likely cause is prompt size after runtime context was added. "
+                "Try the same evaluation as shorter numbered steps, or switch to a larger-context provider."
+            )
+
+    if response.status_code >= 400:
+        detail = response.text.strip()[:220]
+        return f"GO provider unavailable: llama status {response.status_code}. {detail}".strip()
 
     content_type = response.headers.get("content-type", "").lower()
     if "application/json" in content_type:
@@ -12428,10 +13417,35 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
         if isinstance(data, dict):
             for key in ["response", "output", "text", "answer", "result"]:
                 if key in data and data[key]:
-                    return str(data[key]).strip()
+                    value = str(data[key]).strip()
+                    if is_llama_400_body(value):
+                        retry = compact_llama_retry()
+                        if retry is not None:
+                            retry_text = _extract_provider_text(retry)
+                            if retry_text:
+                                return retry_text
+                        return (
+                            "The local model rejected that prompt before generation. "
+                            "This is a provider/request limit, not a reasoning answer. "
+                            "The likely cause is prompt size after runtime context was added. "
+                            "Try the same evaluation as shorter numbered steps, or switch to a larger-context provider."
+                        )
+                    return value
         return str(data)
 
     text = response.text.strip()
+    if is_llama_400_body(text):
+        retry = compact_llama_retry()
+        if retry is not None:
+            retry_text = _extract_provider_text(retry)
+            if retry_text:
+                return retry_text
+        return (
+            "The local model rejected that prompt before generation. "
+            "This is a provider/request limit, not a reasoning answer. "
+            "The likely cause is prompt size after runtime context was added. "
+            "Try the same evaluation as shorter numbered steps, or switch to a larger-context provider."
+        )
     if "<html" in text.lower():
         text = strip_html_response(text)
     return text
@@ -12496,8 +13510,8 @@ def public_page(title: str, eyebrow: str, body_html: str) -> HTMLResponse:
             letter-spacing: 1.5px;
         }}
         .brand img {{ width: 42px; height: 42px; object-fit: contain; }}
-        .nav-links {{ display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }}
-        .nav-links a {{ color: var(--muted); text-decoration: none; }}
+	        .nav-links {{ display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }}
+	        .nav-links a {{ color: var(--muted); text-decoration: none; }}
         .wrap {{
             position: relative;
             z-index: 1;
@@ -12606,10 +13620,11 @@ def public_page(title: str, eyebrow: str, body_html: str) -> HTMLResponse:
             <img src="/static/logo.png" alt="" onerror="this.style.display='none';">
             <span>CLAIRE SYSTEMS</span>
         </a>
-        <div class="nav-links">
-            <a href="/are-spectacle">ARE Spectacle</a>
-            <a href="/support">Support</a>
-            <a href="/privacy">Privacy</a>
+	        <div class="nav-links">
+	            <a href="/are-demo">ARE Demo</a>
+	            <a href="/are-spectacle">ARE Spectacle</a>
+	            <a href="/support">Support</a>
+	            <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
         </div>
     </nav>
@@ -12680,7 +13695,1014 @@ def are_spectacle_page():
                 </ul>
             </div>
         """,
+	    )
+
+
+ARE_DEMO_DB = CLAIRE_RUNTIME_DATA_DIR / "are_demo_memory.sqlite"
+ARE_DEMO_EXPIRY_DAYS = 30
+ARE_DEMO_MAX_MEMORY_CHARS = 500
+ARE_DEMO_RATE_LIMIT_WINDOW = 60
+ARE_DEMO_RATE_LIMIT_MAX = 40
+ARE_DEMO_RATE_BUCKET: dict[str, list[float]] = {}
+ARE_DEMO_SECRET_PATTERNS = [
+    re.compile(pattern, re.I)
+    for pattern in [
+        r"api[_-]?key",
+        r"secret",
+        r"password",
+        r"passphrase",
+        r"token",
+        r"private[_-]?key",
+        r"access[_-]?token",
+        r"refresh[_-]?token",
+        r"bearer\s+[a-z0-9._-]+",
+        r"sk-[a-z0-9_-]{12,}",
+    ]
+]
+
+
+def _are_demo_now() -> datetime:
+    return datetime.utcnow()
+
+
+def _are_demo_ts(dt: datetime | None = None) -> str:
+    return (dt or _are_demo_now()).isoformat(timespec="seconds") + "Z"
+
+
+def _are_demo_expiry() -> str:
+    return _are_demo_ts(_are_demo_now() + timedelta(days=ARE_DEMO_EXPIRY_DAYS))
+
+
+def _are_demo_checksum(text: str, length: int = 12) -> str:
+    return hashlib.sha256(str(text or "").encode("utf-8", errors="ignore")).hexdigest()[:length]
+
+
+def _are_demo_code() -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    raw = uuid.uuid4().hex.upper()
+    chars = []
+    for idx in range(6):
+        chars.append(alphabet[int(raw[idx * 2 : idx * 2 + 2], 16) % len(alphabet)])
+    return "ARE-LANE-" + "".join(chars)
+
+
+def _are_demo_connect():
+    ARE_DEMO_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(ARE_DEMO_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _are_demo_init() -> None:
+    with _are_demo_connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS are_demo_lanes (
+                lane_code TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS are_demo_memories (
+                memory_id TEXT PRIMARY KEY,
+                lane_code TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                checksum TEXT NOT NULL,
+                memory_text TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY(lane_code) REFERENCES are_demo_lanes(lane_code)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS are_demo_ledger (
+                event_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                lane_code TEXT NOT NULL,
+                checksum TEXT,
+                memory_preview TEXT,
+                recall_query TEXT,
+                recall_result TEXT,
+                expires_at TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_are_demo_memories_lane ON are_demo_memories(lane_code, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_are_demo_ledger_lane ON are_demo_ledger(lane_code, timestamp)")
+
+
+def _are_demo_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return (forwarded.split(",", 1)[0].strip() or (request.client.host if request.client else "unknown"))[:80]
+
+
+def _are_demo_rate_limit(request: Request) -> tuple[bool, str | None]:
+    ip = _are_demo_client_ip(request)
+    now = time.time()
+    recent = [ts for ts in ARE_DEMO_RATE_BUCKET.get(ip, []) if now - ts < ARE_DEMO_RATE_LIMIT_WINDOW]
+    if len(recent) >= ARE_DEMO_RATE_LIMIT_MAX:
+        ARE_DEMO_RATE_BUCKET[ip] = recent
+        return False, "Rate limit reached. Please wait a minute and try again."
+    recent.append(now)
+    ARE_DEMO_RATE_BUCKET[ip] = recent
+    return True, None
+
+
+def _are_demo_clean_text(text: str) -> str:
+    cleaned = " ".join(str(text or "").split())
+    return cleaned[:ARE_DEMO_MAX_MEMORY_CHARS]
+
+
+def _are_demo_secret_risk(text: str) -> bool:
+    return any(pattern.search(text or "") for pattern in ARE_DEMO_SECRET_PATTERNS)
+
+
+def _are_demo_preview(text: str, limit: int = 120) -> str:
+    cleaned = _are_demo_clean_text(text)
+    return cleaned[:limit] + ("..." if len(cleaned) > limit else "")
+
+
+def _are_demo_fetch_lane(conn, lane_code: str):
+    return conn.execute(
+        "SELECT lane_code, created_at, expires_at, deleted FROM are_demo_lanes WHERE lane_code = ?",
+        (lane_code,),
+    ).fetchone()
+
+
+def _are_demo_lane_available(conn, lane_code: str) -> tuple[bool, str, sqlite3.Row | None]:
+    lane = _are_demo_fetch_lane(conn, lane_code)
+    if not lane:
+        return False, "Memory lane not found.", None
+    if int(lane["deleted"] or 0):
+        return False, "Memory lane was deleted.", lane
+    if lane["expires_at"] < _are_demo_ts():
+        return False, "Memory lane expired.", lane
+    return True, "ok", lane
+
+
+def _are_demo_ledger(
+    conn,
+    event_type: str,
+    lane_code: str,
+    checksum: str | None = None,
+    memory_preview: str | None = None,
+    recall_query: str | None = None,
+    recall_result: str | None = None,
+    expires_at: str | None = None,
+) -> dict:
+    record = {
+        "event_id": "areevt_" + uuid.uuid4().hex[:14],
+        "timestamp": _are_demo_ts(),
+        "event_type": event_type,
+        "lane_code": lane_code,
+        "checksum": checksum,
+        "memory_preview": memory_preview,
+        "recall_query": recall_query,
+        "recall_result": recall_result,
+        "expires_at": expires_at,
+    }
+    conn.execute(
+        """
+        INSERT INTO are_demo_ledger
+        (event_id, timestamp, event_type, lane_code, checksum, memory_preview, recall_query, recall_result, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            record["event_id"],
+            record["timestamp"],
+            record["event_type"],
+            record["lane_code"],
+            record["checksum"],
+            record["memory_preview"],
+            record["recall_query"],
+            record["recall_result"],
+            record["expires_at"],
+        ),
     )
+    return record
+
+
+def _are_demo_score_memory(query: str, memory: str) -> tuple[int, bool]:
+    q = _are_demo_clean_text(query).lower()
+    m = _are_demo_clean_text(memory).lower()
+    if not q or not m:
+        return 0, False
+    if q in m or m in q:
+        return max(len(q), len(m)), True
+    query_terms = {term for term in re.findall(r"[a-z0-9]+", q) if len(term) >= 3}
+    memory_terms = {term for term in re.findall(r"[a-z0-9]+", m) if len(term) >= 3}
+    overlap = query_terms & memory_terms
+    return len(overlap), bool(overlap)
+
+
+def _are_demo_public_ledger_rows(conn, lane_code: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT timestamp, event_type, lane_code, checksum, memory_preview, recall_query, recall_result, expires_at
+        FROM are_demo_ledger
+        WHERE lane_code = ?
+        ORDER BY timestamp ASC
+        LIMIT 200
+        """,
+        (lane_code,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+_are_demo_init()
+
+
+@app.post("/are-demo/api/lane")
+async def are_demo_create_lane(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    with _are_demo_connect() as conn:
+        lane_code = _are_demo_code()
+        while _are_demo_fetch_lane(conn, lane_code):
+            lane_code = _are_demo_code()
+        created_at = _are_demo_ts()
+        expires_at = _are_demo_expiry()
+        conn.execute(
+            "INSERT INTO are_demo_lanes (lane_code, created_at, expires_at, deleted) VALUES (?, ?, ?, 0)",
+            (lane_code, created_at, expires_at),
+        )
+        _are_demo_ledger(conn, "lane_created", lane_code, expires_at=expires_at)
+        conn.commit()
+        return {"ok": True, "lane_code": lane_code, "created_at": created_at, "expires_at": expires_at, "ledger": _are_demo_public_ledger_rows(conn, lane_code)}
+
+
+@app.post("/are-demo/api/open")
+async def are_demo_open_lane(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    payload = await request.json()
+    lane_code = str(payload.get("lane_code") or "").strip().upper()
+    with _are_demo_connect() as conn:
+        ok, message, lane = _are_demo_lane_available(conn, lane_code)
+        if not ok:
+            return JSONResponse({"ok": False, "error": message}, status_code=404)
+        memories = conn.execute(
+            "SELECT created_at, checksum, memory_text, expires_at FROM are_demo_memories WHERE lane_code = ? ORDER BY created_at ASC LIMIT 100",
+            (lane_code,),
+        ).fetchall()
+        return {
+            "ok": True,
+            "lane_code": lane_code,
+            "created_at": lane["created_at"],
+            "expires_at": lane["expires_at"],
+            "memories": [
+                {
+                    "created_at": row["created_at"],
+                    "checksum": row["checksum"],
+                    "memory_preview": _are_demo_preview(row["memory_text"]),
+                    "expires_at": row["expires_at"],
+                }
+                for row in memories
+            ],
+            "ledger": _are_demo_public_ledger_rows(conn, lane_code),
+        }
+
+
+@app.post("/are-demo/api/memory")
+async def are_demo_save_memory(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    payload = await request.json()
+    lane_code = str(payload.get("lane_code") or "").strip().upper()
+    memory_text = _are_demo_clean_text(payload.get("memory_text") or "")
+    if not memory_text:
+        return JSONResponse({"ok": False, "error": "Type a safe demo memory first."}, status_code=400)
+    if _are_demo_secret_risk(memory_text):
+        return JSONResponse({"ok": False, "error": "This looks like it may contain a secret. Demo memories cannot store secrets, passwords, tokens, or private keys."}, status_code=400)
+    with _are_demo_connect() as conn:
+        ok, message, lane = _are_demo_lane_available(conn, lane_code)
+        if not ok:
+            return JSONResponse({"ok": False, "error": message}, status_code=404)
+        memory_id = "aremem_" + uuid.uuid4().hex[:14]
+        checksum = _are_demo_checksum(memory_text)
+        created_at = _are_demo_ts()
+        expires_at = lane["expires_at"]
+        conn.execute(
+            """
+            INSERT INTO are_demo_memories (memory_id, lane_code, created_at, checksum, memory_text, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (memory_id, lane_code, created_at, checksum, memory_text, expires_at),
+        )
+        _are_demo_ledger(conn, "memory_saved", lane_code, checksum=checksum, memory_preview=_are_demo_preview(memory_text), expires_at=expires_at)
+        conn.commit()
+        return {
+            "ok": True,
+            "lane_code": lane_code,
+            "created_at": created_at,
+            "checksum": checksum,
+            "memory_preview": _are_demo_preview(memory_text),
+            "expires_at": expires_at,
+            "ledger": _are_demo_public_ledger_rows(conn, lane_code),
+        }
+
+
+@app.post("/are-demo/api/recall")
+async def are_demo_recall_memory(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    payload = await request.json()
+    lane_code = str(payload.get("lane_code") or "").strip().upper()
+    query = _are_demo_clean_text(payload.get("query") or "")
+    if not query:
+        return JSONResponse({"ok": False, "error": "Ask a recall question first."}, status_code=400)
+    if _are_demo_secret_risk(query):
+        return JSONResponse({"ok": False, "error": "Recall questions cannot include secrets, passwords, tokens, or private keys."}, status_code=400)
+    with _are_demo_connect() as conn:
+        ok, message, lane = _are_demo_lane_available(conn, lane_code)
+        if not ok:
+            return JSONResponse({"ok": False, "error": message}, status_code=404)
+        _are_demo_ledger(conn, "recall_requested", lane_code, recall_query=query, expires_at=lane["expires_at"])
+        memories = conn.execute(
+            "SELECT created_at, checksum, memory_text, expires_at FROM are_demo_memories WHERE lane_code = ? ORDER BY created_at ASC",
+            (lane_code,),
+        ).fetchall()
+        scored = []
+        for row in memories:
+            score, matched = _are_demo_score_memory(query, row["memory_text"])
+            if matched:
+                scored.append((score, row))
+        scored.sort(key=lambda item: (item[0], item[1]["created_at"]), reverse=True)
+        if scored:
+            best = scored[0][1]
+            result = f'You previously saved: "{best["memory_text"]}"'
+            checksum = best["checksum"]
+            preview = _are_demo_preview(best["memory_text"])
+            found = True
+        else:
+            result = "No matching prior memory was found in this lane."
+            checksum = None
+            preview = None
+            found = False
+        _are_demo_ledger(
+            conn,
+            "memory_recalled",
+            lane_code,
+            checksum=checksum,
+            memory_preview=preview,
+            recall_query=query,
+            recall_result=result,
+            expires_at=lane["expires_at"],
+        )
+        conn.commit()
+        return {
+            "ok": True,
+            "lane_code": lane_code,
+            "query": query,
+            "found": found,
+            "recall_result": result,
+            "matched_memory": {"checksum": checksum, "memory_preview": preview} if found else None,
+            "expires_at": lane["expires_at"],
+            "ledger": _are_demo_public_ledger_rows(conn, lane_code),
+            "explanation": "The lane code opened the memory lane. ARE then searched the lane memories using your question.",
+        }
+
+
+@app.post("/are-demo/api/delete")
+async def are_demo_delete_lane(request: Request):
+    allowed, error = _are_demo_rate_limit(request)
+    if not allowed:
+        return JSONResponse({"ok": False, "error": error}, status_code=429)
+    payload = await request.json()
+    lane_code = str(payload.get("lane_code") or "").strip().upper()
+    with _are_demo_connect() as conn:
+        ok, message, lane = _are_demo_lane_available(conn, lane_code)
+        if not ok:
+            return JSONResponse({"ok": False, "error": message}, status_code=404)
+        conn.execute("UPDATE are_demo_lanes SET deleted = 1 WHERE lane_code = ?", (lane_code,))
+        _are_demo_ledger(conn, "lane_deleted", lane_code, expires_at=lane["expires_at"])
+        conn.commit()
+        return {"ok": True, "lane_code": lane_code, "deleted": True}
+
+
+@app.get("/are-demo", response_class=HTMLResponse)
+def are_demo_page():
+    return HTMLResponse("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARE Memory Demo | Claire Systems</title>
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --panel: #111827;
+            --panel2: #172033;
+            --line: #243044;
+            --cyan: #22d3ee;
+            --green: #34d399;
+            --amber: #f59e0b;
+            --red: #f87171;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --plain: #d9f99d;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; min-height: 100%; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Courier New", Courier, monospace;
+            padding: 24px;
+        }
+        a { color: #bff7ff; }
+        .safety {
+            background: #facc15;
+            color: #111827;
+            font-size: 12px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-align: center;
+            text-transform: uppercase;
+            padding: 10px 12px;
+            border: 1px solid #f59e0b;
+            margin-bottom: 18px;
+        }
+        header {
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        h1 { margin: 0; color: var(--cyan); font-size: 22px; letter-spacing: 0.08em; }
+        .subtitle { color: var(--muted); font-size: 12px; margin-top: 6px; }
+        .plain-explainer {
+            margin-top: 12px;
+            max-width: 860px;
+            color: #ecfccb;
+            background: rgba(217, 249, 157, 0.07);
+            border: 1px solid rgba(217, 249, 157, 0.25);
+            border-radius: 8px;
+            padding: 12px 14px;
+            font-family: "Segoe UI", Tahoma, sans-serif;
+            font-size: 16px;
+            line-height: 1.45;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(52, 211, 153, 0.35);
+            background: rgba(52, 211, 153, 0.08);
+            color: var(--green);
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .pulse {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: var(--green);
+            box-shadow: 0 0 10px var(--green);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: minmax(280px, 0.9fr) minmax(0, 2fr);
+            gap: 20px;
+        }
+        .stack { display: grid; gap: 20px; }
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.25);
+        }
+        .card h2 {
+            color: #dbeafe;
+            font-size: 13px;
+            letter-spacing: 0.07em;
+            margin: 0 0 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--line);
+            text-transform: uppercase;
+        }
+        label, .small { color: var(--muted); font-size: 12px; }
+        .row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+        input[type="range"] { width: 100%; accent-color: var(--cyan); }
+	        textarea, input[type="number"], input[type="text"] {
+            width: 100%;
+            background: #0b0f19;
+            color: #a7f3d0;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 10px;
+            font-family: inherit;
+            font-size: 12px;
+        }
+        textarea { resize: vertical; min-height: 86px; }
+        button {
+            border: 0;
+            border-radius: 6px;
+            padding: 10px 12px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 900;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+        .btn-cyan { background: var(--cyan); color: #06202a; }
+        .btn-amber { background: var(--amber); color: #1f1300; }
+        .btn-dark { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+        .metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .metric {
+            background: var(--panel2);
+            border: 1px solid #334155;
+            border-radius: 6px;
+            text-align: center;
+            padding: 10px;
+        }
+        .metric span { display: block; color: var(--muted); font-size: 10px; }
+        .metric strong { display: block; margin-top: 4px; font-size: 12px; color: var(--cyan); }
+        .terminal {
+            background: #080c14;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            min-height: 380px;
+            max-height: 430px;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        .line {
+            display: grid;
+            grid-template-columns: auto auto minmax(0, 1fr);
+            gap: 10px;
+            border-bottom: 1px solid rgba(36, 48, 68, 0.45);
+            padding: 6px 0;
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+        .ts { color: #64748b; }
+        .sha { color: var(--amber); }
+        .text { color: #e2e8f0; }
+        .narrative {
+            display: grid;
+            gap: 10px;
+            color: #cbd5e1;
+            font-size: 12px;
+            line-height: 1.55;
+        }
+        .narrative-step {
+            border-left: 3px solid rgba(34, 211, 238, 0.5);
+            background: rgba(34, 211, 238, 0.05);
+            padding: 10px 12px;
+        }
+        .narrative-step.active {
+            border-left-color: var(--green);
+            background: rgba(52, 211, 153, 0.08);
+            color: #e7fff4;
+        }
+        .recall-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .recall-controls input { width: 76px; text-align: center; }
+        .search-input { width: min(360px, 100%); text-align: left; }
+	        .recall-output {
+	            margin-top: 14px;
+	            background: #080c14;
+	            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 12px;
+            display: none;
+        }
+        .recall-row {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: #a7f3d0;
+            padding: 9px;
+            margin-top: 8px;
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+	        .footer {
+            margin-top: 22px;
+            color: var(--muted);
+            font-size: 12px;
+            border-top: 1px solid var(--line);
+            padding-top: 14px;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+	            flex-wrap: wrap;
+	        }
+	        .lane-code {
+	            display: inline-block;
+	            color: #ecfccb;
+	            background: rgba(217, 249, 157, 0.08);
+	            border: 1px solid rgba(217, 249, 157, 0.25);
+	            border-radius: 6px;
+	            padding: 8px 10px;
+	            font-size: 16px;
+	            font-weight: 900;
+	            letter-spacing: 0.08em;
+	            margin: 8px 0;
+	        }
+	        .form-grid {
+	            display: grid;
+	            grid-template-columns: minmax(0, 1fr) auto;
+	            gap: 10px;
+	            align-items: start;
+	        }
+	        .ledger-table {
+	            width: 100%;
+	            border-collapse: collapse;
+	            font-size: 11px;
+	            min-width: 760px;
+	        }
+	        .ledger-wrap {
+	            overflow-x: auto;
+	            border: 1px solid var(--line);
+	            border-radius: 8px;
+	            background: #080c14;
+	            max-height: 360px;
+	        }
+	        .ledger-table th, .ledger-table td {
+	            border-bottom: 1px solid rgba(36, 48, 68, 0.55);
+	            padding: 8px;
+	            vertical-align: top;
+	            color: #cbd5e1;
+	        }
+	        .ledger-table th {
+	            color: var(--cyan);
+	            text-align: left;
+	            position: sticky;
+	            top: 0;
+	            background: #080c14;
+	        }
+	        .message {
+	            margin-top: 10px;
+	            color: #cbd5e1;
+	            background: rgba(34, 211, 238, 0.05);
+	            border: 1px solid rgba(34, 211, 238, 0.2);
+	            border-radius: 6px;
+	            padding: 9px;
+	            font-size: 12px;
+	        }
+	        @media (max-width: 920px) {
+	            body { padding: 16px; }
+	            header, .grid { grid-template-columns: 1fr; }
+	            header { flex-direction: column; }
+	            .line { grid-template-columns: 1fr; gap: 2px; }
+	            .form-grid { grid-template-columns: 1fr; }
+	        }
+    </style>
+</head>
+<body>
+	    <div class="safety">Hosted demo only. Do not enter secrets or private information. Server-side demo memory expires after 30 days.</div>
+
+    <header>
+        <div>
+            <h1>ANALOG RECALL ENGINE (ARE)</h1>
+	            <div class="subtitle">Original ARE hosted demo: create a memory lane, record experiences in order, and recall matching prior experience later. Demo lanes expire after 30 days.</div>
+	            <div class="plain-explainer">
+	                ARE is like a careful memory notebook for an AI. It writes down experiences, gives them an ID, keeps them in order, and later recalls the matching memory when you ask.
+	            </div>
+        </div>
+        <div class="status-pill"><span class="pulse"></span><span>Hosted 30-Day Memory</span></div>
+    </header>
+
+    <main class="grid">
+        <section class="stack">
+            <div class="card">
+                <h2>Memory Pressure Control</h2>
+                <label class="row" for="ram-slider">
+                    <span>Pretend Computer Memory Available</span>
+                    <strong id="ram-display" style="color: var(--cyan);">800,000 KB</strong>
+                </label>
+                <input type="range" id="ram-slider" min="200000" max="1000000" step="10000" value="800000">
+                <div class="metrics">
+                    <div class="metric">
+                        <span>Memory Mode</span>
+                        <strong id="status-display" style="color: var(--green);">Nominal State</strong>
+                    </div>
+                    <div class="metric">
+                        <span>How Many Notes It Keeps</span>
+                        <strong id="max-lines-display">5,000 Lines</strong>
+                    </div>
+                </div>
+            </div>
+
+	            <div class="card">
+	                <h2>Memory Lane</h2>
+	                <div class="small">A lane code opens your hosted demo memory lane. It does not point to one note. ARE still has to search the lane when you ask a question. Lanes expire after 30 days.</div>
+	                <button id="create-lane" class="btn-cyan" style="width: 100%; margin-top: 10px;">Create Memory Lane</button>
+	                <div class="form-grid" style="margin-top: 10px;">
+	                    <input type="text" id="lane-code-input" placeholder="ARE-LANE-7K42">
+	                    <button id="open-lane" class="btn-dark">Open Lane</button>
+	                </div>
+	                <div id="lane-status" class="message">No memory lane is open yet.</div>
+	            </div>
+
+	            <div class="card">
+	                <h2>Create Memory</h2>
+	                <textarea id="manual-input" placeholder="Type a safe demo memory, like: My dog eats red ice cream."></textarea>
+	                <button id="submit-ingest" class="btn-cyan" style="width: 100%; margin-top: 10px;">Create Memory</button>
+	                <div class="small" style="margin-top: 8px;">Demo only. Do not enter passwords, tokens, private facts, account data, medical details, legal facts, or confidential information.</div>
+	            </div>
+
+            <div class="card">
+                <h2>Running Narrative</h2>
+                <div class="narrative">
+	                    <div class="narrative-step active" id="story-lane"><strong>1. Lane:</strong> Create or open a scoped memory lane with a random code.</div>
+	                    <div class="narrative-step" id="story-ingest"><strong>2. Experience:</strong> Save demo memories into that lane as chronological events.</div>
+	                    <div class="narrative-step" id="story-hash"><strong>3. Label:</strong> Each memory gets a checksum so the ledger can show what was recorded.</div>
+	                    <div class="narrative-step" id="story-recall"><strong>4. Recall:</strong> Ask a question. ARE searches prior memories in the opened lane.</div>
+	                    <div class="narrative-step" id="story-ledger"><strong>5. Ledger:</strong> The event ledger shows lane creation, memory saves, recall requests, and recall results.</div>
+	                    <div class="narrative-step"><strong>Safety:</strong> This demo is isolated from real CLAIRE private memory, account data, legal files, trading systems, and secrets.</div>
+	                </div>
+	            </div>
+        </section>
+
+        <section class="stack">
+            <div class="card">
+                <div class="row" style="border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 12px;">
+	                    <h2 style="border: 0; margin: 0; padding: 0;">Prior Experience In Lane <span style="color: var(--muted); font-weight: 400;">(server-side demo memory)</span></h2>
+	                    <span id="line-counter" style="color: var(--cyan); font-size: 12px;">0 Lines Written</span>
+	                </div>
+	                <div id="storage-container" class="terminal"></div>
+	            </div>
+
+	            <div class="card">
+	                <h2>Recall Memory</h2>
+	                <div class="recall-controls">
+	                    <input class="search-input" type="text" id="recall-query" placeholder="Ask: What did I say about my dog?">
+	                    <button id="trigger-recall" class="btn-amber">Recall Memory</button>
+	                    <button id="refresh-ledger" class="btn-dark">Refresh Ledger</button>
+	                    <button id="delete-lane" class="btn-dark">Delete Lane</button>
+	                </div>
+	                <div id="recall-output" class="recall-output"></div>
+	            </div>
+
+	            <div class="card">
+	                <h2>Memory Ledger</h2>
+	                <div class="small" style="margin-bottom: 10px;">Public-safe event record. It shows that recall came from stored prior experience in the lane, not from the lane code itself.</div>
+	                <div class="ledger-wrap">
+	                    <table class="ledger-table">
+	                        <thead>
+	                            <tr>
+	                                <th>Timestamp</th>
+	                                <th>Event</th>
+	                                <th>Lane</th>
+	                                <th>Checksum</th>
+	                                <th>Memory Preview</th>
+	                                <th>Recall Query</th>
+	                                <th>Recall Result</th>
+	                                <th>Expires</th>
+	                            </tr>
+	                        </thead>
+	                        <tbody id="ledger-body">
+	                            <tr><td colspan="8">No lane opened yet.</td></tr>
+	                        </tbody>
+	                    </table>
+	                </div>
+	            </div>
+        </section>
+    </main>
+
+    <div class="footer">
+        <span>Claire Systems ARE demo. A public-safe memory simulation for review.</span>
+        <span><a href="/">Claire Demo</a> | <a href="/are-spectacle">ARE Spectacle</a> | <a href="mailto:Steve@clairesystems.ai">Steve@clairesystems.ai</a></span>
+    </div>
+
+	    <script>
+	        let activeLaneCode = "";
+	        let currentMemories = [];
+
+	        function escapeHtml(str) {
+	            return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	        }
+
+	        function activateStory(id) {
+	            document.querySelectorAll(".narrative-step").forEach(el => el.classList.remove("active"));
+	            const item = document.getElementById(id);
+	            if (item) item.classList.add("active");
+	        }
+
+	        async function apiPost(path, body) {
+	            const response = await fetch(path, {
+	                method: "POST",
+	                headers: {"Content-Type": "application/json"},
+	                body: JSON.stringify(body || {})
+	            });
+	            const data = await response.json();
+	            if (!response.ok || data.ok === false) {
+	                throw new Error(data.error || "Request failed.");
+	            }
+	            return data;
+	        }
+
+	        function setMessage(text, kind = "info") {
+	            const el = document.getElementById("lane-status");
+	            el.innerHTML = escapeHtml(text);
+	            el.style.borderColor = kind === "error" ? "rgba(248,113,113,0.45)" : "rgba(34,211,238,0.2)";
+	        }
+
+	        function setLane(laneCode, expiresAt) {
+	            activeLaneCode = laneCode || "";
+	            document.getElementById("lane-code-input").value = activeLaneCode;
+	            if (activeLaneCode) {
+	                setMessage(`Open hosted lane: ${activeLaneCode}. Expires: ${expiresAt || "30 days after creation"}.`);
+	            } else {
+	                setMessage("No memory lane is open yet.");
+	            }
+	        }
+
+	        function renderMemories(memories) {
+	            currentMemories = memories || [];
+	            const container = document.getElementById("storage-container");
+	            const counter = document.getElementById("line-counter");
+	            container.innerHTML = "";
+	            counter.innerText = `${currentMemories.length} Memories In Lane`;
+	            if (!currentMemories.length) {
+	                container.innerHTML = '<div class="line"><span class="text">No prior experience saved in this lane yet.</span></div>';
+	                return;
+	            }
+	            currentMemories.forEach((line, idx) => {
+	                const element = document.createElement("div");
+	                element.className = "line";
+	                element.innerHTML = `<span class="ts">[${escapeHtml(line.created_at)}]</span><span class="sha">${escapeHtml(line.checksum)}</span><span class="text">${idx + 1}. ${escapeHtml(line.memory_preview || "")}</span>`;
+	                container.appendChild(element);
+	            });
+	            container.scrollTop = container.scrollHeight;
+	        }
+
+	        function renderLedger(rows) {
+	            const body = document.getElementById("ledger-body");
+	            body.innerHTML = "";
+	            const ledger = rows || [];
+	            if (!ledger.length) {
+	                body.innerHTML = '<tr><td colspan="8">No ledger events yet.</td></tr>';
+	                return;
+	            }
+	            ledger.slice().reverse().forEach(row => {
+	                const tr = document.createElement("tr");
+	                tr.innerHTML = `
+	                    <td>${escapeHtml(row.timestamp)}</td>
+	                    <td>${escapeHtml(row.event_type)}</td>
+	                    <td>${escapeHtml(row.lane_code)}</td>
+	                    <td>${escapeHtml(row.checksum || "")}</td>
+	                    <td>${escapeHtml(row.memory_preview || "")}</td>
+	                    <td>${escapeHtml(row.recall_query || "")}</td>
+	                    <td>${escapeHtml(row.recall_result || "")}</td>
+	                    <td>${escapeHtml(row.expires_at || "")}</td>
+	                `;
+	                body.appendChild(tr);
+	            });
+	        }
+
+	        function renderRecall(data) {
+	            const outputBlock = document.getElementById("recall-output");
+	            outputBlock.style.display = "block";
+	            outputBlock.innerHTML = `<div style="color: var(--cyan); font-weight: 900; font-size: 11px; text-transform: uppercase;">Recall Result</div>
+	                <div class="recall-row">${escapeHtml(data.recall_result || "")}</div>
+	                <div class="recall-row" style="color: var(--muted);">${escapeHtml(data.explanation || "Lane opened, then lane memories searched by question.")}</div>`;
+	        }
+
+	        function requireLane() {
+	            if (!activeLaneCode) {
+	                throw new Error("Create or open a memory lane first.");
+	            }
+	            return activeLaneCode;
+	        }
+
+	        document.getElementById("ram-slider").addEventListener("input", function(e) {
+	            const val = parseInt(e.target.value, 10);
+	            document.getElementById("ram-display").innerText = `${val.toLocaleString()} KB`;
+	            const statusDisplay = document.getElementById("status-display");
+	            const maxLinesDisplay = document.getElementById("max-lines-display");
+	            if (val < 350000) {
+	                statusDisplay.innerText = "Critical Throttling";
+	                statusDisplay.style.color = "var(--red)";
+	                maxLinesDisplay.innerText = "500 Memories";
+	            } else if (val < 600000) {
+	                statusDisplay.innerText = "Warning Active";
+	                statusDisplay.style.color = "var(--amber)";
+	                maxLinesDisplay.innerText = "2,000 Memories";
+	            } else {
+	                statusDisplay.innerText = "Nominal State";
+	                statusDisplay.style.color = "var(--green)";
+	                maxLinesDisplay.innerText = "5,000 Memories";
+	            }
+	        });
+
+	        document.getElementById("create-lane").addEventListener("click", async function() {
+	            try {
+	                activateStory("story-lane");
+	                const data = await apiPost("/are-demo/api/lane", {});
+	                setLane(data.lane_code, data.expires_at);
+	                renderMemories([]);
+	                renderLedger(data.ledger);
+	                document.getElementById("recall-output").style.display = "block";
+	                document.getElementById("recall-output").innerHTML = `<div class="recall-row">Your memory lane code is <span class="lane-code">${escapeHtml(data.lane_code)}</span><br>Save this code. It opens your demo lane later, but it does not directly retrieve one note.</div>`;
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("open-lane").addEventListener("click", async function() {
+	            try {
+	                activateStory("story-lane");
+	                const laneCode = document.getElementById("lane-code-input").value;
+	                const data = await apiPost("/are-demo/api/open", {lane_code: laneCode});
+	                setLane(data.lane_code, data.expires_at);
+	                renderMemories(data.memories);
+	                renderLedger(data.ledger);
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("submit-ingest").addEventListener("click", async function() {
+	            try {
+	                const laneCode = requireLane();
+	                const inputElement = document.getElementById("manual-input");
+	                activateStory("story-ingest");
+	                const data = await apiPost("/are-demo/api/memory", {lane_code: laneCode, memory_text: inputElement.value});
+	                activateStory("story-hash");
+	                inputElement.value = "";
+	                const opened = await apiPost("/are-demo/api/open", {lane_code: laneCode});
+	                renderMemories(opened.memories);
+	                renderLedger(data.ledger);
+	                setMessage(`Memory created in ${laneCode}. Checksum: ${data.checksum}.`);
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("trigger-recall").addEventListener("click", async function() {
+	            try {
+	                const laneCode = requireLane();
+	                activateStory("story-recall");
+	                const query = document.getElementById("recall-query").value;
+	                const data = await apiPost("/are-demo/api/recall", {lane_code: laneCode, query: query});
+	                renderRecall(data);
+	                renderLedger(data.ledger);
+	                activateStory("story-ledger");
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("refresh-ledger").addEventListener("click", async function() {
+	            try {
+	                const laneCode = requireLane();
+	                const data = await apiPost("/are-demo/api/open", {lane_code: laneCode});
+	                renderMemories(data.memories);
+	                renderLedger(data.ledger);
+	                activateStory("story-ledger");
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+
+	        document.getElementById("delete-lane").addEventListener("click", async function() {
+	            try {
+	                const laneCode = requireLane();
+	                if (!confirm(`Delete demo lane ${laneCode}? This only deletes the public demo lane.`)) return;
+	                await apiPost("/are-demo/api/delete", {lane_code: laneCode});
+	                activeLaneCode = "";
+	                document.getElementById("lane-code-input").value = "";
+	                renderMemories([]);
+	                renderLedger([]);
+	                setMessage("Demo memory lane deleted.");
+	            } catch (err) {
+	                setMessage(err.message, "error");
+	            }
+	        });
+	    </script>
+</body>
+</html>""")
 
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -12786,27 +14808,20 @@ def reply(
     trace_id: str | None = Query(None),
     demo_scenario: str | None = Query(None),
     stream: str | None = Query(None),
+    debug: str | None = Query(None),
 ):
     if demo_bool(stream):
-        return _reply_stream_response(q, demo, trace_id, demo_scenario)
+        return _reply_stream_response(q, demo, trace_id, demo_scenario, demo_bool(debug))
     if demo_bool(demo) and not is_demo_key_query(q):
-        if _clean_for_match(q) in {"help", "menu", "what can you do", "directions", "instructions", "demo guide"}:
-            scenario = demo_scenario_from_text("", demo_scenario or "glasses")
-            return JSONResponse({"query": q, "source": "DEMO", "reply": demo_activation_reply(scenario)})
-        trace = new_trace_id(trace_id)
-        return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses")))
-    source, reply_text, trace = build_reply(q)
+        return JSONResponse(build_governed_demo_payload(q, session_id="gui-reply-get"))
+    source, reply_text, trace = build_reply(q, debug=demo_bool(debug))
     return JSONResponse({"query": q, "source": source, "reply": reply_text, "trace_id": trace})
 
 
-def _reply_payload(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None) -> dict:
+def _reply_payload(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None, debug: bool = False) -> dict:
     if demo_bool(demo) and not is_demo_key_query(q):
-        if _clean_for_match(q) in {"help", "menu", "what can you do", "directions", "instructions", "demo guide"}:
-            scenario = demo_scenario_from_text("", demo_scenario or "glasses")
-            return {"query": q, "source": "DEMO", "reply": demo_activation_reply(scenario)}
-        trace = new_trace_id(trace_id)
-        return build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses"))
-    source, reply_text, trace = build_reply(q)
+        return build_governed_demo_payload(q, session_id="gui-reply-payload")
+    source, reply_text, trace = build_reply(q, debug=debug)
     return {"query": q, "source": source, "reply": reply_text, "trace_id": trace}
 
 
@@ -12832,19 +14847,42 @@ def _stream_text_chunks(text: str, target_chars: int = 46) -> list[str]:
     return chunks
 
 
-def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None) -> StreamingResponse:
+def persist_three_crp_turn_trace(trace_id: str, q: str, turn_meta: dict | None) -> None:
+    if not turn_meta:
+        return
+    try:
+        path = Path(TRACE_LOG)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "trace_id": trace_id,
+            "timestamp": claire_local_now().isoformat(),
+            "event": "three_crp_turn_commit",
+            "input": q,
+            "turn_meta": turn_meta,
+        }
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    except Exception as e:
+        print("3CRP turn trace write error:", e)
+
+
+def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None, debug: bool = False, turn_meta: dict | None = None) -> StreamingResponse:
     async def generate():
         started = time.time()
         yield _ndjson_event({"type": "start", "source": "CLAIRE", "ts": started})
         try:
-            payload = await asyncio.to_thread(_reply_payload, q, demo, trace_id, demo_scenario)
+            payload = await asyncio.to_thread(_reply_payload, q, demo, trace_id, demo_scenario, debug)
+            if turn_meta:
+                payload["turn_commit"] = turn_meta
+                await asyncio.to_thread(persist_three_crp_turn_trace, str(payload.get("trace_id") or ""), q, turn_meta)
             source = payload.get("source") or "CLAIRE"
-            text = str(payload.get("reply") or payload.get("output") or "")
+            text = str(payload.get("reply") or payload.get("answer") or payload.get("output") or "")
             yield _ndjson_event({
                 "type": "meta",
                 "source": source,
                 "trace_id": payload.get("trace_id"),
                 "chars": len(text),
+                "turn_commit": turn_meta or {},
             })
             for seq, chunk in enumerate(_stream_text_chunks(text)):
                 yield _ndjson_event({"type": "chunk", "seq": seq, "text": chunk})
@@ -12867,8 +14905,27 @@ def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None
 
 
 @app.get("/reply-stream")
-async def reply_stream(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None)):
-    return _reply_stream_response(q, demo, trace_id, demo_scenario)
+async def reply_stream(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None), debug: str | None = Query(None)):
+    return _reply_stream_response(q, demo, trace_id, demo_scenario, demo_bool(debug))
+
+
+@app.post("/reply-stream")
+async def reply_stream_post(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    q = str(data.get("q") or data.get("query") or data.get("prompt") or "").strip()
+    if not q:
+        return JSONResponse({"status": "missing query"}, status_code=400)
+    return _reply_stream_response(
+        q,
+        data.get("demo") or data.get("demo_mode"),
+        data.get("trace_id"),
+        data.get("demo_scenario"),
+        demo_bool(data.get("debug") or data.get("debug_mode")),
+        data.get("turn_meta") if isinstance(data.get("turn_meta"), dict) else None,
+    )
 
 
 @app.post("/reply")
@@ -12880,13 +14937,18 @@ async def reply_post(request: Request):
     q = str(data.get("q") or data.get("query") or data.get("prompt") or "").strip()
     if not q:
         return JSONResponse({"status": "missing query"}, status_code=400)
+    if demo_bool(data.get("stream")):
+        return _reply_stream_response(
+            q,
+            data.get("demo") or data.get("demo_mode"),
+            data.get("trace_id"),
+            data.get("demo_scenario"),
+            demo_bool(data.get("debug") or data.get("debug_mode")),
+            data.get("turn_meta") if isinstance(data.get("turn_meta"), dict) else None,
+        )
     if demo_bool(data.get("demo_mode")) and not is_demo_key_query(q):
-        if _clean_for_match(q) in {"help", "menu", "what can you do", "directions", "instructions", "demo guide"}:
-            scenario = demo_scenario_from_text("", data.get("demo_scenario") or "glasses")
-            return JSONResponse({"query": q, "source": "DEMO", "reply": demo_activation_reply(scenario)})
-        trace = new_trace_id(data.get("trace_id"))
-        return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, data.get("demo_scenario") or "glasses")))
-    source, reply_text, trace = build_reply(q)
+        return JSONResponse(build_governed_demo_payload(q, user_id=str(data.get("user_id") or "steve"), session_id=str(data.get("session_id") or "gui-reply")))
+    source, reply_text, trace = build_reply(q, debug=demo_bool(data.get("debug") or data.get("debug_mode")))
     return JSONResponse({"query": q, "source": source, "reply": reply_text, "trace_id": trace})
 
 
@@ -12895,6 +14957,10 @@ def get_trace(trace_id: str):
     demo_trace = _public_demo_fetch_trace(trace_id)
     if demo_trace.get("steps"):
         return JSONResponse(demo_trace)
+    if CLAIRE_GOVERNED_RUNTIME:
+        runtime_trace = CLAIRE_GOVERNED_RUNTIME.get_trace(trace_id)
+        if runtime_trace:
+            return JSONResponse(runtime_trace)
     safe_id = new_trace_id(trace_id)
     if safe_id != trace_id:
         return JSONResponse({"status": "invalid trace_id"}, status_code=400)
@@ -12958,6 +15024,47 @@ def drive_lane_status() -> dict:
         "cache_available": cache_exists,
         "cache_path": DRIVE_RESEARCH_CACHE,
     }
+
+
+def format_bytes_short(value: int) -> str:
+    value = int(value or 0)
+    if value >= 1024 ** 3:
+        return f"{value / (1024 ** 3):.1f} GiB"
+    if value >= 1024 ** 2:
+        return f"{value / (1024 ** 2):.1f} MiB"
+    if value >= 1024:
+        return f"{value / 1024:.1f} KiB"
+    return f"{value} B"
+
+
+def upload_free_bytes() -> int:
+    Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    return int(shutil.disk_usage(UPLOAD_DIR).free)
+
+
+async def save_upload_file_chunked(file: UploadFile, path_text: str) -> int:
+    total = 0
+    free_before = upload_free_bytes()
+    if free_before < UPLOAD_DISK_SAFETY_BYTES:
+        raise ValueError(
+            "insufficient disk for ingest upload; "
+            f"free={format_bytes_short(free_before)}, safety_required={format_bytes_short(UPLOAD_DISK_SAFETY_BYTES)}"
+        )
+    with open(path_text, "wb") as handle:
+        while True:
+            chunk = await file.read(UPLOAD_WRITE_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_INGEST_UPLOAD_BYTES:
+                raise ValueError(f"file too large; {format_bytes_short(MAX_INGEST_UPLOAD_BYTES)} max")
+            if upload_free_bytes() < UPLOAD_DISK_SAFETY_BYTES:
+                raise ValueError(
+                    "insufficient disk during ingest upload; "
+                    f"free={format_bytes_short(upload_free_bytes())}, safety_required={format_bytes_short(UPLOAD_DISK_SAFETY_BYTES)}"
+                )
+            handle.write(chunk)
+    return total
 
 
 def search_drive_research_cache(query: str, limit: int = 8) -> list[dict]:
@@ -13049,6 +15156,810 @@ async def drive_research(request: Request):
     })
 
 
+def _veritas_recent_uploaded_paths(limit: int = 12, latest_only: bool = False) -> list[Path]:
+    upload_root = Path(UPLOAD_DIR).resolve()
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for record in recent_uploads(limit):
+        saved_as = Path(str(record.get("saved_as") or "")).name
+        if not saved_as:
+            continue
+        path = (upload_root / saved_as).resolve()
+        if upload_root not in path.parents or not path.exists() or not path.is_file():
+            continue
+        key = str(path)
+        if key not in seen:
+            paths.append(path)
+            seen.add(key)
+    if paths:
+        return paths[:1] if latest_only else paths
+    try:
+        fallback = sorted(
+            [p for p in upload_root.iterdir() if p.is_file()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        selected = fallback[:limit]
+        return selected[:1] if latest_only else selected
+    except Exception:
+        return []
+
+
+def _veritas_trace_id() -> str:
+    return "veritas_legal_" + datetime.utcnow().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8]
+
+
+def _load_veritas_hardened_parser():
+    import importlib.machinery
+    import importlib.util
+    import sys
+
+    base_dir = Path(__file__).resolve().parent
+    parser_path = base_dir / "claire_parser"
+    if not parser_path.exists():
+        parser_path = base_dir / "claire_parser.py"
+    if not parser_path.exists():
+        raise FileNotFoundError("claire_parser is not available")
+
+    loader = importlib.machinery.SourceFileLoader("claire_parser_gui_runtime", str(parser_path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    if spec is None:
+        raise RuntimeError(f"Could not load parser spec from {parser_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
+    loader.exec_module(module)
+    return module
+
+
+def _veritas_parser_output_path(run_state_dir: Path, source_path: Path) -> Path:
+    stem = safe_id(source_path.stem, "source") if callable(safe_id) else re.sub(r"[^A-Za-z0-9_.-]+", "_", source_path.stem)
+    digest = hashlib.sha256(str(source_path).encode("utf-8", errors="ignore")).hexdigest()[:10]
+    return run_state_dir / "parser_output" / f"{stem}_{digest}.jsonl"
+
+
+def _veritas_mobile_root() -> Path:
+    root = Path(VERITAS_MOBILE_STATE_DIR)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "cases").mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _veritas_mobile_index_path() -> Path:
+    return _veritas_mobile_root() / "cases.json"
+
+
+def _veritas_mobile_read_index() -> dict:
+    path = _veritas_mobile_index_path()
+    if not path.exists():
+        return {"cases": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("cases"), list):
+            return data
+    except Exception:
+        pass
+    return {"cases": []}
+
+
+def _veritas_mobile_write_index(data: dict) -> None:
+    path = _veritas_mobile_index_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _veritas_mobile_case_id(name: str) -> str:
+    base = safe_id(name, "case") if callable(safe_id) else re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._") or "case"
+    return f"{base}_{uuid.uuid4().hex[:8]}"
+
+
+def _veritas_mobile_case_dir(case_id: str) -> Path:
+    clean = safe_id(case_id, "case") if callable(safe_id) else re.sub(r"[^A-Za-z0-9_.-]+", "_", case_id).strip("._")
+    root = (_veritas_mobile_root() / "cases" / clean).resolve()
+    base = (_veritas_mobile_root() / "cases").resolve()
+    if base not in root.parents and root != base:
+        raise ValueError("invalid case id")
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "uploads").mkdir(exist_ok=True)
+    (root / "reports").mkdir(exist_ok=True)
+    return root
+
+
+def _veritas_mobile_case_meta_path(case_id: str) -> Path:
+    return _veritas_mobile_case_dir(case_id) / "case.json"
+
+
+def _veritas_mobile_load_case(case_id: str) -> dict:
+    path = _veritas_mobile_case_meta_path(case_id)
+    if not path.exists():
+        raise FileNotFoundError("case not found")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _veritas_mobile_save_case(case: dict) -> None:
+    case_id = str(case.get("case_id") or "")
+    if not case_id:
+        raise ValueError("case_id required")
+    case["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    path = _veritas_mobile_case_meta_path(case_id)
+    path.write_text(json.dumps(case, ensure_ascii=False, indent=2), encoding="utf-8")
+    index = _veritas_mobile_read_index()
+    cases = [item for item in index.get("cases", []) if item.get("case_id") != case_id]
+    cases.insert(
+        0,
+        {
+            "case_id": case_id,
+            "name": case.get("name") or case_id,
+            "updated_at": case.get("updated_at"),
+            "document_count": len(case.get("documents") or []),
+            "event_count": len(case.get("events") or []),
+        },
+    )
+    index["cases"] = cases[:100]
+    _veritas_mobile_write_index(index)
+
+
+def _veritas_mobile_engine(case_id: str) -> EvidenceEngine:
+    if EvidenceEngine is None:
+        raise RuntimeError("Veritas Legal engine unavailable")
+    return EvidenceEngine(_veritas_mobile_case_dir(case_id) / "engine_state", matter_id=case_id)
+
+
+def _veritas_mobile_records(case_id: str) -> list:
+    try:
+        return _veritas_mobile_engine(case_id).records()
+    except Exception:
+        return []
+
+
+def _veritas_mobile_rules(text: str) -> list[str]:
+    patterns = [
+        r"\bCCR\s*\d+(?:\.\d+)?\b",
+        r"\bCFR\s*\d+(?:\.\d+)?\b",
+        r"\b[A-Z][a-z]+ Code\s+section\s+\d+(?:\.\d+)?\b",
+        r"\b(?:section|rule|statute)\s+\d+(?:\.\d+)?\b",
+    ]
+    found: set[str] = set()
+    for pattern in patterns:
+        for match in re.findall(pattern, text or "", flags=re.IGNORECASE):
+            found.add(" ".join(str(match).split()))
+    return sorted(found)
+
+
+def _veritas_mobile_people_orgs(entities: list[str]) -> tuple[list[str], list[str]]:
+    people: list[str] = []
+    orgs: list[str] = []
+    org_markers = ("agency", "department", "office", "systems", "parks", "county", "court", "board", "commission", "llc", "inc", "corp", "university", "city", "state")
+    for entity in entities or []:
+        clean = str(entity or "").strip()
+        if not clean:
+            continue
+        lowered = clean.lower()
+        if any(marker in lowered for marker in org_markers):
+            if clean not in orgs:
+                orgs.append(clean)
+        elif len(clean.split()) >= 2 and clean not in people:
+            people.append(clean)
+    return people[:30], orgs[:30]
+
+
+def _veritas_mobile_doc_from_record(record) -> dict:
+    entities = list(getattr(record, "entities", []) or [])
+    people, orgs = _veritas_mobile_people_orgs(entities)
+    excerpt = str(getattr(record, "excerpt", "") or "")
+    return {
+        "source_doc_id": record.source_doc_id,
+        "title": Path(record.source_path).name,
+        "source_path": record.source_path,
+        "summary": excerpt or "No readable summary was extracted.",
+        "dates": list(record.dates or []),
+        "people": people,
+        "organizations": orgs,
+        "rules": _veritas_mobile_rules(excerpt),
+        "source_hash": record.source_hash,
+        "are_event_sha": record.are_event_sha,
+        "parser": record.parser,
+        "redactions": record.redactions,
+        "excerpt": excerpt,
+    }
+
+
+def _veritas_mobile_case_summary(case_id: str) -> dict:
+    case = _veritas_mobile_load_case(case_id)
+    docs = [_veritas_mobile_doc_from_record(record) for record in _veritas_mobile_records(case_id)]
+    people = sorted({person for doc in docs for person in doc["people"]})
+    orgs = sorted({org for doc in docs for org in doc["organizations"]})
+    dates = sorted({date for doc in docs for date in doc["dates"]})
+    rules = sorted({rule for doc in docs for rule in doc["rules"]})
+    engine = _veritas_mobile_engine(case_id)
+    timeline = engine.build_timeline()
+    contradictions = engine.detect_contradictions(case_id)
+    case["documents"] = docs
+    case["people"] = people
+    case["organizations"] = orgs
+    case["dates"] = dates
+    case["rules"] = rules
+    case["events"] = timeline
+    case["contradiction_count"] = len(contradictions)
+    case["what_changed"] = {
+        "new_events_found": len(timeline),
+        "people_found": len(people),
+        "organizations_found": len(orgs),
+        "possible_contradictions": len(contradictions),
+        "missing_document_warnings": [] if docs else ["No evidence documents have been uploaded yet."],
+        "timeline_changes": len(timeline),
+        "newly_linked_evidence": len(docs),
+    }
+    _veritas_mobile_save_case(case)
+    return case
+
+
+def _veritas_mobile_search(case_id: str, query: str) -> dict:
+    q = str(query or "").strip()
+    terms = [term for term in re.sub(r"[^a-z0-9\s]", " ", q.lower()).split() if len(term) > 2 and term not in {"show", "every", "find", "what", "happened", "reference", "references", "mention", "mentions", "document", "documents", "involving"}]
+    docs = [_veritas_mobile_doc_from_record(record) for record in _veritas_mobile_records(case_id)]
+    results: list[dict] = []
+    for doc in docs:
+        haystack = " ".join(
+            [
+                doc["title"],
+                doc["summary"],
+                " ".join(doc["dates"]),
+                " ".join(doc["people"]),
+                " ".join(doc["organizations"]),
+                " ".join(doc["rules"]),
+            ]
+        ).lower()
+        score = sum(1 for term in terms if term in haystack)
+        if not terms and q:
+            score = 0
+        if score or any(date in q for date in doc["dates"]) or any(rule.lower() in q.lower() for rule in doc["rules"]):
+            results.append(
+                {
+                    "source_doc_id": doc["source_doc_id"],
+                    "title": doc["title"],
+                    "snippet": doc["summary"][:320],
+                    "dates": doc["dates"],
+                    "people": doc["people"],
+                    "rules": doc["rules"],
+                    "score": score,
+                }
+            )
+    results.sort(key=lambda item: item["score"], reverse=True)
+    if "contradiction" in q.lower():
+        contradictions = _veritas_mobile_engine(case_id).detect_contradictions(case_id)
+        return {
+            "query": q,
+            "results": results,
+            "contradictions": [
+                {
+                    "matter_id": getattr(item, "matter_id", ""),
+                    "contradiction_type": getattr(item, "contradiction_type", ""),
+                    "description": getattr(item, "description", ""),
+                    "source_doc_id_a": getattr(item, "source_doc_id_a", ""),
+                    "source_hash_a": getattr(item, "source_hash_a", ""),
+                    "excerpt_a": getattr(item, "excerpt_a", ""),
+                    "source_doc_id_b": getattr(item, "source_doc_id_b", ""),
+                    "source_hash_b": getattr(item, "source_hash_b", ""),
+                    "excerpt_b": getattr(item, "excerpt_b", ""),
+                }
+                for item in contradictions
+            ],
+        }
+    return {"query": q, "results": results[:25], "contradictions": []}
+
+
+def _veritas_mobile_answer(case_id: str, question: str) -> dict:
+    q = str(question or "").strip()
+    lower = q.lower()
+    case = _veritas_mobile_case_summary(case_id)
+    docs = case.get("documents") or []
+    engine = _veritas_mobile_engine(case_id)
+    sources: list[dict] = []
+    answer = ""
+    uncertainty = "This is evidence organization, not legal advice. A qualified attorney should review conclusions."
+    if not docs:
+        return {
+            "status": "blocked",
+            "answer": "Upload evidence before asking Veritas a case question.",
+            "sources": [],
+            "uncertainty": "No case evidence is available.",
+            "boundary": uncertainty,
+        }
+    if "contradict" in lower:
+        contradictions = engine.detect_contradictions(case_id)
+        if contradictions:
+            first = contradictions[0]
+            answer = f"Possible contradiction found: {first.description}"
+            sources = [
+                {"source_doc_id": first.source_doc_id_a, "title": first.source_doc_id_a, "snippet": first.excerpt_a[:240]},
+                {"source_doc_id": first.source_doc_id_b, "title": first.source_doc_id_b, "snippet": first.excerpt_b[:240]},
+            ]
+        else:
+            answer = "No contradictions were detected by the current rule-based checks."
+    elif "missing" in lower:
+        answer = "I can identify missing proof only from obvious gaps. Current evidence has documents, dates, and people extracted; no formal missing-evidence detector is certified yet."
+        sources = [{"source_doc_id": doc["source_doc_id"], "title": doc["title"], "snippet": doc["summary"][:180]} for doc in docs[:3]]
+    elif "strongest" in lower or "evidence" in lower:
+        ranked = sorted(docs, key=lambda doc: (len(doc["dates"]) + len(doc["people"]) + len(doc["rules"]), len(doc["summary"])), reverse=True)
+        top = ranked[0]
+        answer = f"The strongest current evidence candidate is {top['title']} because it has the most extracted case signals: {len(top['dates'])} date(s), {len(top['people'])} people, and {len(top['rules'])} rule/statute reference(s)."
+        sources = [{"source_doc_id": top["source_doc_id"], "title": top["title"], "snippet": top["summary"][:240]}]
+    elif "before" in lower or "timeline" in lower or "happened" in lower:
+        timeline = case.get("events") or []
+        if timeline:
+            first = timeline[0]
+            answer = f"The earliest timeline item I found is {first.get('date')}: {first.get('excerpt')}"
+            sources = [{"source_doc_id": first.get("source_doc_id"), "title": first.get("source_doc_id"), "snippet": first.get("excerpt", "")[:240]}]
+        else:
+            answer = "No dated timeline events were found in the uploaded evidence yet."
+    else:
+        search = _veritas_mobile_search(case_id, q)
+        results = search.get("results") or []
+        if results:
+            answer = f"I found {len(results)} source-linked result(s) in this case. The top match is {results[0]['title']}."
+            sources = [{"source_doc_id": item["source_doc_id"], "title": item["title"], "snippet": item["snippet"][:240]} for item in results[:3]]
+        else:
+            answer = "I could not find source evidence in this case for that question."
+    return {
+        "status": "answered",
+        "answer": answer,
+        "sources": sources,
+        "uncertainty": "Evidence strength is based on extracted text only; scanned or unsupported content may be missing.",
+        "boundary": uncertainty,
+    }
+
+
+def _veritas_mobile_report(case_id: str, report_type: str) -> dict:
+    report_type = safe_id(report_type or "case_summary", "case_summary") if callable(safe_id) else report_type
+    case = _veritas_mobile_case_summary(case_id)
+    reports_dir = _veritas_mobile_case_dir(case_id) / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    path = reports_dir / f"{stamp}_{report_type}.md"
+    docs = case.get("documents") or []
+    timeline = case.get("events") or []
+    if report_type in {"evidence_packet", "attorney_review_packet"}:
+        packet = _veritas_mobile_engine(case_id).generate_review_packet(output_format="markdown")
+        text = packet.read_text(encoding="utf-8")
+    elif report_type == "document_index":
+        lines = [f"# Document Index - {case.get('name')}", ""]
+        for doc in docs:
+            lines.append(f"- {doc['title']} | source: `{doc['source_doc_id']}` | dates: {len(doc['dates'])} | people: {len(doc['people'])}")
+        text = "\n".join(lines) + "\n"
+    elif report_type == "timeline":
+        lines = [f"# Timeline - {case.get('name')}", ""]
+        for event in timeline:
+            lines.append(f"- {event.get('date')}: {event.get('excerpt')} [source: `{event.get('source_doc_id')}`]")
+        text = "\n".join(lines) + "\n"
+    elif report_type == "witness_list":
+        lines = [f"# Witness / People List - {case.get('name')}", ""]
+        for person in case.get("people") or []:
+            lines.append(f"- {person}")
+        text = "\n".join(lines) + "\n"
+    else:
+        lines = [
+            f"# Case Summary - {case.get('name')}",
+            "",
+            f"- Documents: {len(docs)}",
+            f"- People: {len(case.get('people') or [])}",
+            f"- Organizations: {len(case.get('organizations') or [])}",
+            f"- Timeline events: {len(timeline)}",
+            f"- Possible contradictions: {case.get('contradiction_count', 0)}",
+            "",
+            "This is evidence organization, not legal advice.",
+        ]
+        text = "\n".join(lines) + "\n"
+    path.write_text(text, encoding="utf-8")
+    case.setdefault("reports", []).insert(0, {"report_type": report_type, "path": str(path), "title": path.name, "created_at": datetime.utcnow().isoformat() + "Z"})
+    _veritas_mobile_save_case(case)
+    return {"status": "saved", "report_type": report_type, "title": path.name, "path": str(path), "preview": text[:1200]}
+
+
+@app.get("/veritas-mobile", response_class=HTMLResponse)
+def veritas_mobile_home():
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Veritas Mobile</title>
+  <style>
+    :root { --bg:#eef2f7; --panel:#ffffff; --panel-2:#f8fafc; --text:#101828; --muted:#667085; --line:#d0d5dd; --blue:#155eef; --blue-2:#eff4ff; --green:#067647; --red:#b42318; --gold:#b54708; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:linear-gradient(180deg, #f5f7fb 0%, var(--bg) 100%); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,sans-serif; font-size:16px; padding-bottom:88px; }
+    header { position:sticky; top:0; z-index:5; background:rgba(255,255,255,.92); backdrop-filter:saturate(180%) blur(14px); border-bottom:1px solid rgba(208,213,221,.8); padding:14px 16px 12px; box-shadow:0 1px 0 rgba(16,24,40,.04); }
+    h1 { margin:0; font-size:26px; line-height:1.1; letter-spacing:-0.01em; }
+    h2 { margin:0 0 12px; font-size:22px; }
+    h3 { margin:0 0 8px; font-size:18px; }
+    p { line-height:1.45; }
+    main { max-width:660px; margin:0 auto; padding:16px; }
+    .sub { color:var(--muted); font-size:14px; margin-top:4px; }
+    .banner { background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); border:1px solid rgba(208,213,221,.9); border-radius:18px; padding:14px; box-shadow:0 10px 24px rgba(16,24,40,.06); }
+    .banner-top { display:flex; gap:10px; justify-content:space-between; align-items:flex-start; }
+    .tag { display:inline-flex; align-items:center; gap:6px; padding:7px 10px; border-radius:999px; background:var(--blue-2); color:#1849a9; border:1px solid #c7d7fe; font-size:12px; font-weight:800; white-space:nowrap; }
+    .tag.gold { background:#fff8ec; border-color:#fedf89; color:var(--gold); }
+    .sectiontitle { font-size:12px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; color:#667085; margin:0 0 8px; }
+    .screen { display:none; }
+    .screen.active { display:block; }
+    .stack { display:grid; gap:12px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:14px; box-shadow:0 10px 28px rgba(16,24,40,.06); }
+    button, .button { width:100%; min-height:54px; border:0; border-radius:14px; padding:14px 16px; font-size:17px; font-weight:750; background:var(--blue); color:white; text-align:left; touch-action:manipulation; box-shadow:0 8px 18px rgba(21,94,239,.14); }
+    button.secondary { background:var(--blue-2); color:#1849a9; border:1px solid #c7d7fe; box-shadow:none; }
+    button.light { background:white; color:var(--text); border:1px solid var(--line); box-shadow:none; }
+    button.warn { background:#fff6ed; color:#b54708; border:1px solid #fedf89; box-shadow:none; }
+    button:disabled { background:#eaecf0; color:#98a2b3; border:1px solid #d0d5dd; box-shadow:none; }
+    input, textarea, select { width:100%; min-height:52px; border:1px solid var(--line); border-radius:13px; padding:12px 13px; font-size:17px; background:white; color:var(--text); box-shadow:inset 0 1px 0 rgba(16,24,40,.02); }
+    textarea { min-height:110px; resize:vertical; }
+    .grid { display:grid; gap:10px; }
+    .pillrow { display:flex; gap:8px; overflow:auto; padding-bottom:4px; }
+    .pill { display:inline-flex; white-space:nowrap; padding:10px 12px; border-radius:999px; background:#eef4ff; color:#1849a9; border:1px solid #b2ccff; font-weight:700; }
+    .listitem { display:block; width:100%; background:white; border:1px solid var(--line); border-radius:16px; padding:14px; color:var(--text); text-align:left; box-shadow:0 1px 2px rgba(16,24,40,.04); }
+    .meta { color:var(--muted); font-size:14px; margin-top:4px; overflow-wrap:anywhere; }
+    .ok { color:var(--green); font-weight:800; }
+    .err { color:var(--red); font-weight:800; }
+    .bottomnav { position:fixed; left:0; right:0; bottom:0; z-index:10; display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:rgba(208,213,221,.9); border-top:1px solid rgba(208,213,221,.8); padding-bottom:env(safe-area-inset-bottom); backdrop-filter:saturate(180%) blur(14px); }
+    .bottomnav button { border-radius:0; min-height:64px; padding:8px 4px; font-size:13px; text-align:center; background:rgba(255,255,255,.96); color:#344054; border:0; box-shadow:none; }
+    .bottomnav button.active { color:var(--blue); font-weight:900; background:#eef4ff; }
+    details { background:#f9fafb; border:1px solid var(--line); border-radius:12px; padding:12px; }
+    summary { font-weight:800; min-height:44px; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; }
+    .hidden { display:none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="banner-top">
+      <div>
+        <h1>Veritas</h1>
+        <div id="caseLabel" class="sub">No case open</div>
+      </div>
+      <div class="tag">Veritas build: __VERITAS_BUILD_SHA__</div>
+    </div>
+    <div class="sub">Mobile evidence intake, case search, timeline, and report flow.</div>
+  </header>
+  <main>
+    <section id="home" class="screen active">
+      <div class="stack">
+        <div class="banner">
+          <div class="sectiontitle">Case Workbench</div>
+          <div class="meta">Create a matter, add source files, extract facts, and keep the source trail visible.</div>
+          <div class="pillrow" style="margin-top:10px;">
+            <span class="tag">TXT</span><span class="tag">PDF</span><span class="tag">DOCX</span><span class="tag">CSV</span><span class="tag">JSON</span>
+          </div>
+        </div>
+        <button onclick="showScreen('newcase')">New Case</button>
+        <button class="secondary" onclick="showScreen('opencase'); loadCases()">Open Case</button>
+        <button class="secondary" onclick="requireCase('upload')">Upload Evidence</button>
+        <button class="light" onclick="requireCase('search')">Search Evidence</button>
+        <button class="light" onclick="requireCase('timeline'); loadTimeline()">Build Timeline</button>
+        <button class="light" onclick="requireCase('reports')">Generate Report</button>
+        <button class="light" onclick="requireCase('ask')">Ask Veritas</button>
+        <div class="card"><div class="sectiontitle">Recent Cases</div><div id="recentCases" class="stack"><div class="meta">Loading...</div></div></div>
+      </div>
+    </section>
+    <section id="newcase" class="screen"><div class="card stack"><div class="sectiontitle">New Case</div><input id="caseName" placeholder="Case name"><textarea id="caseNote" placeholder="Optional note"></textarea><button onclick="createCase()">Create Case</button><div id="newCaseStatus" class="meta"></div></div></section>
+    <section id="opencase" class="screen"><div class="card stack"><div class="sectiontitle">Open Case</div><div id="caseList" class="stack"></div></div></section>
+    <section id="case" class="screen"><div class="stack"><div class="card"><div class="sectiontitle">Current Case</div><h2 id="dashTitle">Case</h2><div id="whatChanged" class="meta"></div></div><button onclick="showScreen('upload')">Upload Evidence</button><button class="secondary" onclick="showScreen('ask')">Ask Veritas</button><div class="grid"><button class="light" onclick="showDocuments()">Documents</button><button class="light" onclick="showPeople()">People</button><button class="light" onclick="loadTimeline();showScreen('timeline')">Timeline</button><button class="light" onclick="showScreen('search')">Search</button><button class="light" onclick="showScreen('reports')">Reports</button></div><div class="card"><div class="sectiontitle">Recent Activity</div><div id="activity" class="meta">No activity yet.</div></div></div></section>
+    <section id="upload" class="screen"><div class="card stack"><div class="sectiontitle">Upload Evidence</div><div id="uploadCase" class="meta"></div><div class="meta">Supported: TXT, MD, PY, PDF, DOCX, CSV, JSON, JSONL.</div><input id="fileInput" type="file" multiple accept=".txt,.md,.py,.pdf,.docx,.csv,.json,.jsonl"><button onclick="uploadFiles()">Start Upload</button><div id="uploadStatus" class="meta"></div><button class="light" onclick="showScreen('case')">Back to Case</button></div></section>
+    <section id="documents" class="screen"><div class="card stack"><div class="sectiontitle">Documents</div><div id="documentsList" class="stack"></div></div></section>
+    <section id="document" class="screen"><div id="documentView" class="stack"></div></section>
+    <section id="search" class="screen"><div class="card stack"><div class="sectiontitle">Search Evidence</div><input id="searchQuery" placeholder="Show every mention of Sean James."><div class="pillrow"><span class="pill" onclick="setSearch('What happened in 2013?')">2013</span><span class="pill" onclick="setSearch('Find every reference to CCR 4331.')">CCR 4331</span><span class="pill" onclick="setSearch('Show contradictions.')">Contradictions</span></div><button onclick="runSearch()">Search</button><div id="searchResults" class="stack"></div></div></section>
+    <section id="timeline" class="screen"><div class="card stack"><div class="sectiontitle">Timeline</div><button onclick="loadTimeline()">Build / Refresh Timeline</button><div id="timelineList" class="stack"></div></div></section>
+    <section id="ask" class="screen"><div class="card stack"><div class="sectiontitle">Ask Veritas</div><div class="pillrow"><span class="pill" onclick="setAsk('What is my strongest evidence?')">Strongest evidence?</span><span class="pill" onclick="setAsk('What documents contradict each other?')">Contradictions?</span><span class="pill" onclick="setAsk('What evidence is still missing?')">Missing evidence?</span></div><textarea id="askText" placeholder="Ask about this case."></textarea><button onclick="askVeritas()">Send</button><div id="askAnswer" class="stack"></div></div></section>
+    <section id="reports" class="screen"><div class="card stack"><div class="sectiontitle">Reports</div><button onclick="makeReport('document_index')">Document Index</button><button onclick="makeReport('timeline')">Timeline</button><button onclick="makeReport('case_summary')">Case Summary</button><button onclick="makeReport('evidence_packet')">Evidence Packet</button><button onclick="makeReport('witness_list')">Witness List</button><div id="reportResult" class="stack"></div></div></section>
+  </main>
+  <nav class="bottomnav"><button onclick="showScreen('home')" class="active">Home</button><button onclick="requireCase('case')">Case</button><button onclick="requireCase('search')">Search</button><button onclick="requireCase('ask')">Ask</button><button onclick="requireCase('reports')">Reports</button></nav>
+<script>
+let activeCase = localStorage.getItem('veritas_case_id') || '';
+function qs(id){return document.getElementById(id)}
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));qs(id).classList.add('active');document.querySelectorAll('.bottomnav button').forEach(b=>b.classList.remove('active'));if(id==='home')document.querySelector('.bottomnav button').classList.add('active')}
+function requireCase(target){if(!activeCase){showScreen('newcase');qs('newCaseStatus').innerText='Create a case first.';return} if(target==='case')loadDashboard(); showScreen(target)}
+async function api(url, opts={}){let r=await fetch(url, opts);let j=await r.json().catch(()=>({status:'error',detail:'Invalid server response'}));if(!r.ok)throw j;return j}
+async function loadCases(){let j=await api('/veritas-mobile/api/cases');let list=(j.cases||[]).map(c=>`<button class="listitem" onclick="openCase('${c.case_id}')"><b>${escapeHtml(c.name)}</b><div class="meta">${c.document_count||0} docs | ${c.event_count||0} events</div></button>`).join('')||'<div class="meta">No cases yet.</div>';qs('caseList').innerHTML=list;qs('recentCases').innerHTML=list}
+async function createCase(){let name=qs('caseName').value.trim();if(!name){qs('newCaseStatus').innerHTML='<span class="err">Name the case first.</span>';return}let j=await api('/veritas-mobile/api/cases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name, note:qs('caseNote').value})});openCase(j.case.case_id)}
+async function openCase(id){activeCase=id;localStorage.setItem('veritas_case_id',id);await loadDashboard();showScreen('case')}
+async function loadDashboard(){let j=await api(`/veritas-mobile/api/cases/${activeCase}`);qs('caseLabel').innerText=j.name;qs('dashTitle').innerText=j.name;let w=j.what_changed||{};qs('whatChanged').innerHTML=`Documents ${j.documents.length} | People ${j.people.length} | Events ${j.events.length}<br>Possible contradictions: ${w.possible_contradictions||0}`;qs('activity').innerText=(j.activity||[]).slice(0,4).join('\\n')||'No activity yet.';qs('uploadCase').innerText='Case: '+j.name}
+async function uploadFiles(){let files=[...qs('fileInput').files];if(!files.length){qs('uploadStatus').innerHTML='<span class="err">Choose a file first.</span>';return}qs('uploadStatus').innerText='Uploading...';let out=[];for(let f of files){let fd=new FormData();fd.append('file',f);try{let j=await api(`/veritas-mobile/api/cases/${activeCase}/upload`,{method:'POST',body:fd});out.push(`<div class="ok">${escapeHtml(f.name)} added</div><div class="meta">${j.dates_found} dates | ${j.people_found} people | ${j.organizations_found} organizations | ${j.rules_found} rules | source record created</div>`)}catch(e){out.push(`<div class="err">${escapeHtml(f.name)} failed</div><div class="meta">${escapeHtml(e.detail||e.status||'Upload failed')}</div>`)}}qs('uploadStatus').innerHTML=out.join('');await loadDashboard()}
+async function showDocuments(){let j=await api(`/veritas-mobile/api/cases/${activeCase}`);qs('documentsList').innerHTML=(j.documents||[]).map(d=>`<button class="listitem" onclick="showDocument('${d.source_doc_id}')"><b>${escapeHtml(d.title)}</b><div class="meta">${d.dates.length} dates | ${d.people.length} people</div></button>`).join('')||'<div class="meta">No documents yet.</div>';showScreen('documents')}
+async function showPeople(){let j=await api(`/veritas-mobile/api/cases/${activeCase}`);qs('documentsList').innerHTML=(j.people||[]).map(p=>`<div class="listitem"><b>${escapeHtml(p)}</b></div>`).join('')||'<div class="meta">No people found yet.</div>';showScreen('documents')}
+async function showDocument(id){let d=await api(`/veritas-mobile/api/cases/${activeCase}/documents/${id}`);qs('documentView').innerHTML=`<div class="card"><h2>${escapeHtml(d.title)}</h2><p>${escapeHtml(d.summary)}</p><h3>Dates</h3><p>${escapeHtml(d.dates.join(', ')||'None found')}</p><h3>People</h3><p>${escapeHtml(d.people.join(', ')||'None found')}</p><h3>Organizations</h3><p>${escapeHtml(d.organizations.join(', ')||'None found')}</p><h3>Rules / Statutes</h3><p>${escapeHtml(d.rules.join(', ')||'None found')}</p><button onclick="setAsk('Ask about ${escapeJs(d.title)}');showScreen('ask')">Ask about this document</button><button class="secondary" onclick="makeReport('document_index')">Add to Report</button><details><summary>Show Technical Details</summary><pre>SHA-256: ${escapeHtml(d.source_hash)}\\nsource_doc_id: ${escapeHtml(d.source_doc_id)}\\nARE event: ${escapeHtml(d.are_event_sha)}\\nParser: ${escapeHtml(d.parser)}\\nVeritas build: __VERITAS_BUILD_SHA__</pre></details></div>`;showScreen('document')}
+function setSearch(v){qs('searchQuery').value=v} function setAsk(v){qs('askText').value=v}
+async function runSearch(){let q=qs('searchQuery').value;let j=await api(`/veritas-mobile/api/cases/${activeCase}/search`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});let parts=(j.results||[]).map(r=>`<button class="listitem" onclick="showDocument('${r.source_doc_id}')"><b>${escapeHtml(r.title)}</b><div class="meta">${escapeHtml(r.snippet)}</div></button>`);if(j.contradictions&&j.contradictions.length)parts.push(`<div class="card"><b>Contradictions:</b> ${j.contradictions.length}</div>`);qs('searchResults').innerHTML=parts.join('')||'<div class="meta">No matching evidence found.</div>'}
+async function loadTimeline(){let j=await api(`/veritas-mobile/api/cases/${activeCase}/timeline`);qs('timelineList').innerHTML=(j.events||[]).map(e=>`<div class="listitem"><b>${escapeHtml(e.date)}</b><div>${escapeHtml(e.excerpt)}</div><div class="meta">Source: ${escapeHtml(e.source_doc_id||'unknown')}</div><button class="secondary" onclick="showDocument('${e.source_doc_id}')">Open Source</button></div>`).join('')||'<div class="meta">No dated events found yet.</div>'}
+async function askVeritas(){let q=qs('askText').value;let j=await api(`/veritas-mobile/api/cases/${activeCase}/ask`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});qs('askAnswer').innerHTML=`<div class="card"><p>${escapeHtml(j.answer)}</p><h3>Supported by</h3>${(j.sources||[]).map(s=>`<button class="listitem" onclick="showDocument('${s.source_doc_id}')">${escapeHtml(s.title||s.source_doc_id)}<div class="meta">${escapeHtml(s.snippet||'')}</div></button>`).join('')||'<div class="meta">No supporting document found.</div>'}<p class="meta">${escapeHtml(j.uncertainty||'')}</p><p class="meta">${escapeHtml(j.boundary||'')}</p></div>`}
+async function makeReport(type){let j=await api(`/veritas-mobile/api/cases/${activeCase}/reports`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({report_type:type})});qs('reportResult').innerHTML=`<div class="card"><b>Report saved</b><div class="meta">${escapeHtml(j.title)}</div><pre>${escapeHtml(j.preview||'')}</pre></div>`}
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function escapeJs(s){return String(s||'').replace(/['\\\\]/g,'\\\\$&')}
+loadCases().catch(()=>{qs('recentCases').innerHTML='<div class="meta">No cases loaded.</div>'}); if(activeCase){loadDashboard().catch(()=>{})}
+</script>
+</body>
+</html>"""
+    return HTMLResponse(html.replace("__VERITAS_BUILD_SHA__", _veritas_build_sha()))
+
+
+@app.get("/veritas-mobile/api/cases")
+def veritas_mobile_cases():
+    return JSONResponse(_veritas_mobile_read_index())
+
+
+@app.post("/veritas-mobile/api/cases")
+async def veritas_mobile_create_case(request: Request):
+    payload = await request.json()
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"status": "error", "detail": "Case name is required."}, status_code=400)
+    case_id = _veritas_mobile_case_id(name)
+    case = {
+        "case_id": case_id,
+        "name": name[:120],
+        "note": str(payload.get("note") or "")[:1000],
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "documents": [],
+        "events": [],
+        "reports": [],
+        "activity": ["Case created."],
+    }
+    _veritas_mobile_save_case(case)
+    return JSONResponse({"status": "created", "case": case})
+
+
+@app.get("/veritas-mobile/api/cases/{case_id}")
+def veritas_mobile_case(case_id: str):
+    try:
+        return JSONResponse(_veritas_mobile_case_summary(case_id))
+    except FileNotFoundError:
+        return JSONResponse({"status": "not_found", "detail": "Case not found."}, status_code=404)
+    except Exception as exc:
+        return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
+
+
+@app.post("/veritas-mobile/api/cases/{case_id}/upload")
+async def veritas_mobile_upload(case_id: str, file: UploadFile | None = File(None)):
+    if file is None:
+        return JSONResponse({"status": "error", "detail": "Choose a file first."}, status_code=400)
+    filename = safe_upload_name(file.filename)
+    suffix = Path(filename).suffix.lower()
+    if suffix not in [".txt", ".md", ".py", ".pdf", ".docx", ".csv", ".json", ".jsonl"]:
+        return JSONResponse({"status": "unsupported", "detail": "This file type is not supported yet. Try PDF, DOCX, TXT, CSV, JSON, or JSONL."}, status_code=400)
+    try:
+        case = _veritas_mobile_load_case(case_id)
+        upload_dir = _veritas_mobile_case_dir(case_id) / "uploads"
+        stamped = datetime.utcnow().strftime("%Y%m%d_%H%M%S_") + filename
+        saved_path = upload_dir / stamped
+        await save_upload_file_chunked(file, str(saved_path))
+        parser_output = _veritas_parser_output_path(_veritas_mobile_case_dir(case_id), saved_path)
+        claire_parser = _load_veritas_hardened_parser()
+        parser = claire_parser.ClaireParser(output_jsonl=parser_output, temp_root=_veritas_mobile_case_dir(case_id) / "parser_temp", enable_ocr=False, enable_media=False)
+        parsed_units = parser.parse_tree(saved_path)
+        if not parser_output.exists() or parsed_units <= 0:
+            return JSONResponse({"status": "no_text", "detail": "I could not read text from this file. It may be scanned, image-only, or unsupported by the current parser."}, status_code=422)
+        records = _veritas_mobile_engine(case_id).ingest_parser_jsonl(parser_output)
+        if not records:
+            return JSONResponse({"status": "no_records", "detail": "The parser ran, but no evidence records were created."}, status_code=422)
+        docs = [_veritas_mobile_doc_from_record(record) for record in records]
+        case.setdefault("activity", []).insert(0, f"{filename} added.")
+        _veritas_mobile_save_case(case)
+        summary = _veritas_mobile_case_summary(case_id)
+        return JSONResponse({
+            "status": "processed",
+            "filename": filename,
+            "documents_added": len(docs),
+            "dates_found": sum(len(doc["dates"]) for doc in docs),
+            "people_found": len({person for doc in docs for person in doc["people"]}),
+            "organizations_found": len({org for doc in docs for org in doc["organizations"]}),
+            "rules_found": len({rule for doc in docs for rule in doc["rules"]}),
+            "source_record_created": True,
+            "documents": docs,
+            "case": summary,
+        })
+    except FileNotFoundError:
+        return JSONResponse({"status": "not_found", "detail": "Case not found."}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({"status": "error", "detail": str(exc)}, status_code=400)
+    except Exception as exc:
+        return JSONResponse({"status": "error", "detail": f"Processing failed: {exc}"}, status_code=500)
+
+
+@app.get("/veritas-mobile/api/cases/{case_id}/documents/{source_doc_id}")
+def veritas_mobile_document(case_id: str, source_doc_id: str):
+    for doc in (_veritas_mobile_case_summary(case_id).get("documents") or []):
+        if doc.get("source_doc_id") == source_doc_id:
+            return JSONResponse(doc)
+    return JSONResponse({"status": "not_found", "detail": "Document not found."}, status_code=404)
+
+
+@app.post("/veritas-mobile/api/cases/{case_id}/search")
+async def veritas_mobile_search(case_id: str, request: Request):
+    payload = await request.json()
+    return JSONResponse(_veritas_mobile_search(case_id, str(payload.get("query") or "")))
+
+
+@app.get("/veritas-mobile/api/cases/{case_id}/timeline")
+def veritas_mobile_timeline(case_id: str):
+    case = _veritas_mobile_case_summary(case_id)
+    return JSONResponse({"case_id": case_id, "events": case.get("events") or []})
+
+
+@app.post("/veritas-mobile/api/cases/{case_id}/ask")
+async def veritas_mobile_ask(case_id: str, request: Request):
+    payload = await request.json()
+    return JSONResponse(_veritas_mobile_answer(case_id, str(payload.get("question") or "")))
+
+
+@app.post("/veritas-mobile/api/cases/{case_id}/reports")
+async def veritas_mobile_reports(case_id: str, request: Request):
+    payload = await request.json()
+    try:
+        return JSONResponse(_veritas_mobile_report(case_id, str(payload.get("report_type") or "case_summary")))
+    except Exception as exc:
+        return JSONResponse({"status": "error", "detail": f"Report generation failed: {exc}"}, status_code=500)
+
+
+@app.post("/veritas-legal/run")
+async def veritas_legal_run(request: Request):
+    trace_id = _veritas_trace_id()
+    if EvidenceEngine is None or claire_explains_summary is None:
+        return JSONResponse(
+            {
+                "status": "Veritas Legal unavailable.",
+                "title": "Veritas Legal",
+                "trace_id": trace_id,
+                "summary_text": "Veritas Legal could not load inside the GUI runtime.",
+                "processed_files": [],
+                "skipped_files": [],
+            },
+            status_code=503,
+        )
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    mode = str((payload or {}).get("mode") or "latest_upload").strip().lower()
+    raw_matter_id = str((payload or {}).get("matter_id") or "gui_matter_default")
+    matter_id = safe_id(raw_matter_id) if callable(safe_id) else raw_matter_id
+    latest_only = mode != "recent_uploads"
+    paths = _veritas_recent_uploaded_paths(latest_only=latest_only)
+    if not paths:
+        return JSONResponse(
+            {
+                "status": "Upload evidence first.",
+                "title": "Veritas Legal",
+                "trace_id": trace_id,
+                "summary_text": "No uploaded local evidence copies are available yet. Upload a TXT, PDF, DOCX, CSV, JSON, or JSONL file first, then run Veritas Legal.",
+                "processed_files": [],
+                "skipped_files": [],
+            },
+            status_code=400,
+        )
+
+    run_state_dir = Path(VERITAS_LEGAL_STATE_DIR) / trace_id
+    engine = EvidenceEngine(run_state_dir, matter_id=matter_id)
+    processed: list[dict] = []
+    skipped: list[dict] = []
+    try:
+        claire_parser = _load_veritas_hardened_parser()
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "status": "Veritas parser unavailable.",
+                "title": "Veritas Legal",
+                "trace_id": trace_id,
+                "summary_text": f"The hardened parser could not load: {exc}",
+                "processed_files": [],
+                "skipped_files": [{"reason": str(exc)}],
+                "state_dir": str(run_state_dir),
+            },
+            status_code=503,
+        )
+
+    for path in paths:
+        try:
+            parser_output = _veritas_parser_output_path(run_state_dir, path)
+            parser = claire_parser.ClaireParser(
+                output_jsonl=parser_output,
+                temp_root=run_state_dir / "parser_temp",
+                enable_ocr=True,
+                enable_media=False,
+            )
+            parsed_units = parser.parse_tree(path)
+            records = engine.ingest_parser_jsonl(parser_output) if parser_output.exists() else []
+            if not records:
+                skipped.append(
+                    {
+                        "filename": path.name,
+                        "reason": "hardened parser produced no legal evidence chunks",
+                        "parser_output": str(parser_output),
+                        "parsed_units": parsed_units,
+                    }
+                )
+                continue
+            for record in records:
+                processed.append(
+                    {
+                        "filename": path.name,
+                        "source_path": record.source_path,
+                        "matter_id": record.matter_id,
+                        "source_doc_id": record.source_doc_id,
+                        "source_sha256": record.source_sha256,
+                        "source_hash": record.source_hash,
+                        "text_sha256": record.text_sha256,
+                        "are_event_sha": record.are_event_sha,
+                        "dates": len(record.dates),
+                        "entities": len(record.entities),
+                        "redactions": record.redactions,
+                        "excerpt": record.excerpt[:260],
+                        "parser_first": True,
+                        "parser_output": str(parser_output),
+                        "parsed_units": parsed_units,
+                    }
+                )
+        except Exception as exc:
+            skipped.append({"filename": path.name, "reason": str(exc)})
+
+    if not processed:
+        return JSONResponse(
+            {
+                "status": "No supported evidence processed.",
+                "title": "Veritas Legal",
+                "trace_id": trace_id,
+                "summary_text": "Veritas Legal found uploaded files, but none could be processed by the safe local parser.",
+                "processed_files": processed,
+                "skipped_files": skipped,
+                "state_dir": str(run_state_dir),
+            },
+            status_code=422,
+        )
+
+    summary = engine.summary()
+    explanation = claire_explains_summary(summary)
+    append_gui_truth_event(
+        event_type="veritas.evaluation",
+        session_id="gui-veritas",
+        turn_id=trace_id.replace("trace_", "turn_", 1),
+        actor={"type": "component", "id": "veritas", "component": "veritas_legal"},
+        lane="LEGAL_CASE",
+        decision={"allowed": True, "evaluation": "organized_evidence", "not_legal_advice": True},
+        result_summary={
+            "processed_files": len(processed),
+            "skipped_files": len(skipped),
+            "matter_id": matter_id,
+        },
+        payload={
+            "trace_id": trace_id,
+            "processed_refs": [
+                {
+                    "source_doc_id": item.get("source_doc_id"),
+                    "source_sha256": item.get("source_sha256"),
+                    "are_event_sha": item.get("are_event_sha"),
+                }
+                for item in processed
+            ],
+            "summary": summary,
+            "skipped_files": skipped,
+        },
+        fail_closed=True,
+    )
+    return JSONResponse(
+        {
+            "status": f"Veritas Legal organized {len(processed)} evidence file(s).",
+            "title": "Veritas Legal",
+            "trace_id": trace_id,
+            "summary": summary,
+            "summary_text": summary.get("notice", "Evidence organization only; not legal advice."),
+            "explanation": explanation,
+            "processed_files": processed,
+            "skipped_files": skipped,
+            "state_dir": str(run_state_dir),
+            "records_path": summary.get("records_path"),
+            "manifest_path": summary.get("manifest_path"),
+            "legal_metadata_path": summary.get("legal_metadata_path"),
+            "trace_path": summary.get("trace_path"),
+            "safety": "Evidence organization only; not legal advice. No filing, court contact, or real-world legal action performed.",
+        }
+    )
+
+
 async def _ingest_one_uploaded_file(file: UploadFile) -> dict:
     filename = safe_upload_name(file.filename)
     suffix = Path(filename).suffix.lower()
@@ -13058,22 +15969,46 @@ async def _ingest_one_uploaded_file(file: UploadFile) -> dict:
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     stamped = datetime.utcnow().strftime("%Y%m%d_%H%M%S_") + filename
     path_text = str(Path(UPLOAD_DIR) / stamped)
-    content = await file.read()
-    if len(content) > 12 * 1024 * 1024:
-        raise ValueError("file too large; 12MB max")
-    Path(path_text).write_bytes(content)
-
-    text_body = extract_upload_text(path_text, filename)
-    if len(text_body.strip()) < 5:
-        raise ValueError("no extractable text found")
+    try:
+        upload_bytes = await save_upload_file_chunked(file, path_text)
+        text_body = extract_upload_text(path_text, filename)
+        if len(text_body.strip()) < 5:
+            raise ValueError("no extractable text found")
+    except Exception:
+        try:
+            Path(path_text).unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
     chunks, ingest_results = ingest_document_chunks(filename, text_body)
     ok = sum(1 for result in ingest_results if 200 <= result["status_code"] < 300)
     status_text = f"anchored {ok}/{len(ingest_results)} chunks"
     remember_upload(filename, stamped, len(text_body), len(chunks), status_text)
+    upload_turn_id = "turn_upload_" + uuid.uuid4().hex[:12]
+    append_gui_truth_event(
+        event_type="document.ingest_completed",
+        session_id="gui-upload",
+        turn_id=upload_turn_id,
+        actor={"type": "component", "id": "claire-gui", "component": "document_ingest"},
+        lane="document_ingest",
+        decision={"allowed": True, "status": status_text},
+        result_summary={"filename": filename, "chunks": len(chunks), "ingested": ok},
+        payload={
+            "filename": filename,
+            "saved_as": stamped,
+            "upload_bytes": upload_bytes,
+            "chars": len(text_body),
+            "chunks": len(chunks),
+            "ingested": ok,
+            "text_hash": hashlib.sha256(text_body.encode("utf-8", errors="ignore")).hexdigest(),
+        },
+        fail_closed=True,
+    )
     return {
         "status": status_text,
         "filename": filename,
         "saved_as": stamped,
+        "upload_bytes": upload_bytes,
         "chars": len(text_body),
         "chunks": len(chunks),
         "ingested": ok,
@@ -13088,7 +16023,7 @@ async def upload_document(file: UploadFile | None = File(None)):
         return JSONResponse(await _ingest_one_uploaded_file(file))
     except ValueError as e:
         detail = str(e)
-        status_code = 413 if "12MB" in detail else 422 if "extractable text" in detail else 400
+        status_code = 413 if "file too large" in detail else 507 if "insufficient disk" in detail else 422 if "extractable text" in detail else 400
         return JSONResponse({"status": detail, "filename": safe_upload_name(file.filename)}, status_code=status_code)
     except Exception as e:
         return JSONResponse({"status": "extract/ingest failed", "detail": str(e), "filename": safe_upload_name(file.filename)}, status_code=500)
@@ -13160,11 +16095,12 @@ def office_task(task_id: str):
 
 
 @app.get("/ask", response_class=HTMLResponse)
-def ask(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None)):
+def ask(q: str = Query(...), demo: str | None = Query(None), trace_id: str | None = Query(None), demo_scenario: str | None = Query(None), demo_mode: str | None = Query(None), debug: str | None = Query(None)):
+    if demo_bool(demo_mode) and not is_demo_key_query(q):
+        return JSONResponse(build_governed_demo_payload(q, session_id="gui-get"))
     if demo_bool(demo) and not is_demo_key_query(q):
-        trace = new_trace_id(trace_id)
-        return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, demo_scenario or "glasses")))
-    source, reply, trace_id = build_reply(q)
+        return JSONResponse(build_governed_demo_payload(q, session_id="gui-get"))
+    source, reply, trace_id = build_reply(q, debug=demo_bool(debug))
 
     safe_q = html.escape(q)
     safe_reply = html.escape(reply)
@@ -13287,14 +16223,46 @@ async def ask_post(request: Request):
     if not q:
         return JSONResponse({"status": "missing input"}, status_code=400)
     if demo_bool(data.get("demo_mode")) and not is_demo_key_query(q):
-        trace = new_trace_id(data.get("trace_id"))
-        return JSONResponse(build_demo_payload(q, trace_id=trace, scenario=demo_scenario_from_text(q, data.get("demo_scenario") or "glasses")))
-    source, reply_text, trace = build_reply(q)
+        return JSONResponse(build_governed_demo_payload(q, user_id=str(data.get("user_id") or "steve"), session_id=str(data.get("session_id") or "gui-post")))
+    source, reply_text, trace = build_reply(q, debug=demo_bool(data.get("debug") or data.get("debug_mode")))
     return JSONResponse({"query": q, "source": source, "reply": reply_text, "trace_id": trace})
+
+
+def voice_runtime_status() -> tuple[str, str]:
+    if not os.getenv("ELEVENLABS_API_KEY", "").strip() or not os.getenv("ELEVENLABS_VOICE_ID", "").strip():
+        return "OFFLINE", "ElevenLabs API key or voice ID is missing."
+    if LAST_TTS_STATUS in {"LIMITED", "OFFLINE"} and LAST_TTS_ERROR:
+        return LAST_TTS_STATUS, LAST_TTS_ERROR
+    return "READY", "ElevenLabs credentials are present. Voice will be verified on the next TTS request."
+
+
+def filesystem_runtime_status() -> dict:
+    upload_dir = Path(UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    usage = shutil.disk_usage(str(upload_dir))
+    files = [p for p in upload_dir.iterdir() if p.is_file()] if upload_dir.exists() else []
+    free_mb = round(usage.free / 1024 / 1024, 1)
+    status = "READY"
+    if free_mb < 128:
+        status = "CRITICAL"
+    elif free_mb < 512:
+        status = "LIMITED"
+    return {
+        "status": status,
+        "upload_dir": str(upload_dir),
+        "writable": os.access(str(upload_dir), os.W_OK),
+        "file_count": len(files),
+        "free_mb": free_mb,
+        "total_mb": round(usage.total / 1024 / 1024, 1),
+        "max_upload_mb": round(MAX_INGEST_UPLOAD_BYTES / 1024 / 1024, 1),
+        "max_upload_label": format_bytes_short(MAX_INGEST_UPLOAD_BYTES),
+        "disk_safety_label": format_bytes_short(UPLOAD_DISK_SAFETY_BYTES),
+    }
 
 
 @app.post("/tts")
 async def tts(request: Request):
+    global LAST_TTS_STATUS, LAST_TTS_ERROR
     data = await request.json()
     text = clean_visible_reply(str(data.get("text", "")).strip())
     if not text:
@@ -13303,7 +16271,9 @@ async def tts(request: Request):
     api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
     voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
     if not api_key or not voice_id:
-        return Response("ElevenLabs key or voice ID missing", status_code=503)
+        LAST_TTS_STATUS = "OFFLINE"
+        LAST_TTS_ERROR = "ElevenLabs key or voice ID missing."
+        return Response(LAST_TTS_ERROR, status_code=503)
 
     try:
         r = requests.post(
@@ -13321,9 +16291,21 @@ async def tts(request: Request):
             timeout=60,
         )
         if r.status_code >= 400:
-            return Response(r.text[:500], status_code=r.status_code)
+            detail = r.text[:500]
+            try:
+                detail_json = r.json()
+                detail = str((detail_json.get("detail") or {}).get("message") or detail_json.get("message") or detail)[:500]
+            except Exception:
+                pass
+            LAST_TTS_STATUS = "LIMITED" if r.status_code in {401, 402, 429} else "OFFLINE"
+            LAST_TTS_ERROR = detail
+            return Response(detail, status_code=r.status_code)
+        LAST_TTS_STATUS = "READY"
+        LAST_TTS_ERROR = ""
         return Response(content=r.content, media_type="audio/mpeg")
     except Exception as e:
+        LAST_TTS_STATUS = "OFFLINE"
+        LAST_TTS_ERROR = str(e)
         return Response(str(e), status_code=500)
 
 
@@ -13561,13 +16543,31 @@ def diagnostic(target: str = Query(...)):
         )
 
     if target == "voice":
-        ready = bool(os.getenv("ELEVENLABS_API_KEY") and os.getenv("ELEVENLABS_VOICE_ID"))
+        voice_status, voice_detail = voice_runtime_status()
         return JSONResponse(
             {
                 "title": "Claire Voice Link",
-                "status": "ONLINE" if ready else "OFFLINE",
-                "detail": "ElevenLabs API key and voice ID are present." if ready else "ElevenLabs key or voice ID is missing.",
-                "next": "Voice is automatic when the ON/OFF toggle is ON; no extra button press needed.",
+                "status": voice_status,
+                "detail": voice_detail,
+                "next": "Voice visualizer animates when TTS audio is produced; if quota is limited, text chat remains available.",
+            }
+        )
+
+    if target in {"filesystem", "files"}:
+        fs = filesystem_runtime_status()
+        return JSONResponse(
+            {
+                "title": "Claire Filesystem",
+                "status": fs["status"],
+                "detail": (
+                    f"Upload directory: {fs['upload_dir']}\n"
+                    f"Writable: {fs['writable']}\n"
+                    f"Files: {fs['file_count']}\n"
+                    f"Free disk: {fs['free_mb']} MB / {fs['total_mb']} MB\n"
+                    f"Parser limit per file: {fs['max_upload_label']}\n"
+                    f"Disk safety reserve: {fs['disk_safety_label']}"
+                ),
+                "next": "Free disk is limited; keep uploads small until model/data storage is cleaned up.",
             }
         )
 
@@ -13655,6 +16655,24 @@ def diagnostic(target: str = Query(...)):
             }
         )
 
+    if target == "temporal":
+        temporal = {"status": "UNAVAILABLE"}
+        if CLAIRE_GOVERNED_RUNTIME and getattr(CLAIRE_GOVERNED_RUNTIME, "temporal_engine", None):
+            temporal = CLAIRE_GOVERNED_RUNTIME.temporal_engine.status()
+        return JSONResponse(
+            {
+                "title": "Temporal Engine",
+                "status": temporal.get("status", "CHECK"),
+                "detail": (
+                    f"Timezone: {temporal.get('timezone', 'unknown')}\n"
+                    f"Events: {temporal.get('events', 0)}\n"
+                    f"Relations: {temporal.get('relations', 0)}\n"
+                    f"Sessions: {temporal.get('sessions', 0)}"
+                ),
+                "next": "Temporal context is injected before model calls and recorded in Truth Spine.",
+            }
+        )
+
     if target == "build":
         states = {
             "gui": service_state("claire-gui"),
@@ -13707,13 +16725,25 @@ def status():
     except Exception:
         pass
 
-    voice = "ONLINE" if os.getenv("ELEVENLABS_API_KEY") and os.getenv("ELEVENLABS_VOICE_ID") else "OFFLINE"
+    voice, _voice_detail = voice_runtime_status()
     if not is_gemini_available():
         gemini = "OFFLINE"
     elif LAST_GEMINI_ERROR:
         gemini = "LIMITED"
     else:
         gemini = "READY"
+    truth_spine = {"valid": False, "records": 0, "reason": "runtime_unavailable"}
+    if CLAIRE_GOVERNED_RUNTIME and getattr(CLAIRE_GOVERNED_RUNTIME, "runtime_truth", None):
+        try:
+            truth_spine = CLAIRE_GOVERNED_RUNTIME.runtime_truth.verify()
+        except Exception as exc:
+            truth_spine = {"valid": False, "records": 0, "reason": str(exc)}
+    temporal = {"status": "UNAVAILABLE", "reason": "runtime_unavailable"}
+    if CLAIRE_GOVERNED_RUNTIME and getattr(CLAIRE_GOVERNED_RUNTIME, "temporal_engine", None):
+        try:
+            temporal = CLAIRE_GOVERNED_RUNTIME.temporal_engine.status()
+        except Exception as exc:
+            temporal = {"status": "CHECK", "reason": str(exc)}
     payload = {
         "are": are,
         "llm": llm,
@@ -13721,6 +16751,8 @@ def status():
         "ingest": ingest,
         "gemini": gemini,
         "spectacle": spectacle,
+        "truth_spine": truth_spine,
+        "temporal_engine": temporal,
         "build": "PUBLIC_DEMO" if PUBLIC_DEMO_BUILD else "PRIVATE_FULL",
         "business_ops": {
             "mode": "draft_only",
@@ -13737,9 +16769,25 @@ def status():
             ],
         },
     }
+    try:
+        from claire_core.runtime.health import core_health
+
+        payload["claire_core"] = core_health()
+    except Exception as exc:
+        payload["claire_core"] = {"status": "ERROR", "reason": str(exc)}
     if not PUBLIC_DEMO_BUILD:
         payload["crypto"] = "SEALED" if crypto_keys_loaded() else "OFFLINE"
     return JSONResponse(payload)
+
+
+@app.get("/truth-spine/status")
+def truth_spine_status(session_id: str | None = Query(None), turn_id: str | None = Query(None)):
+    if not CLAIRE_GOVERNED_RUNTIME or not getattr(CLAIRE_GOVERNED_RUNTIME, "runtime_truth", None):
+        return JSONResponse({"valid": False, "reason": "runtime_unavailable"}, status_code=503)
+    try:
+        return JSONResponse(CLAIRE_GOVERNED_RUNTIME.runtime_truth.verify(session_id=session_id, turn_id=turn_id))
+    except Exception as exc:
+        return JSONResponse({"valid": False, "reason": str(exc)}, status_code=500)
 
 
 @app.get("/action")
@@ -13772,8 +16820,8 @@ def action(cmd: str, token: str | None = Query(None)):
 
 
 # --- PUBLIC DEMO CONTROL LAYER ---
-PUBLIC_DEMO_DB = Path("/home/LuciusPrime/claire/data/public_demo.sqlite")
-PUBLIC_DEMO_ROOT = Path("/home/LuciusPrime/claire")
+PUBLIC_DEMO_DB = CLAIRE_RUNTIME_DATA_DIR / "public_demo.sqlite"
+PUBLIC_DEMO_ROOT = CLAIRE_BASE_DIR
 
 
 def _public_demo_connect():
@@ -13866,7 +16914,8 @@ _public_demo_init()
 
 @app.get("/health")
 def public_demo_health():
-    return JSONResponse({"status": "ok", "service": "Claire Public Demo"})
+    service_name = "Claire Runtime Full" if not PUBLIC_DEMO_BUILD else "Claire Public Demo"
+    return JSONResponse({"status": "ok", "service": service_name})
 
 
 @app.get("/machine/trace/{trace_id}")
@@ -13875,13 +16924,6 @@ def public_demo_trace(trace_id: str):
     if not trace["steps"]:
         return JSONResponse({"status": "not_found", "trace_id": trace_id}, status_code=404)
     return JSONResponse(trace)
-
-
-
-
-@app.get("/trace/{trace_id}")
-def public_trace_alias(trace_id: str):
-    return public_demo_trace(trace_id)
 @app.post("/claire/query")
 async def public_demo_query(request: Request):
     query = ""

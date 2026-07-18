@@ -1,0 +1,32 @@
+{
+  "description": "Duplicate-content Federal Register search results for duplicate detection",
+  "count": 2,
+  "total_pages": 1,
+  "next_page_url": null,
+  "results": [
+    {
+      "title": "AI Governance Assessment Notice",
+      "type": "Notice",
+      "abstract": "Public comment is sought on an AI governance assessment program.",
+      "document_number": "2026-20001",
+      "html_url": "https://www.federalregister.gov/documents/2026/07/13/2026-20001/ai-governance-assessment-notice",
+      "pdf_url": "https://www.govinfo.gov/content/pkg/FR-2026-07-13/pdf/2026-20001.pdf",
+      "public_inspection_pdf_url": null,
+      "publication_date": "2026-07-13",
+      "agencies": [],
+      "excerpts": "Public comment is sought on an AI governance assessment program."
+    },
+    {
+      "title": "AI Governance Assessment Notice",
+      "type": "Notice",
+      "abstract": "Public comment is sought on an AI governance assessment program.",
+      "document_number": "2026-20002",
+      "html_url": "https://www.federalregister.gov/documents/2026/07/13/2026-20002/ai-governance-assessment-notice-copy",
+      "pdf_url": "https://www.govinfo.gov/content/pkg/FR-2026-07-13/pdf/2026-20002.pdf",
+      "public_inspection_pdf_url": null,
+      "publication_date": "2026-07-13",
+      "agencies": [],
+      "excerpts": "Public comment is sought on an AI governance assessment program."
+    }
+  ]
+}

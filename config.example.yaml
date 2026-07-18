@@ -1,0 +1,35 @@
+environment: development
+data_dir: ./data
+
+core:
+  enabled: false
+  shadow_mode: true
+  continuity_enabled: true
+  temporal_enabled: true
+  cognitive_enabled: true
+  provenance_enabled: true
+  governance_enabled: true
+
+runtime:
+  host: 0.0.0.0
+  claire_port: 8000
+  veritas_port: 8020
+  local_only: true
+
+models:
+  provider: llama
+  endpoint: http://127.0.0.1:8080/v1/chat/completions
+  model_name: replace-with-local-model-id
+  timeout_seconds: 90
+
+storage:
+  are_dir: ./data/are
+  truth_spine_dir: ./data/truth_spine
+  ember_dir: ./data/ember
+  traces_dir: ./data/traces
+  uploads_dir: ./data/uploads
+
+security:
+  allow_memory_writes: true
+  reject_secret_like_memory: true
+  legal_evidence_uploads_enabled: false

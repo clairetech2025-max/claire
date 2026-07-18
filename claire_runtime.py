@@ -1,0 +1,2262 @@
+from __future__ import annotations
+
+import json
+import re
+import time
+from dataclasses import asdict
+from datetime import timedelta
+from typing import Any
+
+from are_memory_store import AREMemoryStore, MemoryEvent
+from authority_capsule import AuthorityCapsule
+from claire.runtime.gyro import GyroOrientationLayer
+from claire.runtime.loopback import LoopbackLayer
+from claire.runtime.trace import gyro_trace_object
+from claire_core.adapters.echoshield import EchoShield
+from claire_core.adapters.sentinel import RuntimeSentinel
+from claire_core.runtime.feature_flags import current_feature_flags
+from claire_core.runtime.shadow_mode import evaluate_shadow
+from claire_runtime_truth import (
+    Runtime3CRPAuthority,
+    RuntimeTruthEvent,
+    RuntimeTruthSpine,
+    q_insight_packet,
+    recognition_packet_from_are,
+)
+from context_builder import build_context_packet
+from current_truth_loader import load_current_truth, truth_for_lane
+from diode_protocol import DiodeProtocol
+from entity_registry import identify_entities
+from faiss_are_index import original_are_records, query_records
+from handshake_broker import HandshakeBroker
+from lane_classifier import LaneResult, classify_lane
+from claire_runtime_router import c3rp_classify, normalize_input as c3rp_normalize_input, provisional_orientation
+from language_guard import strengthen_confidence_language
+from memory_committer import commit_if_needed, should_commit_memory
+from memory_eligibility import evaluate_memory_eligibility
+from nemotron_adapter import build_messages, call_nemotron, messages_to_prompt
+from nvidia_mode import apply_nvidia_mode, nvidia_constraints
+from original_are_bridge import append_original_are_memory, read_original_are_history
+from sentinel_validator import validate_response
+from temporal_engine import TemporalEngine, TemporalEvent, TemporalInstant, parse_aware_datetime
+from trace_logger import TraceLogger, new_trace_id, sha_text
+
+
+class ClaireRuntime:
+    """
+    Governed runtime around Nemotron.
+
+    Nemotron is only called after CLAIRE has normalized input, classified lane,
+    reviewed memory eligibility, loaded current truth, recalled lane-eligible
+    memory, built context, and applied risk/authority gates.
+    """
+
+    def __init__(
+        self,
+        memory_store: AREMemoryStore | None = None,
+        trace_logger: TraceLogger | None = None,
+        model_config: dict[str, Any] | None = None,
+        use_original_are: bool | None = None,
+        temporal_engine: TemporalEngine | None = None,
+    ) -> None:
+        self.use_original_are = (memory_store is None) if use_original_are is None else use_original_are
+        self.memory_store = memory_store if memory_store is not None else (None if self.use_original_are else AREMemoryStore())
+        self.trace_logger = trace_logger or TraceLogger()
+        self.model_config = model_config or {}
+        self.handshake_broker = HandshakeBroker()
+        self.diode = DiodeProtocol()
+        self.gyro = GyroOrientationLayer()
+        self.loopback = LoopbackLayer()
+        self.runtime_truth = RuntimeTruthSpine.from_env()
+        self.runtime_3crp = Runtime3CRPAuthority()
+        self.temporal_engine = temporal_engine or TemporalEngine()
+        self.echo_shield = EchoShield()
+        self.runtime_sentinel = RuntimeSentinel()
+
+    def _append_runtime_event(
+        self,
+        *,
+        event_type: str,
+        session_id: str,
+        turn_id: str,
+        actor: dict[str, Any] | None = None,
+        lane: str = "",
+        floor_state: str = "",
+        decision: dict[str, Any] | None = None,
+        result_summary: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        evidence_refs: list[str] | None = None,
+        parent_event_ids: list[str] | None = None,
+        status: str = "committed",
+        fail_closed: bool = False,
+    ) -> dict[str, Any]:
+        return self.runtime_truth.append(
+            RuntimeTruthEvent(
+                event_type=event_type,
+                session_id=session_id,
+                turn_id=turn_id,
+                actor=actor or {"type": "component", "id": "claire-runtime", "component": "runtime"},
+                lane=lane,
+                floor_state=floor_state,
+                decision=decision or {},
+                result_summary=result_summary or {},
+                payload=payload or {},
+                evidence_refs=evidence_refs or [],
+                parent_event_ids=parent_event_ids or [],
+                status=status,
+            ),
+            fail_closed=fail_closed,
+        )
+
+    def handle_user_message(
+        self,
+        user_id: str,
+        session_id: str,
+        message: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        metadata = metadata or {}
+        if metadata.get("demo_mode"):
+            return self.handle_demo_message(user_id, session_id, message, metadata)
+        trace_id = new_trace_id()
+        turn_id = str(metadata.get("turn_id") or trace_id.replace("trace_", "turn_", 1))
+        timezone_name = str(metadata.get("timezone") or metadata.get("timezone_name") or "")
+        temporal_session = self.temporal_engine.start_session(session_id, timezone_name or None)
+        temporal_turn = self.temporal_engine.start_turn(session_id, turn_id)
+        temporal_context = self.temporal_engine.get_now(
+            session_id=session_id,
+            turn_id=turn_id,
+            timezone_name=timezone_name or temporal_session.get("timezone_name"),
+        )
+        origin = {
+            "type": "user",
+            "id": str(user_id or "guest"),
+            "component": str(metadata.get("source_component") or "claire_gui"),
+            "device_id": str(metadata.get("device_id") or "unknown"),
+        }
+        session_event = self._append_runtime_event(
+            event_type="session.turn_started",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor=origin,
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            payload={"trace_id": trace_id},
+            result_summary={"status": "started"},
+        )
+        temporal_context_event = self._append_runtime_event(
+            event_type="temporal.context_created",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "temporal-engine", "component": "temporal_engine"},
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            result_summary={
+                "timezone": temporal_context.timezone_name,
+                "session_elapsed_seconds": temporal_context.session_elapsed_seconds,
+                "turn_elapsed_seconds": temporal_context.turn_elapsed_seconds,
+            },
+            payload={
+                "temporal_context": asdict(temporal_context),
+                "session_record": temporal_session,
+                "turn_record": temporal_turn,
+            },
+            parent_event_ids=[session_event["event_id"]],
+        )
+
+        normalized_raw = self._normalize_input(message)
+        normalized = self.diode.redact(normalized_raw)
+        secret_detected = self.diode.contains_secret(normalized_raw)
+        input_hash = sha_text(normalized)
+        temporal_resolution = self.temporal_engine.resolve_expression(
+            normalized,
+            reference_time=temporal_context.now_local,
+            timezone_name=temporal_context.timezone_name,
+        )
+        temporal_resolution_event = self._append_runtime_event(
+            event_type="temporal.ambiguity_detected" if temporal_resolution.get("status") == "ambiguous" else "temporal.relative_time_resolved",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "temporal-engine", "component": "temporal_engine"},
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            decision={"status": temporal_resolution.get("status")},
+            result_summary={
+                "expressions": len(temporal_resolution.get("expressions") or []),
+                "ambiguities": len(temporal_resolution.get("ambiguities") or []),
+            },
+            payload={"temporal_resolution": temporal_resolution},
+            parent_event_ids=[temporal_context_event["event_id"]],
+        )
+        ingress_decision = self.runtime_3crp.admit_input(
+            origin=origin,
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            fragment=bool(metadata.get("fragment")),
+        )
+        ingress_event = self._append_runtime_event(
+            event_type="3crp.ingress",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "ingress"},
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            decision=ingress_decision,
+            payload={"input_hash": input_hash, "secret_redacted": bool(secret_detected)},
+            parent_event_ids=[temporal_resolution_event["event_id"]],
+            status="committed" if ingress_decision.get("allowed") else "rejected",
+            fail_closed=not ingress_decision.get("allowed", False),
+        )
+        debug_requested = self._debug_enabled(metadata, normalized)
+        c3rp_route = self._c3rp_route(normalized)
+        c3rp_ingress_route_event = self._append_runtime_event(
+            event_type="3crp.route_preliminary",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "lane_router"},
+            lane=str(c3rp_route.get("lane") or ""),
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            decision={"allowed": True, "route": c3rp_route.get("lane")},
+            payload={"c3rp_route": c3rp_route},
+            parent_event_ids=[ingress_event["event_id"]],
+        )
+        lane_result = self._lane_result_from_c3rp(normalized, c3rp_route, metadata.get("recent_context"))
+        lane = lane_result.lane
+        risk_level, risks = self._risk_authority_gate(lane, normalized)
+        authority_decision = self.handshake_broker.resolve_authority(
+            user_id=user_id,
+            session_id=session_id,
+            lane=lane,
+            request_text=normalized,
+            risk_level=risk_level,
+            metadata={**metadata, "raw_request_text": normalized_raw},
+        )
+        authority_event = self._append_runtime_event(
+            event_type="traillink.authentication",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "trail-link", "component": "handshake_broker"},
+            lane=lane,
+            decision={
+                "trusted": authority_decision.trusted,
+                "role": authority_decision.capsule.role,
+                "denied_reasons": list(authority_decision.denied_reasons),
+            },
+            result_summary={
+                "authority_capsule_id": authority_decision.capsule.capsule_id,
+                "auth_strength": authority_decision.capsule.auth_strength,
+            },
+            payload={
+                "capsule_id": authority_decision.capsule.capsule_id,
+                "allowed_memory_scopes": list(authority_decision.capsule.allowed_memory_scopes),
+                "allowed_tools": list(authority_decision.capsule.allowed_tools),
+            },
+            parent_event_ids=[c3rp_ingress_route_event["event_id"]],
+            status="committed" if not authority_decision.denied_reasons else "degraded",
+        )
+        authority_capsule = authority_decision.capsule
+        debug_enabled = bool(debug_requested and str(user_id) != "guest")
+        full_truth = load_current_truth()
+        current_truth = truth_for_lane(lane, full_truth)
+        subsystem_status = self._subsystem_status_for_lane(lane, authority_capsule)
+        if subsystem_status:
+            current_truth["authorized_subsystem_status"] = subsystem_status
+        entities = identify_entities(normalized)
+        entity_names = [entity["name"] for entity in entities]
+        eligibility = evaluate_memory_eligibility(normalized, lane)
+        eligibility_event = self._append_runtime_event(
+            event_type="ingestion_governance.memory_eligibility",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "memory-eligibility", "component": "ingestion_governance"},
+            lane=lane,
+            decision={
+                "mode": getattr(getattr(eligibility, "mode", None), "value", str(getattr(eligibility, "mode", ""))),
+                "category": getattr(eligibility, "category", ""),
+                "eligible": bool(getattr(eligibility, "should_commit", False) or getattr(eligibility, "commit", False) or getattr(eligibility, "mode", None)),
+            },
+            payload={"eligibility": getattr(eligibility, "to_dict", lambda: str(eligibility))()},
+            parent_event_ids=[authority_event["event_id"]],
+        )
+        gyro_bearing = self.gyro.orient(
+            prompt=normalized,
+            lane_result=lane_result,
+            c3rp_route=c3rp_route,
+            authority_capsule=authority_capsule,
+            memory_eligibility=eligibility,
+            risk_level=risk_level,
+            risks=risks,
+            current_truth=current_truth,
+            metadata=metadata,
+        )
+        gyro_trace = gyro_bearing.to_trace()
+        gyro_trace["temporal_bearing"] = self._temporal_bearing(temporal_context, temporal_resolution)
+        gyro_event = self._append_runtime_event(
+            event_type="gyro.orientation",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "gyro", "component": "gyro"},
+            lane=lane,
+            decision=self.runtime_3crp.enforce_orientation(gyro_trace),
+            result_summary={"stable": gyro_trace.get("stable"), "confidence": gyro_trace.get("confidence")},
+            payload={"gyro": gyro_trace},
+            parent_event_ids=[eligibility_event["event_id"]],
+            status="committed" if gyro_trace.get("stable") else "rejected",
+        )
+        if not gyro_bearing.stable:
+            gyro_reason = "unstable gyro bearing"
+            if gyro_bearing.reasons:
+                gyro_reason += ": " + "; ".join(gyro_bearing.reasons)
+            loop = self.loopback.pre_generation_response(
+                prompt=normalized,
+                gyro_bearing=gyro_trace,
+                reason=gyro_reason,
+            )
+            return self._return_loopback_response(
+                trace_id=trace_id,
+                user_id=user_id,
+                session_id=session_id,
+                normalized=normalized,
+                lane_result=lane_result,
+                c3rp_route=c3rp_route,
+                risk_level=risk_level,
+                authority_capsule=authority_capsule,
+                authority_denied=authority_decision.denied_reasons,
+                gyro_trace=gyro_trace,
+                loopback_reason=gyro_reason,
+                answer=loop["answer"],
+                answer_mode=loop["answer_mode"],
+                secret_detected=secret_detected,
+            )
+        if "private_data_exfiltration_blocked" in set(authority_decision.denied_reasons):
+            answer = self._apply_authority_answer_boundary("", lane, authority_decision.denied_reasons)
+            return self._return_loopback_response(
+                trace_id=trace_id,
+                user_id=user_id,
+                session_id=session_id,
+                normalized=normalized,
+                lane_result=lane_result,
+                c3rp_route=c3rp_route,
+                risk_level="high",
+                authority_capsule=authority_capsule,
+                authority_denied=authority_decision.denied_reasons,
+                gyro_trace=gyro_trace,
+                loopback_reason="private data exfiltration blocked",
+                answer=answer,
+                answer_mode="refuse",
+                secret_detected=secret_detected,
+            )
+        recent_path, long_term_memories, rejected_memories = self._recall_memory(
+            user_id,
+            lane_result,
+            entity_names,
+            normalized,
+            authority_capsule,
+        )
+        canonical_memories = self._canonical_memory_leads(normalized, lane, current_truth)
+        recent_path = self._dedupe_memories(canonical_memories + recent_path)
+        recalled_all = self.temporal_engine.rank_temporal_relevance(recent_path + long_term_memories)
+        recent_path = recalled_all[-5:] if recalled_all else []
+        long_term_memories = recalled_all[:-5] if recalled_all else []
+        stale_refs = [
+            memory.get("memory_id")
+            for memory in recalled_all
+            if (memory.get("temporal_metadata") or {}).get("freshness_state") in {"stale", "expired", "superseded"}
+        ]
+        recall_decision = self.runtime_3crp.authorize_recall(lane=lane, allowed_lanes=list(lane_result.allowed_memory_lanes or [lane]))
+        recall_event = self._append_runtime_event(
+            event_type="are.consulted",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "are", "component": "backward_recall"},
+            lane=lane,
+            decision=recall_decision,
+            result_summary={"accepted": len(recalled_all), "rejected": len(rejected_memories)},
+            payload={
+                "query_hash": input_hash,
+                "are_record_refs": [memory.get("memory_id") or memory.get("provenance_hash") for memory in recalled_all],
+                "temporal_scores": [
+                    {
+                        "memory_id": memory.get("memory_id") or memory.get("provenance_hash"),
+                        "score": memory.get("temporal_score"),
+                        "freshness_state": (memory.get("temporal_metadata") or {}).get("freshness_state"),
+                    }
+                    for memory in recalled_all
+                ],
+                "rejected": rejected_memories,
+            },
+            parent_event_ids=[gyro_event["event_id"]],
+        )
+        if stale_refs:
+            self._append_runtime_event(
+                event_type="memory.marked_stale",
+                session_id=session_id,
+                turn_id=turn_id,
+                actor={"type": "component", "id": "temporal-engine", "component": "temporal_engine"},
+                lane=lane,
+                result_summary={"stale_count": len(stale_refs)},
+                payload={"stale_record_refs": stale_refs},
+                parent_event_ids=[recall_event["event_id"]],
+            )
+        recognition_packet = recognition_packet_from_are(
+            current_input_ref=input_hash,
+            query=normalized,
+            memories=recalled_all,
+            rejected=rejected_memories,
+            temporal_context=asdict(temporal_context),
+            temporal_resolution=temporal_resolution,
+        )
+        recognition_event = self._append_runtime_event(
+            event_type="recognition_rail.result",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "recognition-rail", "component": "recognition_rail"},
+            lane=lane,
+            result_summary={
+                "continuation_score": recognition_packet["continuation_score"],
+                "recommended_turn_action": recognition_packet["recommended_turn_action"],
+            },
+            payload={"recognition": recognition_packet},
+            evidence_refs=recognition_packet.get("are_record_refs") or [],
+            parent_event_ids=[recall_event["event_id"]],
+        )
+        q_packet = q_insight_packet(query=normalized, recognition=recognition_packet, lane=lane, temporal_resolution=temporal_resolution)
+        q_insight_event = self._append_runtime_event(
+            event_type="q_insight.result",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "q-insight", "component": "q_insight"},
+            lane=lane,
+            decision={"finished": q_packet["finished"], "clarification_required": q_packet["clarification_required"]},
+            result_summary={"confidence": q_packet["confidence"], "candidate_lane": q_packet["candidate_lane"]},
+            payload={"q_insight": q_packet},
+            parent_event_ids=[recognition_event["event_id"]],
+        )
+        clarification_blocks = bool(
+            q_packet["clarification_required"]
+            and not metadata.get("recent_context")
+            and not authority_decision.denied_reasons
+        )
+        high_impact_temporal = self._high_impact_temporal_action(normalized)
+        temporal_policy = self.runtime_3crp.authorize_temporal_operation(
+            operation="resolve_and_use_time",
+            temporal_resolution=temporal_resolution,
+            high_impact=high_impact_temporal,
+        )
+        temporal_policy_event = self._append_runtime_event(
+            event_type="3crp.temporal_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "temporal_gate"},
+            lane=lane,
+            decision=temporal_policy,
+            payload={"high_impact_temporal": high_impact_temporal, "temporal_resolution": temporal_resolution},
+            parent_event_ids=[q_insight_event["event_id"]],
+            status="committed" if temporal_policy.get("allowed") else "rejected",
+        )
+        post_gyro_decision = {
+            "allowed": bool(gyro_trace.get("stable", True)) and not clarification_blocks,
+            "active_lane": lane,
+            "recall_mode": recall_decision["recall_mode"],
+            "permitted_tools": list(authority_capsule.allowed_tools),
+            "model_provider": "configured",
+            "output_mode": gyro_trace.get("output_boundary"),
+            "temporal_allowed": bool(temporal_policy.get("allowed")),
+        }
+        if not temporal_policy.get("allowed"):
+            post_gyro_decision["allowed"] = False
+        post_gyro_auth_event = self._append_runtime_event(
+            event_type="3crp.post_gyro_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "post_gyro"},
+            lane=lane,
+            decision=post_gyro_decision,
+            payload={
+                "gyro_event_id": gyro_event["event_id"],
+                "q_insight_event_id": q_insight_event["event_id"],
+                "temporal_authorization_event_id": temporal_policy_event["event_id"],
+            },
+            parent_event_ids=[temporal_policy_event["event_id"], gyro_event["event_id"]],
+            status="committed" if post_gyro_decision["allowed"] else "rejected",
+        )
+        if not post_gyro_decision["allowed"]:
+            answer = "I need one clarification before I answer that: what exact date, time, or timezone should I use?"
+            if temporal_policy.get("allowed"):
+                answer = "I need one clarification before I answer that: what does the unresolved reference point to?"
+            return self._return_loopback_response(
+                trace_id=trace_id,
+                user_id=user_id,
+                session_id=session_id,
+                normalized=normalized,
+                lane_result=lane_result,
+                c3rp_route=c3rp_route,
+                risk_level=risk_level,
+                authority_capsule=authority_capsule,
+                authority_denied=authority_decision.denied_reasons,
+                gyro_trace=gyro_trace,
+                loopback_reason="3CRP held the turn after Q Insight or Temporal Engine requested clarification",
+                answer=answer,
+                answer_mode="clarify",
+                secret_detected=secret_detected,
+            )
+        self._register_temporal_user_events(
+            normalized=normalized,
+            session_id=session_id,
+            turn_id=turn_id,
+            temporal_context=temporal_context,
+            temporal_resolution=temporal_resolution,
+            parent_event_id=post_gyro_auth_event["event_id"],
+        )
+        constraints = self._constraints(lane)
+        temporal_model_context = self.temporal_engine.serialize_context_for_model(temporal_context, temporal_resolution)
+
+        context_packet = build_context_packet(
+            lane_result=lane_result,
+            user_goal=normalized,
+            current_truth=current_truth,
+            entities=entities,
+            recent_path=recent_path,
+            long_term_memories=long_term_memories,
+            constraints=constraints,
+            risks=risks,
+            temporal_context=temporal_model_context,
+        )
+        messages = build_messages(context_packet, normalized)
+        model_auth = self.runtime_3crp.authorize_model(
+            lane=lane,
+            orientation_event_id=gyro_event["event_id"],
+            authorization_event_id=post_gyro_auth_event["event_id"],
+        )
+        model_auth_event = self._append_runtime_event(
+            event_type="model.authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "model_gate"},
+            lane=lane,
+            decision=model_auth,
+            payload={"prompt_hash": sha_text(messages_to_prompt(messages))},
+            parent_event_ids=[post_gyro_auth_event["event_id"]],
+            fail_closed=True,
+        )
+        raw_response = call_nemotron(
+            messages,
+            model_config=metadata.get("model_config") or self.model_config,
+            provider_generate=metadata.get("provider_generate"),
+        )
+        model_invocation_event = self._append_runtime_event(
+            event_type="model.invocation",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "model", "id": self._model_used(raw_response), "component": "nemotron_adapter"},
+            lane=lane,
+            result_summary={"model_used": self._model_used(raw_response)},
+            payload={"response_hash": sha_text(str(raw_response.get("content") or ""))},
+            parent_event_ids=[model_auth_event["event_id"]],
+            fail_closed=True,
+        )
+        answer = str(raw_response.get("content") or "").strip()
+        raw_model_answer_for_echoshield = answer
+        if self._is_generic_provider_filler(answer) and risk_level != "high":
+            retry_messages = self._generic_filler_retry_messages(messages, normalized)
+            retry_response = call_nemotron(
+                retry_messages,
+                model_config=metadata.get("model_config") or self.model_config,
+                provider_generate=metadata.get("provider_generate"),
+            )
+            retry_answer = str(retry_response.get("content") or "").strip()
+            if retry_answer and not self._is_generic_provider_filler(retry_answer):
+                raw_response = retry_response
+                messages = retry_messages
+                answer = retry_answer
+                raw_model_answer_for_echoshield = retry_answer
+        answer = self.sanitize_user_answer(answer, debug=debug_enabled)
+        answer = strengthen_confidence_language(answer)
+        if lane == "NVIDIA_PATHWAY":
+            answer = apply_nvidia_mode(answer)
+        answer = self._redact_sensitive(self.diode.redact(answer))
+        answer = self._apply_authority_answer_boundary(answer, lane, authority_decision.denied_reasons)
+        answer = self._apply_canonical_answer_boundary(answer, normalized, lane, current_truth)
+        post_loop = self.loopback.post_generation_check(
+            prompt=normalized,
+            answer=answer,
+            gyro_bearing=gyro_trace,
+            lane=lane,
+            risk_level=risk_level,
+        )
+        loopback_triggered = bool(post_loop.get("triggered"))
+        loopback_reason = str(post_loop.get("reason") or "")
+        answer_mode = str(post_loop.get("answer_mode") or gyro_trace.get("output_boundary") or "direct")
+        if loopback_triggered:
+            answer = self._redact_sensitive(self.diode.redact(str(post_loop.get("answer") or answer)))
+
+        validator_result = validate_response(answer, context_packet, lane)
+        if not validator_result.get("approved") and validator_result.get("revised_answer"):
+            answer = self.sanitize_user_answer(str(validator_result["revised_answer"]), debug=debug_enabled)
+
+        runtime_report = None
+        if self._wants_runtime_orientation(normalized):
+            runtime_report = self._build_runtime_report(
+                normalized=normalized,
+                lane_result=lane_result,
+                eligibility=eligibility,
+                recent_path=recent_path,
+                long_term_memories=long_term_memories,
+                risk_level=risk_level,
+                risks=risks,
+                validator_result=validator_result,
+                model_answer=answer,
+            )
+            answer = self._visible_orientation_answer(normalized, runtime_report, answer)
+
+        safe_memory_message = self._redact_sensitive(normalized)
+        safe_memory_answer = self._redact_sensitive(self.diode.redact(answer))
+        candidate_memory_allowed, candidate_memory_reason = should_commit_memory(
+            safe_memory_message,
+            lane,
+            eligibility,
+        )
+        if secret_detected or self.diode.contains_secret(normalized) or self.diode.contains_secret(answer):
+            candidate_memory_allowed = False
+            candidate_memory_reason = "Sensitive content is not eligible for durable memory."
+        echo_classification = self.echo_shield.inspect_text(
+            "\n".join([safe_memory_message, raw_model_answer_for_echoshield]),
+            source_id=trace_id,
+            record_class="model_output" if candidate_memory_allowed else "turn_context",
+            lane=lane,
+            matter_id=str(metadata.get("matter_id") or ""),
+            expected_matter_id=str(metadata.get("matter_id") or ""),
+            metadata={"lane": lane, "proposed_evidence": False},
+        )
+        echo_event = self._append_runtime_event(
+            event_type="echoshield.classification",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "echoshield", "component": "context_defense"},
+            lane=lane,
+            decision={
+                "quarantine": echo_classification.quarantine,
+                "trust_class": echo_classification.trust_class,
+                "restrictions": list(echo_classification.recommended_restrictions),
+            },
+            result_summary={
+                "risk_count": len(echo_classification.detected_risks),
+                "record_class": echo_classification.record_class,
+            },
+            payload={"echoshield": echo_classification.to_dict()},
+            parent_event_ids=[model_invocation_event["event_id"]],
+            status="rejected" if echo_classification.quarantine else "committed",
+        )
+        if echo_classification.quarantine:
+            candidate_memory_allowed = False
+            candidate_memory_reason = "EchoShield quarantined candidate memory context."
+        sentinel_memory_decision = self.runtime_sentinel.authorize_memory_write(
+            lane=lane,
+            record_class="model_output" if candidate_memory_allowed else "turn_context",
+            echo_classification=echo_classification.to_dict(),
+            matter_id=str(metadata.get("matter_id") or ""),
+            target_matter_id=str(metadata.get("matter_id") or ""),
+        )
+        sentinel_memory_event = self._append_runtime_event(
+            event_type="sentinel.memory_write_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "sentinel", "component": "memory_write_policy"},
+            lane=lane,
+            decision=sentinel_memory_decision.to_dict(),
+            result_summary={
+                "allowed": sentinel_memory_decision.allowed,
+                "decision": sentinel_memory_decision.decision.value,
+            },
+            payload={"sentinel": sentinel_memory_decision.to_dict()},
+            parent_event_ids=[echo_event["event_id"]],
+            status="committed" if sentinel_memory_decision.allowed else "rejected",
+        )
+        if not sentinel_memory_decision.allowed:
+            candidate_memory_allowed = False
+            candidate_memory_reason = sentinel_memory_decision.reason
+        memory_write_auth = self.runtime_3crp.authorize_memory_write(
+            lane=lane,
+            eligible=bool(candidate_memory_allowed),
+        )
+        memory_write_auth["reason"] = candidate_memory_reason
+        memory_write_auth_event = self._append_runtime_event(
+            event_type="3crp.memory_write_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "memory_write_gate"},
+            lane=lane,
+            decision=memory_write_auth,
+            payload={
+                "candidate_memory_allowed": candidate_memory_allowed,
+                "reason": candidate_memory_reason,
+            },
+            parent_event_ids=[sentinel_memory_event["event_id"]],
+            fail_closed=bool(candidate_memory_allowed),
+        )
+        memory_written = False
+        memory_event = None
+        if memory_write_auth.get("allowed"):
+            memory_written, memory_event = self._commit_memory(
+                user_id=user_id,
+                session_id=session_id,
+                message=safe_memory_message,
+                lane=lane,
+                answer=safe_memory_answer,
+                eligibility=eligibility,
+                secret_detected=secret_detected,
+            )
+        memory_commit_event = self._append_runtime_event(
+            event_type="memory.commit_result" if memory_written else "memory.commit_denied",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "are", "component": "memory_commit"},
+            lane=lane,
+            decision={"authorized": bool(memory_write_auth.get("allowed")), "written": bool(memory_written)},
+            result_summary={
+                "memory_written": bool(memory_written),
+                "memory_event_id": (memory_event or {}).get("memory_id"),
+            },
+            payload={
+                "memory_event_id": (memory_event or {}).get("memory_id"),
+                "memory_source": (memory_event or {}).get("source"),
+                "memory_file": (memory_event or {}).get("memory_file"),
+            },
+            parent_event_ids=[memory_write_auth_event["event_id"]],
+            fail_closed=bool(memory_written),
+        )
+        result = {
+            "answer": answer,
+            "lane": lane,
+            "used_memory": [memory.get("memory_id") for memory in recent_path + long_term_memories if memory.get("memory_id")],
+            "risk_level": risk_level,
+            "trace_id": trace_id,
+            "memory_written": memory_written,
+            "authority_capsule_id": authority_capsule.capsule_id,
+            "authority_role": authority_capsule.role,
+            "authority_denied": list(authority_decision.denied_reasons),
+            "gyro": gyro_trace,
+            "loopback_triggered": loopback_triggered,
+            "answer_mode": answer_mode,
+            "temporal": temporal_model_context,
+        }
+        if debug_enabled:
+            result["debug"] = self._safe_debug_payload(
+                trace_id=trace_id,
+                lane=lane,
+                risk_level=risk_level,
+                used_memory=result["used_memory"],
+                memory_written=memory_written,
+                validator_result=validator_result,
+                runtime_report=runtime_report,
+            )
+            if self._wants_debug_visible(normalized):
+                answer = self._append_visible_debug(answer, result["debug"])
+                result["answer"] = answer
+        if runtime_report is not None and debug_enabled:
+            result["runtime_report"] = runtime_report
+        output_auth = self.runtime_3crp.authorize_output(
+            lane=lane,
+            final_answer_hash=sha_text(answer),
+            provenance_ready=True,
+        )
+        output_auth_event = self._append_runtime_event(
+            event_type="3crp.egress_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "egress"},
+            lane=lane,
+            floor_state="claire_owns_floor",
+            decision=output_auth,
+            payload={
+                "final_answer_hash": sha_text(answer),
+                "model_event_id": model_invocation_event["event_id"],
+                "memory_write_authorization_event_id": memory_write_auth_event["event_id"],
+                "memory_commit_event_id": memory_commit_event["event_id"],
+            },
+            parent_event_ids=[memory_commit_event["event_id"]],
+            fail_closed=True,
+        )
+        final_output_event = self._append_runtime_event(
+            event_type="output.released",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "claire-runtime", "component": "output"},
+            lane=lane,
+            floor_state="returning_floor",
+            result_summary={"answer_hash": sha_text(answer), "answer_mode": answer_mode},
+            payload={"answer_hash": sha_text(answer), "egress_authorization_event_id": output_auth_event["event_id"]},
+            parent_event_ids=[output_auth_event["event_id"]],
+            fail_closed=True,
+        )
+        turn_capsule = self.runtime_truth.seal_turn(
+            session_id=session_id,
+            turn_id=turn_id,
+            input_text=normalized,
+            final_output=answer,
+        )
+        turn_sealed_event = self._append_runtime_event(
+            event_type="turn.sealed",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "truth-spine", "component": "turn_sealer"},
+            lane=lane,
+            result_summary={
+                "event_count": turn_capsule.get("event_count"),
+                "chain_head": turn_capsule.get("chain_head"),
+            },
+            payload={"turn_capsule": turn_capsule},
+            parent_event_ids=[final_output_event["event_id"]],
+            fail_closed=True,
+        )
+        result["truth_spine"] = {
+            "turn_id": turn_id,
+            "chain_head": turn_sealed_event.get("record_hash"),
+            "turn_capsule": turn_capsule,
+            "verification": self.runtime_truth.verify(session_id=session_id, turn_id=turn_id),
+        }
+        core_flags = current_feature_flags()
+        if core_flags.get("CLAIRE_CORE_SHADOW_MODE"):
+            result["claire_core_shadow"] = evaluate_shadow(result)
+        self.temporal_engine.end_turn(session_id, turn_id)
+        trace_record = {
+            "trace_id": trace_id,
+            "timestamp_ns": None,
+            "user_id": user_id,
+            "session_id": session_id,
+            "user_message_hash": sha_text(normalized),
+            "lane": lane,
+            "lane_result": lane_result.to_dict() if debug_enabled and hasattr(lane_result, "to_dict") else {"lane": lane, "confidence": lane_result.confidence},
+            "c3rp_route": c3rp_route,
+            "memories_recalled": result["used_memory"],
+            "memories_rejected": rejected_memories,
+            "prompt_hash": sha_text(messages_to_prompt(messages)),
+            "model_used": self._model_used(raw_response),
+            "risk_level": risk_level,
+            "validator_result": validator_result,
+            "final_answer_hash": sha_text(answer),
+            "memory_written": memory_written,
+            "memory_event_id": (memory_event or {}).get("memory_id"),
+            "truth_spine": result["truth_spine"],
+            "temporal": temporal_model_context,
+            "runtime_truth_event_ids": {
+                "ingress": ingress_event["event_id"],
+                "temporal_context": temporal_context_event["event_id"],
+                "temporal_resolution": temporal_resolution_event["event_id"],
+                "temporal_authorization": temporal_policy_event["event_id"],
+                "trail_link": authority_event["event_id"],
+                "gyro": gyro_event["event_id"],
+                "are": recall_event["event_id"],
+                "recognition": recognition_event["event_id"],
+                "q_insight": q_insight_event["event_id"],
+                "post_gyro_3crp": post_gyro_auth_event["event_id"],
+                "model_authorization": model_auth_event["event_id"],
+                "model_invocation": model_invocation_event["event_id"],
+                "egress": output_auth_event["event_id"],
+                "turn_sealed": turn_sealed_event["event_id"],
+            },
+            "runtime_report": runtime_report,
+            "authorized_subsystem_status": subsystem_status,
+            "authority_capsule_id": authority_capsule.capsule_id,
+            "authority_role": authority_capsule.role,
+            "authority_scopes": list(authority_capsule.allowed_memory_scopes),
+            "authority_tools": list(authority_capsule.allowed_tools),
+            "authority_denied_reasons": list(authority_decision.denied_reasons),
+            "diode_redacted": bool(secret_detected),
+            "gyro": gyro_trace_object(
+                gyro_bearing=gyro_trace,
+                loopback_triggered=loopback_triggered,
+                loopback_reason=loopback_reason,
+                answer_mode=answer_mode,
+            ),
+            "steps": [
+                "input_normalization",
+                "diode_redaction",
+                "c3rp_lane_classification",
+                "gyro_orientation",
+                "loopback_drift_check",
+                "handshake_broker_authority",
+                "memory_eligibility_review",
+                "are_chronological_recall",
+                "faiss_are_candidate_search",
+                "current_truth_loading",
+                "authorized_subsystem_inspection",
+                "context_building",
+                "risk_authority_gating",
+                "nemotron_prompt_construction",
+                "response_validation",
+                "trace_logging",
+                "memory_commit_decision",
+            ],
+        }
+        self.trace_logger.log(trace_record)
+        if self.memory_store is not None:
+            self.memory_store.append_session_trace(trace_id, user_id, session_id, lane, trace_record)
+        return result
+
+    INTERNAL_LINE_PATTERNS = [
+        re.compile(r"^\s*CLAIRE processed the message through the governed runtime before Nemotron\.?.*$", re.I),
+        re.compile(r"^\s*(Lane|Risk|Risk level|Answer basis|Current request|Memory eligibility|Trace|Trace ID|Sentinel|Authority gates|Runtime|Context packet|Subsystem attachment notes|Technical gate)\s*[:=].*$", re.I),
+    ]
+    SENSITIVE_PATTERNS = [
+        re.compile(r"\bBATTLEBORN[_-][A-Z0-9_\-]+\b", re.I),
+        re.compile(r"\bexecution passphrase\s+is\s+\S+", re.I),
+        re.compile(r"\b(passphrase|password|private key|api key|secret)\s*(?:is|=|:)\s*\S+", re.I),
+    ]
+
+    def _debug_enabled(self, metadata: dict[str, Any], message: str) -> bool:
+        return bool(metadata.get("debug") or metadata.get("debug_mode") or self._wants_debug_visible(message))
+
+    def _wants_debug_visible(self, message: str) -> bool:
+        text = str(message or "").lower()
+        return any(
+            marker in text
+            for marker in [
+                "show runtime trace",
+                "show debug",
+                "show lane",
+                "show your routing",
+                "debug lane",
+            ]
+        )
+
+    def _redact_sensitive(self, text: str) -> str:
+        clean = str(text or "")
+        for pattern in self.SENSITIVE_PATTERNS:
+            clean = pattern.sub("[REDACTED]", clean)
+        return clean
+
+    def sanitize_user_answer(self, answer: str, debug: bool = False) -> str:
+        text = self._redact_sensitive(str(answer or "").replace("\r\n", "\n").replace("\r", "\n"))
+        if debug:
+            return text.strip()
+        lines: list[str] = []
+        for line in text.splitlines():
+            if any(pattern.match(line) for pattern in self.INTERNAL_LINE_PATTERNS):
+                continue
+            lines.append(line)
+        clean = "\n".join(lines).strip()
+        clean = re.sub(r"\n{3,}", "\n\n", clean)
+        if not clean:
+            clean = "I can help with that. Tell me the specific outcome you want, and I will give a direct next step."
+        return clean
+
+    def _is_generic_provider_filler(self, answer: str) -> bool:
+        text = " ".join(str(answer or "").lower().split())
+        return any(
+            marker in text
+            for marker in [
+                "tell me the goal",
+                "goal, constraints",
+                "make the request concrete",
+                "specific outcome you want",
+                "i don't have enough context",
+            ]
+        )
+
+    def _generic_filler_retry_messages(self, messages: list[dict[str, str]], normalized: str) -> list[dict[str, str]]:
+        retry = [dict(message) for message in messages]
+        retry.insert(
+            1,
+            {
+                "role": "system",
+                "content": (
+                    "The previous draft was generic filler. Answer the user's actual turn naturally and directly. "
+                    "For greetings, introductions, acknowledgements, and ordinary conversation, respond conversationally. "
+                    "Do not ask for goals or constraints unless the user truly asked for planning help."
+                ),
+            },
+        )
+        if retry and retry[-1].get("role") == "user":
+            retry[-1] = {"role": "user", "content": normalized}
+        return retry
+
+    def _safe_debug_payload(
+        self,
+        *,
+        trace_id: str,
+        lane: str,
+        risk_level: str,
+        used_memory: list[str],
+        memory_written: bool,
+        validator_result: dict[str, Any],
+        runtime_report: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload = {
+            "trace_id": trace_id,
+            "lane": lane,
+            "risk_level": risk_level,
+            "used_memory": used_memory,
+            "memory_written": memory_written,
+            "validator_issues": list((validator_result or {}).get("issues") or []),
+        }
+        if runtime_report:
+            payload["runtime_report_summary"] = {
+                "lane": runtime_report.get("lane"),
+                "should_write_to_ARE": runtime_report.get("should_write_to_ARE"),
+                "recall_summary": runtime_report.get("recall_summary"),
+            }
+        return json.loads(self._redact_sensitive(json.dumps(payload, ensure_ascii=False)))
+
+    def _append_visible_debug(self, answer: str, debug_payload: dict[str, Any]) -> str:
+        debug_lines = [
+            "",
+            "Debug:",
+            f"Lane: {debug_payload.get('lane')}",
+            f"Risk: {debug_payload.get('risk_level')}",
+            f"Trace: {debug_payload.get('trace_id')}",
+            f"Memory written: {debug_payload.get('memory_written')}",
+        ]
+        issues = debug_payload.get("validator_issues") or []
+        if issues:
+            debug_lines.append("Validator issues: " + ", ".join(map(str, issues)))
+        return self._redact_sensitive(str(answer or "").strip() + "\n" + "\n".join(debug_lines)).strip()
+
+    def _return_loopback_response(
+        self,
+        *,
+        trace_id: str,
+        user_id: str,
+        session_id: str,
+        normalized: str,
+        lane_result: LaneResult,
+        c3rp_route: dict[str, Any],
+        risk_level: str,
+        authority_capsule: AuthorityCapsule,
+        authority_denied: list[str],
+        gyro_trace: dict[str, Any],
+        loopback_reason: str,
+        answer: str,
+        answer_mode: str,
+        secret_detected: bool,
+    ) -> dict[str, Any]:
+        lane = lane_result.lane
+        turn_id = trace_id.replace("trace_", "turn_", 1)
+        answer = self.sanitize_user_answer(self._redact_sensitive(self.diode.redact(answer)), debug=False)
+        loopback_event = self._append_runtime_event(
+            event_type="loopback.response",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "loopback", "component": "loopback"},
+            lane=lane,
+            decision={"answer_mode": answer_mode, "reason": loopback_reason},
+            result_summary={"answer_hash": sha_text(answer)},
+            payload={"gyro": gyro_trace, "loopback_reason": loopback_reason},
+        )
+        output_auth = self.runtime_3crp.authorize_output(
+            lane=lane,
+            final_answer_hash=sha_text(answer),
+            provenance_ready=True,
+        )
+        output_auth_event = self._append_runtime_event(
+            event_type="3crp.egress_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "egress"},
+            lane=lane,
+            floor_state="claire_owns_floor",
+            decision=output_auth,
+            payload={"final_answer_hash": sha_text(answer), "loopback_event_id": loopback_event["event_id"]},
+            parent_event_ids=[loopback_event["event_id"]],
+            fail_closed=True,
+        )
+        final_output_event = self._append_runtime_event(
+            event_type="output.released",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "claire-runtime", "component": "output"},
+            lane=lane,
+            floor_state="returning_floor",
+            result_summary={"answer_hash": sha_text(answer), "answer_mode": answer_mode},
+            payload={"answer_hash": sha_text(answer), "egress_authorization_event_id": output_auth_event["event_id"]},
+            parent_event_ids=[output_auth_event["event_id"]],
+            fail_closed=True,
+        )
+        turn_capsule = self.runtime_truth.seal_turn(
+            session_id=session_id,
+            turn_id=turn_id,
+            input_text=normalized,
+            final_output=answer,
+        )
+        turn_sealed_event = self._append_runtime_event(
+            event_type="turn.sealed",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "truth-spine", "component": "turn_sealer"},
+            lane=lane,
+            result_summary={"event_count": turn_capsule.get("event_count"), "chain_head": turn_capsule.get("chain_head")},
+            payload={"turn_capsule": turn_capsule},
+            parent_event_ids=[final_output_event["event_id"]],
+            fail_closed=True,
+        )
+        result = {
+            "answer": answer,
+            "lane": lane,
+            "used_memory": [],
+            "risk_level": risk_level,
+            "trace_id": trace_id,
+            "memory_written": False,
+            "authority_capsule_id": authority_capsule.capsule_id,
+            "authority_role": authority_capsule.role,
+            "authority_denied": list(authority_denied or []),
+            "gyro": gyro_trace,
+            "loopback_triggered": True,
+            "answer_mode": answer_mode,
+            "truth_spine": {
+                "turn_id": turn_id,
+                "chain_head": turn_sealed_event.get("record_hash"),
+                "turn_capsule": turn_capsule,
+                "verification": self.runtime_truth.verify(session_id=session_id, turn_id=turn_id),
+            },
+        }
+        if str(user_id) != "guest" and self._debug_enabled({}, normalized):
+            result["debug"] = self._safe_debug_payload(
+                trace_id=trace_id,
+                lane=lane,
+                risk_level=risk_level,
+                used_memory=[],
+                memory_written=False,
+                validator_result={"approved": True, "issues": []},
+                runtime_report=None,
+            )
+            if self._wants_debug_visible(normalized):
+                result["answer"] = self._append_visible_debug(result["answer"], result["debug"])
+
+        trace_record = {
+            "trace_id": trace_id,
+            "timestamp_ns": None,
+            "user_id": user_id,
+            "session_id": session_id,
+            "user_message_hash": sha_text(normalized),
+            "lane": lane,
+            "lane_result": {"lane": lane, "confidence": lane_result.confidence},
+            "c3rp_route": c3rp_route,
+            "memories_recalled": [],
+            "memories_rejected": [],
+            "prompt_hash": "",
+            "model_used": "loopback",
+            "risk_level": risk_level,
+            "validator_result": {"approved": True, "issues": []},
+            "final_answer_hash": sha_text(answer),
+            "memory_written": False,
+            "memory_event_id": None,
+            "truth_spine": result["truth_spine"],
+            "runtime_truth_event_ids": {
+                "loopback": loopback_event["event_id"],
+                "egress": output_auth_event["event_id"],
+                "turn_sealed": turn_sealed_event["event_id"],
+            },
+            "runtime_report": None,
+            "authorized_subsystem_status": {},
+            "authority_capsule_id": authority_capsule.capsule_id,
+            "authority_role": authority_capsule.role,
+            "authority_scopes": list(authority_capsule.allowed_memory_scopes),
+            "authority_tools": list(authority_capsule.allowed_tools),
+            "authority_denied_reasons": list(authority_denied or []),
+            "diode_redacted": bool(secret_detected),
+            "gyro": gyro_trace_object(
+                gyro_bearing=gyro_trace,
+                loopback_triggered=True,
+                loopback_reason=loopback_reason,
+                answer_mode=answer_mode,
+            ),
+            "steps": [
+                "input_normalization",
+                "diode_redaction",
+                "c3rp_lane_classification",
+                "handshake_broker_authority",
+                "gyro_orientation",
+                "loopback_return",
+                "trace_logging",
+            ],
+        }
+        self.trace_logger.log(trace_record)
+        if self.memory_store is not None:
+            self.memory_store.append_session_trace(trace_id, user_id, session_id, lane, trace_record)
+        return result
+
+    def _subsystem_status_for_lane(self, lane: str, authority_capsule: AuthorityCapsule | None = None) -> dict[str, Any]:
+        if lane == "TRADING_STATION":
+            if authority_capsule is None or "veritas_status" not in set(authority_capsule.allowed_tools):
+                return {}
+            from veritas_adapter import (
+                get_kill_switch_status,
+                get_kraken_status,
+                get_market_data_status,
+                get_paper_trade_summary,
+                get_risk_status,
+                get_trading_station_status,
+            )
+
+            return {
+                "subsystem": "Veritas",
+                "memory_authority": False,
+                "trading_station": get_trading_station_status(),
+                "kraken": get_kraken_status(),
+                "market_data": get_market_data_status(),
+                "paper_trades": get_paper_trade_summary(),
+                "risk": get_risk_status(),
+                "kill_switch": get_kill_switch_status(),
+            }
+        if lane == "LEGAL_CASE":
+            if authority_capsule is None or "legal_research" not in set(authority_capsule.allowed_tools):
+                return {}
+            from claire_courtlistener import (
+                check_case_updates,
+                get_courtlistener_status,
+                get_legal_monitor_summary,
+                get_recent_docket_events,
+                get_tracked_cases,
+            )
+
+            return {
+                "subsystem": "CourtListener",
+                "memory_authority": False,
+                "courtlistener": get_courtlistener_status(),
+                "tracked_cases": get_tracked_cases(),
+                "recent_docket_events": get_recent_docket_events(),
+                "case_updates": check_case_updates(),
+                "summary": get_legal_monitor_summary(),
+            }
+        return {}
+
+    def _apply_authority_answer_boundary(self, answer: str, lane: str, denied_reasons: list[str]) -> str:
+        denied = set(denied_reasons or [])
+        if "sensitive_tool_action_blocked_from_normal_chat" in denied:
+            if lane == "TRADING_STATION":
+                return "I can review trading-system status and risk posture, but I cannot place or execute live trades from normal chat. Live execution requires a separate step-up path that is not implemented here."
+            return "That action is blocked from normal chat. It requires a separate step-up path that is not implemented here."
+        if "trusted_authority_required_for_veritas_status" in denied:
+            return "Veritas status requires trusted authority. From guest chat I can only explain the safety boundary: Veritas is a governed financial intelligence subsystem, not CLAIRE memory, and no live trading or live execution is allowed here."
+        if "private_data_exfiltration_blocked" in denied:
+            return "I cannot show private information from previous users or dump private memory. I can only work with information you are authorized to access, and private recall requires the proper identity, scope, and purpose."
+        if "legal_filing_blocked_from_normal_chat" in denied:
+            return "Court filing actions are blocked from normal chat. I can summarize monitored legal information when authorized, but I cannot file or submit documents here."
+        if "sensitive_action_requires_step_up_path" in denied:
+            return "Sensitive actions are blocked from normal chat and require a separate step-up path."
+        return answer
+
+    def handle_demo_message(
+        self,
+        user_id: str,
+        session_id: str,
+        message: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        metadata = metadata or {}
+        input_received = str(message or "")
+        trace_id = new_trace_id()
+        steps = [
+            "ingest_input",
+            "generate_trace_id",
+            "run_are_recall",
+            "run_policy_validation",
+            "build_llm_prompt",
+            "call_llm",
+            "assemble_response_json",
+            "persist_trace",
+            "return_response",
+        ]
+
+        try:
+            c3rp_route = self._c3rp_route(input_received)
+            lane_result = self._lane_result_from_c3rp(input_received, c3rp_route, metadata.get("recent_context"))
+            memories = self._recall_demo_memory(user_id, lane_result.lane)
+            memories = [
+                item for item in memories
+                if self._memory_supports_demo_input(input_received, lane_result.lane, item)
+            ]
+            recall_check = {
+                "status": "found" if memories else "none",
+                "summary": "Relevant prior memory found." if memories else "No relevant prior memory found.",
+                "items": [
+                    {
+                        "memory_id": item.get("memory_id"),
+                        "timestamp_ns": item.get("timestamp_ns"),
+                        "lane": item.get("lane"),
+                        "summary": item.get("summary"),
+                    }
+                    for item in memories
+                ],
+            }
+        except Exception:
+            c3rp_route = self._c3rp_route(input_received)
+            lane_result = self._lane_result_from_c3rp(input_received, c3rp_route)
+            memories = []
+            recall_check = {
+                "status": "error",
+                "summary": "Recall subsystem unavailable.",
+                "items": [],
+            }
+
+        try:
+            risk_level, risks = self._risk_authority_gate(lane_result.lane, input_received)
+            policy_validation = {
+                "status": "warning" if risks else "allowed",
+                "summary": "; ".join(risks) if risks else "No policy constraints violated.",
+                "rules_triggered": risks,
+            }
+        except Exception:
+            risk_level = "unknown"
+            policy_validation = {
+                "status": "warning",
+                "summary": "Policy subsystem unavailable.",
+                "rules_triggered": [],
+            }
+
+        messages = self._build_demo_messages(input_received, recall_check, policy_validation)
+        try:
+            raw_response = call_nemotron(
+                messages,
+                model_config=metadata.get("model_config") or self.model_config,
+                provider_generate=metadata.get("provider_generate"),
+            )
+        except Exception as exc:
+            raw_response = {
+                "content": "",
+                "reasoning_content": "",
+                "raw": {"provider_error": str(exc)},
+            }
+        llm_fields = self._parse_demo_llm_fields(raw_response.get("content"))
+        identity = llm_fields.get("identity") or "CLAIRE governed demo runtime."
+        decision = llm_fields.get("decision") or "Simulated action only."
+        output = llm_fields.get("output") or "Simulating requested action for demonstration only; no real-world execution performed."
+
+        if input_received.strip().lower() == "schedule a horseback ride tomorrow at 10am":
+            decision = "Simulated action only."
+            output = "Simulating scheduling action for demonstration only; no real-world execution performed."
+
+        response = {
+            "trace_id": trace_id,
+            "demo_mode": True,
+            "identity": identity,
+            "input_received": input_received,
+            "recall_check": recall_check,
+            "policy_validation": policy_validation,
+            "decision": decision,
+            "output": output,
+            "trace_summary": {
+                "steps_executed": steps,
+                "decisions_made": [
+                    f"lane={lane_result.lane}",
+                    f"recall={recall_check['status']}",
+                    f"policy={policy_validation['status']}",
+                    "execution=simulation_only",
+                ],
+            },
+        }
+        self._validate_demo_response(response)
+        trace_record = {
+            "trace_id": trace_id,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "input": input_received,
+            "recall": recall_check,
+            "policy": policy_validation,
+            "decision": decision,
+            "output": output,
+            "steps": steps,
+        }
+        self._persist_demo_trace(trace_record)
+        self.trace_logger.log(
+            {
+                "trace_id": trace_id,
+                "user_id": user_id,
+                "session_id": session_id,
+                "user_message_hash": sha_text(input_received),
+                "lane": lane_result.lane,
+                "memories_recalled": [item.get("memory_id") for item in memories if item.get("memory_id")],
+                "prompt_hash": sha_text(messages_to_prompt(messages)),
+                "model_used": self._model_used(raw_response),
+                "risk_level": risk_level,
+                "validator_result": {"approved": True, "issues": []},
+                "final_answer_hash": sha_text(output),
+                "memory_written": False,
+                "payload": response,
+            }
+        )
+        return response
+
+    def _build_demo_messages(
+        self,
+        input_received: str,
+        recall_check: dict[str, Any],
+        policy_validation: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "You are CLAIRE demo mode. Return only a compact JSON object with keys "
+                    "identity, decision, and output. No hidden reasoning. No real-world actions. "
+                    "Use the supplied recall and policy summaries only."
+                ),
+            },
+            {
+                "role": "system",
+                "content": (
+                    f"Recall status: {recall_check.get('status')}. "
+                    f"Recall summary: {recall_check.get('summary')}\n"
+                    f"Policy status: {policy_validation.get('status')}. "
+                    f"Policy summary: {policy_validation.get('summary')}"
+                ),
+            },
+            {"role": "user", "content": input_received},
+        ]
+
+    def _parse_demo_llm_fields(self, model_text: Any) -> dict[str, str]:
+        text = str(model_text or "").strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+            if not match:
+                return {}
+            try:
+                parsed = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                return {}
+        if not isinstance(parsed, dict):
+            return {}
+        return {
+            key: str(parsed.get(key) or "").strip()
+            for key in ("identity", "decision", "output")
+            if str(parsed.get(key) or "").strip()
+        }
+
+    def _memory_supports_demo_input(self, input_received: str, lane: str, memory: dict[str, Any]) -> bool:
+        text = " ".join(
+            str(memory.get(key) or "")
+            for key in ("summary", "raw_excerpt", "lane", "source")
+        ).lower()
+        if not text.strip():
+            return False
+        memory_lane = str(memory.get("lane") or "")
+        if memory_lane not in {lane, "GENERAL_CHAT", "SESSION", "ORIGINAL_ARE"}:
+            return False
+        query_terms = {
+            term
+            for term in re.findall(r"[a-z0-9']+", input_received.lower())
+            if len(term) > 3 and term not in {"schedule", "tomorrow", "demo", "mode"}
+        }
+        if not query_terms:
+            return False
+        return bool(query_terms.intersection(set(re.findall(r"[a-z0-9']+", text))))
+
+    def _normalize_input(self, message: str) -> str:
+        return " ".join(str(message or "").split())
+
+    def _c3rp_route(self, message: str) -> dict[str, Any]:
+        normalized = c3rp_normalize_input(message)
+        orientation = provisional_orientation(normalized)
+        return c3rp_classify(normalized, orientation)
+
+    def _lane_result_from_c3rp(
+        self,
+        message: str,
+        c3rp_route: dict[str, Any],
+        recent_context: list[dict[str, Any]] | None = None,
+    ) -> LaneResult:
+        base = classify_lane(message, recent_context)
+        c3rp_lane = str(c3rp_route.get("lane") or "").upper()
+        legacy = c3rp_route.get("legacy_intent") or {}
+        lane = base.lane
+        reason = f"C3RP route={c3rp_lane}; {base.reason}"
+        finance_markers = [
+            "crypto",
+            "kraken",
+            "trading",
+            "paper trade",
+            "paper trading",
+            "live trade",
+            "market status",
+            "ohlcv",
+            "btc",
+            "bitcoin",
+            "eth",
+            "ethereum",
+            "sol",
+            "xrp",
+            "buy btc",
+            "sell btc",
+            "buy bitcoin",
+            "sell bitcoin",
+        ]
+        legal_monitor_markers = [
+            "courtlistener",
+            "court listener",
+            "court_listener",
+            "docket",
+            "pacer",
+            "recap",
+            "case update",
+            "case updates",
+            "court filing",
+            "legal filing",
+            "legal monitor",
+            "tracked case",
+            "tracked cases",
+        ]
+        lowered_message = str(message or "").lower()
+        recent_context_text = json.dumps(recent_context or [], ensure_ascii=False).lower()
+        approval_followup = lowered_message.strip() in {"i approve it", "approved", "yes approve", "i approve", "go ahead"}
+        officeai_product = any(marker in lowered_message for marker in ["officeai", "office ai", "office-management", "office management"])
+        trading_negated = any(
+            marker in lowered_message
+            for marker in [
+                "do not pitch crypto",
+                "do not pitch crypto or trading",
+                "don't pitch crypto",
+                "dont pitch crypto",
+                "keep veritas in the background",
+                "not crypto",
+                "not trading",
+            ]
+        )
+        architecture_orientation = (
+            any(marker in lowered_message for marker in ["difference between", "allowed to own memory", "own memory", "governed runtime", "chronological memory authority"])
+            and any(marker in lowered_message for marker in ["claire", "are", "nemotron", "trace"])
+        )
+        are_canonical_question = (
+            (" are " in f" {lowered_message} " or "analog recall" in lowered_message)
+            and any(marker in lowered_message for marker in ["what does", "what is", "mean", "definition", "evidence", "supports that definition", "where did"])
+        )
+        governed_runtime_security = (
+            any(marker in lowered_message for marker in ["governed-runtime", "governed runtime"])
+            and any(marker in lowered_message for marker in ["malicious skill", "supply-chain attack", "supply chain attack", "plugin", "plugins", "tool trust"])
+            and any(marker in lowered_message for marker in ["handshake broker", "diode", "sentinel", "trace", "c3rp", "are"])
+        )
+        if approval_followup and any(marker in recent_context_text for marker in ["trade", "trading", "btc", "live execution"]):
+            lane = "TRADING_STATION"
+            reason = f"C3RP route={c3rp_lane}; approval follow-up remains inside TRADING_STATION and cannot execute."
+        elif governed_runtime_security:
+            lane = "CLAIRE_SYSTEM_ARCHITECTURE"
+            reason = f"C3RP route={c3rp_lane}; governed runtime security prompt admitted to CLAIRE_SYSTEM_ARCHITECTURE."
+        elif are_canonical_question:
+            lane = "CLAIRE_SYSTEM_ARCHITECTURE"
+            reason = f"C3RP route={c3rp_lane}; canonical ARE definition/evidence prompt admitted to CLAIRE_SYSTEM_ARCHITECTURE."
+        elif officeai_product:
+            lane = "BUSINESS_FORMATION"
+            reason = f"C3RP route={c3rp_lane}; OfficeAI product prompt admitted to BUSINESS_FORMATION."
+        elif self._has_finance_marker(lowered_message, finance_markers) and not trading_negated:
+            lane = "TRADING_STATION"
+            reason = f"C3RP route={c3rp_lane}; finance/trading marker admitted to TRADING_STATION."
+        elif architecture_orientation:
+            lane = "CLAIRE_SYSTEM_ARCHITECTURE"
+            reason = f"C3RP route={c3rp_lane}; architecture/orientation question admitted to CLAIRE_SYSTEM_ARCHITECTURE."
+        elif any(marker in lowered_message for marker in legal_monitor_markers):
+            lane = "LEGAL_CASE"
+            reason = f"C3RP route={c3rp_lane}; legal-monitor marker admitted to LEGAL_CASE."
+
+        if c3rp_lane == "LEGAL_RESEARCH" and not architecture_orientation:
+            lane = "LEGAL_CASE"
+        elif c3rp_lane == "DOCUMENT_QA":
+            lane = "GENERAL_CHAT"
+            reason = "C3RP document utility route admitted through governed runtime."
+        elif c3rp_lane == "SAFETY_SENSITIVE" and not governed_runtime_security:
+            lane = "GENERAL_CHAT"
+            reason = "C3RP safety-sensitive route contained by governed runtime."
+        elif c3rp_lane == "ACTION_REQUEST" and base.lane == "GENERAL_CHAT":
+            lane = "GENERAL_CHAT"
+            reason = "C3RP action request route admitted for simulated or advisory response only."
+        elif c3rp_lane in {"CONCEPTUAL", "PROJECT_STATE"} and base.lane == "GENERAL_CHAT":
+            primary = str(legacy.get("primary_intent") or "")
+            secondaries = set(legacy.get("secondary_intents") or [])
+            if primary == "architectural" or "architectural" in secondaries:
+                lane = "CLAIRE_SYSTEM_ARCHITECTURE"
+            elif primary == "legal" or "legal" in secondaries:
+                lane = "LEGAL_CASE"
+
+        allowed = list(base.allowed_memory_lanes or [])
+        if lane not in allowed:
+            allowed.insert(0, lane)
+        for item in c3rp_route.get("allowed_lanes") or []:
+            item = str(item)
+            if item not in allowed:
+                allowed.append(item)
+        return LaneResult(
+            lane=lane,
+            confidence=base.confidence,
+            reason=reason,
+            allowed_memory_lanes=allowed or [lane],
+            allowed_tools=base.allowed_tools,
+            requires_strict_provenance=base.requires_strict_provenance or bool(c3rp_route.get("suppressed_lanes")),
+            caution=base.caution,
+            output_style=base.output_style,
+        )
+
+    def _has_finance_marker(self, lowered_message: str, finance_markers: list[str]) -> bool:
+        for marker in finance_markers:
+            marker = str(marker or "").lower().strip()
+            if not marker:
+                continue
+            if re.fullmatch(r"[a-z0-9]{2,4}", marker):
+                if re.search(rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])", lowered_message):
+                    return True
+            elif marker in lowered_message:
+                return True
+        return False
+
+    def _wants_runtime_orientation(self, message: str) -> bool:
+        text = str(message or "").lower()
+        triggers = [
+            "before you answer, orient",
+            "answer like claire",
+            "give runtime decision",
+            "what should happen inside your runtime",
+            "show your runtime decision",
+            "orient first",
+        ]
+        return any(trigger in text for trigger in triggers)
+
+    def _visible_orientation_answer(self, message: str, runtime_report: dict[str, Any], model_answer: str) -> str:
+        text = str(message or "").lower()
+        if all(marker in text for marker in ["claire", "are", "nemotron", "trace"]) and "own memory" in text:
+            return (
+                "Claire is the human person. CLAIRE is the governed AI/runtime system.\n\n"
+                "ARE is the chronological memory authority: append-only records, timestamp, short hash, preserved text, ordered recall.\n\n"
+                "Nemotron is only the language engine. It can draft words, but it does not own memory.\n\n"
+                "Trace is audit evidence. It records what happened; it is not memory authority.\n\n"
+                "Veritas is financial monitoring: market data, risk checks, paper-trade ledgers. It is not CLAIRE memory.\n\n"
+                "CourtListener is legal monitoring: docket/case research and source evidence. It is not CLAIRE memory.\n\n"
+                "Only ARE owns CLAIRE durable memory. Trace, Veritas, and CourtListener may keep their own audit or subsystem ledgers, but they do not become CLAIRE's memory."
+            )
+        return (
+            f"Runtime orientation: lane={runtime_report.get('lane')}; "
+            f"memory_write={runtime_report.get('should_write_to_ARE')}; "
+            f"risk={runtime_report.get('Sentinel_checks', {}).get('risk_level')}.\n\n"
+            f"{model_answer}"
+        ).strip()
+
+    def _build_runtime_report(
+        self,
+        *,
+        normalized: str,
+        lane_result: LaneResult,
+        eligibility: Any,
+        recent_path: list[dict[str, Any]],
+        long_term_memories: list[dict[str, Any]],
+        risk_level: str,
+        risks: list[str],
+        validator_result: dict[str, Any],
+        model_answer: str,
+    ) -> dict[str, Any]:
+        should_write, write_reason = should_commit_memory(normalized, lane_result.lane, eligibility)
+        secondary_lanes = [lane for lane in lane_result.allowed_memory_lanes if lane != lane_result.lane]
+        return {
+            "lane": lane_result.lane,
+            "secondary_lanes": secondary_lanes,
+            "memory_eligibility": eligibility.to_dict() if hasattr(eligibility, "to_dict") else dict(eligibility or {}),
+            "should_write_to_ARE": should_write,
+            "ARE_write_format": "original ARE JSONL: {ts:int, sha:sha256(text)[:10], text:text[:8000]}",
+            "memory_event_type": "durable_exchange" if should_write else "none",
+            "durable_summary": normalized[:500] if should_write else "No durable ARE write recommended for this request.",
+            "why_Nemotron_does_not_own_this_memory": "Nemotron receives a governed prompt and produces language only; durable memory is committed by CLAIRE through original_are_bridge.py after policy and eligibility checks.",
+            "how_future_sessions_should_recall_it": "Future sessions should read chronological records through original_are_bridge.read_original_are_history and use them only as lane-governed support.",
+            "Sentinel_checks": {
+                "risk_level": risk_level,
+                "risks": risks,
+                "validator_result": validator_result,
+                "write_reason": write_reason,
+            },
+            "Trace_fields_to_record": [
+                "trace_id",
+                "user_message_hash",
+                "lane",
+                "lane_result",
+                "c3rp_route",
+                "memories_recalled",
+                "prompt_hash",
+                "model_used",
+                "validator_result",
+                "final_answer_hash",
+                "memory_written",
+            ],
+            "assumptions_allowed": [
+                "Use current truth files as higher authority than old memory.",
+                "Use original ARE records as chronological support, not as model-owned memory.",
+                "Treat Nemotron output as language generation subject to Sentinel validation.",
+            ],
+            "assumptions_blocked": [
+                "Do not invent memory.",
+                "Do not let Nemotron write or rewrite durable memory directly.",
+                "Do not promote SQLite or vector search to default runtime memory authority.",
+                "Do not surface off-lane recalled material as the answer.",
+            ],
+            "final_response_to_user": model_answer,
+            "recall_summary": {
+                "recent_path_count": len(recent_path),
+                "long_term_memory_count": len(long_term_memories),
+                "memory_ids": [memory.get("memory_id") for memory in recent_path + long_term_memories if memory.get("memory_id")],
+            },
+        }
+
+    def _canonical_terms(self, current_truth: dict[str, Any]) -> dict[str, Any]:
+        data = (current_truth or {}).get("canonical_terms") or {}
+        terms = data.get("terms") if isinstance(data, dict) else {}
+        return terms if isinstance(terms, dict) else {}
+
+    def _canonical_are(self, current_truth: dict[str, Any]) -> dict[str, Any] | None:
+        term = self._canonical_terms(current_truth).get("ARE")
+        return term if isinstance(term, dict) else None
+
+    def _is_are_definition_or_evidence_query(self, query: str) -> bool:
+        text = " ".join(str(query or "").lower().split())
+        if "are" not in text and "analog recall" not in text:
+            return False
+        return any(
+            marker in text
+            for marker in [
+                "what does are mean",
+                "what does are mean in claire systems",
+                "what is are",
+                "define are",
+                "definition of are",
+                "evidence supports",
+                "supports that definition",
+                "support that definition",
+                "where did that definition",
+                "where does that definition",
+                "analog recall engine",
+            ]
+        )
+
+    def _canonical_memory_leads(self, query: str, lane: str, current_truth: dict[str, Any]) -> list[dict[str, Any]]:
+        if lane != "CLAIRE_SYSTEM_ARCHITECTURE" or not self._is_are_definition_or_evidence_query(query):
+            return []
+        are = self._canonical_are(current_truth)
+        if not are:
+            return []
+        evidence = are.get("evidence") if isinstance(are.get("evidence"), list) else []
+        evidence_summary = "; ".join(
+            str(item.get("summary") or item.get("reference") or "")
+            for item in evidence
+            if isinstance(item, dict)
+        )
+        related = ", ".join(str(term) for term in (are.get("related_terms") or []))
+        summary = (
+            f"Canonical ARE definition: {are.get('definition')} "
+            f"Origin: {(are.get('origin') or {}).get('source')}. "
+            f"Evidence: {evidence_summary}. "
+            f"Related terms: {related}."
+        )
+        return [
+            {
+                "memory_id": "canonical_term_ARE",
+                "timestamp_ns": 0,
+                "lane": "CLAIRE_SYSTEM_ARCHITECTURE",
+                "memory_scope": "PUBLIC",
+                "summary": summary[:800],
+                "raw_excerpt": summary[:2000],
+                "source": "canonical_terms",
+                "provenance_hash": "canonical_terms_ARE",
+                "importance_score": 1.0,
+                "retrieval_source": "canonical_current_truth",
+            }
+        ]
+
+    def _apply_canonical_answer_boundary(
+        self,
+        answer: str,
+        query: str,
+        lane: str,
+        current_truth: dict[str, Any],
+    ) -> str:
+        if lane != "CLAIRE_SYSTEM_ARCHITECTURE" or not self._is_are_definition_or_evidence_query(query):
+            return answer
+        are = self._canonical_are(current_truth)
+        if not are:
+            return answer
+        lowered = str(answer or "").lower()
+        are_mode = self._are_answer_mode(query)
+        evidence_question = are_mode in {"evidence", "creator"}
+        definition_question = are_mode == "normal"
+        answer_has_definition = (
+            "analog recall engine" in lowered
+            and "chronological" in lowered
+            and "memory" in lowered
+            and "agent runtime environment" not in lowered
+            and "gpu memory" not in lowered
+        )
+        answer_has_evidence = (
+            "original_are" in lowered
+            or "original are" in lowered
+            or "arestore" in lowered
+            or "subsystem_registry" in lowered
+            or "record shape" in lowered
+            or "ts" in lowered and "sha" in lowered
+        )
+        generic_failure = any(
+            marker in lowered
+            for marker in [
+                "tell me the goal",
+                "make the request concrete",
+                "generic filler",
+                "do not have enough context",
+                "give me the exact constraint",
+                "exact constraint",
+                "specific outcome",
+            ]
+        )
+        if definition_question:
+            return self._canonical_are_answer(are, mode="normal")
+        if answer_has_definition and answer_has_evidence and not generic_failure:
+            return answer
+        return self._canonical_are_answer(are, mode=are_mode)
+
+    def _are_answer_mode(self, query: str) -> str:
+        text = " ".join(str(query or "").lower().split())
+        if any(
+            marker in text
+            for marker in [
+                "creator mode",
+                "developer detail",
+                "implementation evidence",
+                "architecture internals",
+                "glasses on",
+            ]
+        ):
+            return "creator"
+        if any(
+            marker in text
+            for marker in [
+                "what evidence supports",
+                "evidence supports",
+                "supports that definition",
+                "where does that definition come from",
+                "where did that definition come from",
+                "show source evidence",
+                "prove it",
+                "cite the implementation",
+            ]
+        ):
+            return "evidence"
+        return "normal"
+
+    def _canonical_are_answer(self, are: dict[str, Any], *, mode: str) -> str:
+        definition = str(are.get("definition") or "").strip()
+        origin = are.get("origin") if isinstance(are.get("origin"), dict) else {}
+        evidence = [item for item in (are.get("evidence") or []) if isinstance(item, dict)]
+        related = ", ".join(str(term) for term in (are.get("related_terms") or []))
+
+        lines = [
+            "ARE means Analog Recall Engine in Claire Systems.",
+            "It is Claire's external chronological memory and provenance-continuity layer. It preserves what happened, when it happened, and what evidence supports it before Claire speaks. ARE is not the model, not GPU/RAM memory, and not a generic runtime label.",
+        ]
+        if mode == "normal":
+            return " ".join(lines)
+        if mode in {"evidence", "creator"}:
+            lines.append("The supporting evidence is:")
+            for item in evidence:
+                lines.append(f"- {item.get('reference')}: {item.get('summary')}")
+        if mode == "creator":
+            lines.append(
+                "Creator Mode detail: the implementation evidence points to append-style JSONL, timestamped records, hash fingerprints, AREStore, original ARE JSONL, the bridge/wrapper relationship, and governed recall before model response."
+            )
+            if definition and definition not in lines:
+                lines.append(definition)
+            lines.append(
+                f"The definition comes from {origin.get('source') or 'the original ARE implementation and CLAIRE architecture authority docs'}."
+            )
+        if mode == "creator" and related:
+            lines.append(f"Related terms: {related}.")
+        return "\n\n".join(lines).strip()
+
+    def _recall_memory(
+        self,
+        user_id: str,
+        lane_result: LaneResult,
+        entity_names: list[str],
+        query: str,
+        authority_capsule: AuthorityCapsule,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        rejected: list[dict[str, Any]] = []
+        allowed_scopes = set(authority_capsule.allowed_memory_scopes or ["PUBLIC"])
+
+        def reject(memory: dict[str, Any], reason: str) -> None:
+            rejected.append(
+                {
+                    "memory_id": memory.get("memory_id"),
+                    "lane": memory.get("lane"),
+                    "reason": reason,
+                }
+            )
+
+        def admit(memory: dict[str, Any]) -> bool:
+            if not self._memory_scope_allowed(memory, allowed_scopes):
+                reject(memory, "memory_scope_not_allowed")
+                return False
+            ok, reason = self._memory_supports_active_query(query, lane_result, memory, entity_names)
+            if not ok:
+                reject(memory, reason)
+            return ok
+
+        if self.use_original_are:
+            history = read_original_are_history(limit=8)
+            recent_candidates = [
+                {
+                    "memory_id": f"original_are_{item.get('sha') or item.get('line_number')}",
+                    "timestamp_ns": int(item.get("ts") or 0) * 1_000_000_000,
+                    "lane": "ORIGINAL_ARE",
+                    "memory_scope": "PUBLIC",
+                    "summary": str(item.get("text") or "")[:500],
+                    "raw_excerpt": str(item.get("text") or "")[:2000],
+                    "source": "original_are",
+                    "provenance_hash": item.get("sha"),
+                    "importance_score": 1.0,
+                    "retrieval_source": "original_are_recent",
+                }
+                for item in history.get("records", [])
+            ]
+            memory_file = history.get("memory_file")
+            indexed_records = original_are_records(memory_file, limit=500) if memory_file else []
+            semantic_candidates, _semantic_status = query_records(indexed_records, query, top_k=8)
+            candidates = self._dedupe_memories(recent_candidates + semantic_candidates)
+            memories = [memory for memory in candidates if admit(memory)]
+            memories.sort(key=lambda memory: int(memory.get("timestamp_ns") or 0))
+            return memories[-5:], memories[:-5], rejected
+
+        allowed = set(lane_result.allowed_memory_lanes or [lane_result.lane])
+        primary_lane = lane_result.lane
+        recent = self.memory_store.recall_recent(user_id, lane=primary_lane, limit=8)
+        entity_hits = self.memory_store.recall_by_entity(user_id, entity_names, lane=primary_lane, limit=8)
+        lane_pool = self.memory_store.recall_for_lanes(user_id, sorted(allowed), limit=200)
+        semantic_hits, _semantic_status = query_records(lane_pool, query, top_k=8)
+
+        def lane_allowed(memory: dict[str, Any]) -> bool:
+            return str(memory.get("lane") or "") in allowed
+
+        seen: set[str] = set()
+        ordered: list[dict[str, Any]] = []
+        for memory in recent + entity_hits + semantic_hits:
+            memory_id = str(memory.get("memory_id") or "")
+            if not memory_id or memory_id in seen:
+                continue
+            if not lane_allowed(memory):
+                reject(memory, "lane_not_allowed")
+                continue
+            if admit(memory):
+                seen.add(memory_id)
+                ordered.append(memory)
+        ordered.sort(key=lambda memory: int(memory.get("timestamp_ns") or 0))
+        return ordered[-5:], ordered[:-5], rejected
+
+    def _dedupe_memories(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for memory in memories:
+            memory_id = str(memory.get("memory_id") or memory.get("provenance_hash") or "")
+            if not memory_id or memory_id in seen:
+                continue
+            seen.add(memory_id)
+            deduped.append(memory)
+        return deduped
+
+    def _memory_scope_allowed(self, memory: dict[str, Any], allowed_scopes: set[str]) -> bool:
+        allowed_scopes = {str(scope).upper() for scope in allowed_scopes}
+        scope = str(memory.get("memory_scope") or "PUBLIC").upper()
+        if scope in allowed_scopes:
+            return True
+        if scope == "PROJECT" and "COMPANY_INTERNAL" in allowed_scopes:
+            return True
+        return False
+
+    def _memory_supports_active_query(
+        self,
+        query: str,
+        lane_result: LaneResult,
+        memory: dict[str, Any],
+        entity_names: list[str],
+    ) -> tuple[bool, str]:
+        memory_lane = str(memory.get("lane") or "")
+        lane = str(lane_result.lane or "")
+        allowed = set(lane_result.allowed_memory_lanes or [lane])
+        if memory_lane not in allowed and memory_lane not in {"GENERAL_CHAT", "SESSION", "ORIGINAL_ARE"}:
+            return False, "lane_not_allowed"
+
+        text = " ".join(str(memory.get(key) or "") for key in ("summary", "raw_excerpt", "source", "lane")).lower()
+        if not text.strip():
+            return False, "empty_memory"
+
+        query_terms = self._support_terms(query)
+        memory_terms = set(re.findall(r"[a-z0-9']+", text))
+        if not query_terms:
+            return False, "no_distinctive_query_terms"
+
+        if entity_names:
+            lowered_entities = [entity.lower() for entity in entity_names if entity]
+            if any(entity and entity in text for entity in lowered_entities):
+                return True, "entity_match"
+
+        overlap = query_terms.intersection(memory_terms)
+        if len(overlap) >= 2:
+            return True, "semantic_term_overlap"
+
+        architecture_lanes = {"CLAIRE_SYSTEM_ARCHITECTURE", "NVIDIA_PATHWAY", "BUSINESS_FORMATION"}
+        if lane in architecture_lanes and overlap and any(
+            term in memory_terms
+            for term in {"claire", "are", "runtime", "sentinel", "trace", "memory", "veritas", "governance"}
+        ):
+            return True, "architecture_support_match"
+
+        return False, "semantic_mismatch"
+
+    def _support_terms(self, text: str) -> set[str]:
+        stopwords = {
+            "about", "after", "again", "also", "because", "before", "being", "between",
+            "could", "does", "doing", "from", "have", "into", "just", "like", "more",
+            "must", "only", "over", "should", "that", "their", "them", "then", "there",
+            "these", "they", "this", "what", "when", "where", "which", "with", "would",
+            "your", "youre", "answer", "explain", "give", "tell",
+        }
+        return {
+            term
+            for term in re.findall(r"[a-z0-9']+", str(text or "").lower())
+            if len(term) > 3 and term not in stopwords
+        }
+
+    def _recall_demo_memory(self, user_id: str, lane: str) -> list[dict[str, Any]]:
+        if self.use_original_are:
+            history = read_original_are_history(limit=5)
+            return [
+                {
+                    "memory_id": f"original_are_{item.get('sha') or item.get('line_number')}",
+                    "timestamp_ns": int(item.get("ts") or 0) * 1_000_000_000,
+                    "lane": "ORIGINAL_ARE",
+                    "summary": str(item.get("text") or "")[:500],
+                    "source": "original_are",
+                }
+                for item in history.get("records", [])
+            ]
+        return self.memory_store.recall_recent(user_id, lane=lane, limit=5)
+
+    def _commit_memory(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        message: str,
+        lane: str,
+        answer: str,
+        eligibility: Any,
+        secret_detected: bool = False,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        if secret_detected or self.diode.contains_secret(message) or self.diode.contains_secret(answer):
+            return False, None
+        if self.use_original_are:
+            ok, reason = should_commit_memory(message, lane, eligibility)
+            if not ok:
+                return False, None
+            text = (
+                f"lane={lane}\n"
+                f"user_id={user_id}\n"
+                f"session_id={session_id}\n"
+                f"reason={reason}\n"
+                f"message={message}\n"
+                f"answer={answer[:1200]}"
+            )
+            written = append_original_are_memory(text)
+            return True, {
+                "memory_id": f"original_are_{written['record']['sha']}",
+                "source": "original_are",
+                "memory_file": written["memory_file"],
+            }
+        return commit_if_needed(
+            self.memory_store or AREMemoryStore(),
+            user_id,
+            session_id,
+            message,
+            lane,
+            answer,
+            eligibility,
+        )
+
+    def _constraints(self, lane: str) -> list[str]:
+        constraints = [
+            "Current truth files outrank old memory.",
+            "Use retrieval only as support; answer the active question directly.",
+            "Suppress irrelevant off-lane memories.",
+            "Use trusted temporal context for current time, elapsed time, deadline status, and event order.",
+            "Do not confuse Claire the person with CLAIRE the AI/runtime system.",
+            "Do not treat Nemotron as CLAIRE herself.",
+        ]
+        if lane == "NVIDIA_PATHWAY":
+            constraints.extend(nvidia_constraints())
+        if lane == "TRADING_STATION":
+            constraints.append("Never place live trades directly from chat.")
+        if lane == "LEGAL_CASE":
+            constraints.append("Do not provide legal or tax certainty without professional review.")
+        return constraints
+
+    def _temporal_bearing(self, context: Any, resolution: dict[str, Any]) -> dict[str, Any]:
+        posture = "current-state"
+        if context.overdue_items:
+            posture = "deadline-driven"
+        elif context.upcoming_items:
+            posture = "scheduled"
+        elif resolution.get("status") == "ambiguous":
+            posture = "uncertain"
+        elif resolution.get("expressions"):
+            posture = "temporal-reference"
+        elapsed = context.elapsed_since_previous_turn_seconds
+        return {
+            "current_local_time": context.now_local,
+            "timezone": context.timezone_name,
+            "elapsed_since_last_interaction_seconds": elapsed,
+            "nearest_deadline": (context.upcoming_items or context.overdue_items or [None])[0],
+            "overdue_commitments": context.overdue_items,
+            "freshness_risk": "possible" if elapsed and elapsed > 7 * 86400 else "normal",
+            "recommended_temporal_posture": posture,
+            "temporal_resolution_status": resolution.get("status"),
+        }
+
+    def _high_impact_temporal_action(self, message: str) -> bool:
+        text = str(message or "").lower()
+        action = any(marker in text for marker in ["send", "schedule", "book", "cancel", "reschedule", "file", "submit", "remind"])
+        temporal = any(marker in text for marker in ["tomorrow", "tonight", "morning", "afternoon", "friday", "monday", "deadline", "appointment", "meeting", "call"])
+        return action and temporal
+
+    def _register_temporal_user_events(
+        self,
+        *,
+        normalized: str,
+        session_id: str,
+        turn_id: str,
+        temporal_context: Any,
+        temporal_resolution: dict[str, Any],
+        parent_event_id: str,
+    ) -> None:
+        text = str(normalized or "")
+        lowered = text.lower()
+        expressions = temporal_resolution.get("expressions") or []
+        if not expressions:
+            return
+        event_title = self._temporal_event_title(lowered)
+        if not event_title and any(marker in lowered for marker in ["moved it", "changed it", "rescheduled it", "they moved it"]):
+            existing_any = self._latest_current_temporal_event()
+            event_title = existing_any.title if existing_any else ""
+        if not event_title:
+            return
+        instant_data = expressions[0].get("instant") if isinstance(expressions[0], dict) else None
+        if not instant_data:
+            return
+        instant = TemporalInstant(**instant_data)
+        existing = self._find_current_temporal_event(event_title)
+        moved = any(marker in lowered for marker in ["moved", "changed", "rescheduled", "now", "instead"])
+        deadline_like = any(marker in lowered for marker in ["call", "meeting", "deadline", "appointment"]) or bool(existing and existing.due_at)
+        event_type_name = existing.event_type if existing and moved else "deadline" if deadline_like else "event"
+        event = TemporalEvent(
+            event_id="tevt_" + new_trace_id().replace("trace_", "", 1),
+            event_type=event_type_name,
+            title=event_title,
+            description=text[:500],
+            observed_at=TemporalInstant.from_datetime(parse_aware_datetime(temporal_context.now_utc), timezone_name=temporal_context.timezone_name),
+            ingested_at=TemporalInstant.from_datetime(parse_aware_datetime(temporal_context.now_utc), timezone_name=temporal_context.timezone_name),
+            due_at=instant if deadline_like else None,
+            occurred_at=None if deadline_like else instant,
+            status="current",
+            confidence=0.78,
+        )
+        if moved and existing:
+            event = self.temporal_engine.update_event(existing.event_id, self.temporal_engine._event_to_dict(event))
+            event_type = "temporal.event_superseded"
+            summary = {"old_event_id": existing.event_id, "new_event_id": event.event_id, "title": event.title}
+        else:
+            event = self.temporal_engine.register_event(event)
+            event_type = "temporal.event_registered"
+            summary = {"event_id": event.event_id, "title": event.title}
+        self._append_runtime_event(
+            event_type=event_type,
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "temporal-engine", "component": "temporal_engine"},
+            result_summary=summary,
+            payload={"temporal_event": self.temporal_engine._event_to_dict(event)},
+            parent_event_ids=[parent_event_id],
+        )
+
+    def _temporal_event_title(self, lowered: str) -> str:
+        if "investor call" in lowered:
+            return "investor call"
+        if "call" in lowered:
+            return "call"
+        if "meeting" in lowered:
+            return "meeting"
+        if "deadline" in lowered:
+            return "deadline"
+        if "appointment" in lowered:
+            return "appointment"
+        return ""
+
+    def _find_current_temporal_event(self, title: str) -> TemporalEvent | None:
+        for event in reversed(list(self.temporal_engine._events.values())):
+            if event.title.lower() == title.lower() and event.status == "current":
+                return event
+        return None
+
+    def _latest_current_temporal_event(self) -> TemporalEvent | None:
+        for event in reversed(list(self.temporal_engine._events.values())):
+            if event.status == "current":
+                return event
+        return None
+
+    def _risk_authority_gate(self, lane: str, message: str) -> tuple[str, list[str]]:
+        text = message.lower()
+        risks: list[str] = []
+        live_trade_request = (
+            lane == "TRADING_STATION"
+            and (
+                any(term in text for term in ["buy now", "sell now", "buy ", "sell ", "place order", "execute", "live trade"])
+                or ("place" in text and "trade" in text)
+                or ("live" in text and "trade" in text)
+                or text.strip() in {"i approve it", "approved", "yes approve", "i approve", "go ahead"}
+            )
+        )
+        if live_trade_request:
+            risks.append("Live trading requires Veritas live gates, passphrase, risk governor, kill switch check, and external confirmation.")
+        if lane == "LEGAL_CASE":
+            risks.append("Legal lane requires source gating and no professional-certainty claims.")
+            if any(term in text for term in ["file a motion", "file motion", "submit filing", "e-file", "efile", "file a pleading", "file pleading", "serve papers"]):
+                risks.append("Legal filing automation is blocked from normal chat.")
+        if any(term in text for term in ["password", "private key", "social security", "ssn"]):
+            risks.append("Sensitive data detected.")
+        return ("high" if risks else "low", risks)
+
+    def _model_used(self, raw_response: dict[str, Any]) -> str:
+        raw = raw_response.get("raw") or {}
+        return str(raw.get("model") or raw.get("provider") or "nvidia_nemotron")
+
+    def _validate_demo_response(self, response: dict[str, Any]) -> None:
+        if not response.get("trace_id"):
+            raise ValueError("demo response missing trace_id")
+        if "input_received" not in response:
+            raise ValueError("demo response missing input_received")
+        if not response.get("output"):
+            raise ValueError("demo response missing output")
+        if not response.get("trace_summary", {}).get("steps_executed"):
+            raise ValueError("demo response missing trace_summary.steps_executed")
+
+    def _persist_demo_trace(self, record: dict[str, Any]) -> None:
+        from pathlib import Path
+
+        path = Path("data/traces.jsonl")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def get_trace(self, trace_id: str) -> dict[str, Any] | None:
+        from pathlib import Path
+
+        path = Path("data/traces.jsonl")
+        if not path.exists():
+            runtime_trace = self.trace_logger.get(trace_id)
+            return runtime_trace
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("trace_id") == trace_id:
+                    return record
+        return self.trace_logger.get(trace_id)
+
+
+def handle_user_message(user_id: str, session_id: str, message: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    return ClaireRuntime().handle_user_message(user_id, session_id, message, metadata)

@@ -9,8 +9,8 @@ import requests
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
-BASE_DIR = Path("/home/LuciusPrime/claire")
-SENTINEL_SPINE = BASE_DIR / "silo_data" / "sentinel_spine.jsonl"
+BASE_DIR = Path(os.environ.get("CLAIRE_BASE_DIR", "/home/LuciusPrime/claire"))
+SENTINEL_SPINE = Path(os.environ.get("CLAIRE_INGEST_SENTINEL_SPINE", str(BASE_DIR / "silo_data" / "sentinel_spine.jsonl")))
 ARE_INGEST_URL = os.getenv("CLAIRE_ARE_INGEST_URL", "http://127.0.0.1:8002/ingest")
 INGEST_TOKEN = os.getenv("CLAIRE_INGEST_TOKEN", "")
 

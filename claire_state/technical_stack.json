@@ -1,0 +1,24 @@
+{
+  "runtime": "CLAIRE governed runtime",
+  "memory": "ARE / Analog Recall Engine chronological memory layer",
+  "model_brain": "NVIDIA Nemotron or replaceable provider",
+  "provider_path": "Go adapter / NIM / local llama compatible",
+  "governance": [
+    "input normalization",
+    "lane classification",
+    "memory eligibility review",
+    "ARE chronological recall",
+    "current-truth loading",
+    "context building",
+    "risk / authority gating",
+    "Nemotron prompt construction",
+    "response validation",
+    "trace logging",
+    "memory commit decision"
+  ],
+  "systems": {
+    "ARE": "Analog Recall Engine / chronological memory layer",
+    "Veritas": "Azure financial intelligence station / trading pressure chamber",
+    "CLAIRE": "governed AI runtime"
+  }
+}

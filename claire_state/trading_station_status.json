@@ -1,0 +1,13 @@
+{
+  "name": "Veritas",
+  "role": "Azure financial intelligence station / trading pressure chamber",
+  "mode": "paper by default",
+  "rule": "No live trades from normal chat.",
+  "requires": [
+    "live gates",
+    "passphrase",
+    "risk governor",
+    "kill switch check",
+    "external explicit confirmation outside normal chat"
+  ]
+}

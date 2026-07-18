@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Claire ARE Brain - Sovereign Core")
 
-VAULT_PATH = "/home/LuciusPrime/claire/data/memory_vault.jsonl"
+VAULT_PATH = os.environ.get("CLAIRE_MEMORY_VAULT_PATH", "/home/LuciusPrime/claire/data/memory_vault.jsonl")
 os.makedirs(os.path.dirname(VAULT_PATH), exist_ok=True)
 
 _RECORDS = []

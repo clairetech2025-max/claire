@@ -1,0 +1,29 @@
+{
+  "environment": "development",
+  "github_repository": "https://github.com/clairetech2025-max/claire",
+  "azure": {
+    "enabled": true,
+    "managed_outside_this_manifest": true,
+    "do_not_shutdown_from_deployment": true
+  },
+  "huggingface": {
+    "claire_space_id": "Blackstormhorse/CLAIRE_Control_Interface",
+    "veritas_space_id": "set-after-authenticated-discovery",
+    "expected_host": "0.0.0.0",
+    "expected_port": 7860,
+    "secrets": [
+      "CLAIRE_MODEL_ENDPOINT",
+      "CLAIRE_MODEL_NAME",
+      "COURTLISTENER_API_TOKEN"
+    ]
+  },
+  "feature_flags": {
+    "CLAIRE_CORE_ENABLED": "false",
+    "CLAIRE_CORE_SHADOW_MODE": "true",
+    "CLAIRE_CORE_CONTINUITY_ENABLED": "true",
+    "CLAIRE_CORE_TEMPORAL_ENABLED": "true",
+    "CLAIRE_CORE_COGNITIVE_ENABLED": "true",
+    "CLAIRE_CORE_PROVENANCE_ENABLED": "true",
+    "CLAIRE_CORE_GOVERNANCE_ENABLED": "true"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "Claire Systems LLC",
+  "intended_jurisdiction": "Wyoming",
+  "structure": "technology company and horse stewardship / horse rescue company",
+  "founder": "Steve Roth",
+  "founder_role": "Founder, CEO & Chief Architect",
+  "principles": [
+    "CLAIRE is a governed runtime, not a chatbot persona.",
+    "Nemotron is CLAIRE's language engine, not CLAIRE herself.",
+    "The horses are central mission assets, not a side project.",
+    "Use confident language with factual precision."
+  ]
+}

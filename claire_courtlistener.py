@@ -3,9 +3,13 @@ import sys
 import json
 import requests
 from datetime import datetime, timezone
+from pathlib import Path
+
+from current_truth_loader import get_subsystem_entry
 
 COURTLISTENER_BASE = "https://www.courtlistener.com/api/rest/v4"
 INGEST_URL = "http://127.0.0.1:8081/parser/push"
+NOT_REGISTERED = "CourtListener subsystem not registered."
 
 
 def load_env(path="claire_keys.env"):
@@ -106,6 +110,123 @@ def push_to_claire(payload):
     r = requests.post(INGEST_URL, json=payload, timeout=20)
     r.raise_for_status()
     return r.json()
+
+
+def _registry_entry():
+    return get_subsystem_entry("CourtListener")
+
+
+def _registered_root():
+    entry = _registry_entry()
+    if not entry:
+        return None
+    root = Path(str(entry.get("absolute_path") or "")).expanduser()
+    if root.exists():
+        return root
+    return None
+
+
+def _not_configured(extra=None):
+    status = {"status": "not_configured", "summary": NOT_REGISTERED}
+    if extra:
+        status.update(extra)
+    return status
+
+
+def _registry_path(key):
+    entry = _registry_entry() or {}
+    value = entry.get(key)
+    return Path(str(value)).expanduser() if value else None
+
+
+def _read_jsonl(path, limit=10):
+    if not path or not path.exists():
+        return []
+    items = []
+    try:
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-limit:]:
+            if not line.strip():
+                continue
+            try:
+                items.append(json.loads(line))
+            except Exception:
+                items.append({"raw": line[:500]})
+    except Exception as exc:
+        return [{"error": str(exc)}]
+    return items
+
+
+def get_courtlistener_status():
+    root = _registered_root()
+    if root is None:
+        return _not_configured()
+    return {
+        "status": "configured",
+        "subsystem": "CourtListener",
+        "root_path": str(root),
+        "api_key_present": bool(os.getenv("COURTLISTENER_API_KEY") or os.getenv("COURTLISTENER_TOKEN")),
+        "memory_authority": False,
+        "default_runtime_authority": False,
+        "legal_filing_from_chat": "blocked",
+    }
+
+
+def get_tracked_cases():
+    root = _registered_root()
+    if root is None:
+        return _not_configured({"items": []})
+    path = _registry_path("cases_path")
+    items = _read_jsonl(path, limit=25)
+    return {
+        "status": "configured" if path and path.exists() else "not_configured",
+        "summary": "Tracked legal cases loaded." if items else "No tracked cases file registered or no cases found.",
+        "cases_path": str(path) if path else None,
+        "items": items,
+    }
+
+
+def get_recent_docket_events():
+    root = _registered_root()
+    if root is None:
+        return _not_configured({"items": []})
+    traces = _registry_path("traces_path")
+    cache = _registry_path("cache_path")
+    items = _read_jsonl(traces, limit=10) or _read_jsonl(cache, limit=10)
+    return {
+        "status": "configured" if items else "not_configured",
+        "summary": "Recent legal monitor events loaded." if items else "No recent docket events found.",
+        "traces_path": str(traces) if traces else None,
+        "cache_path": str(cache) if cache else None,
+        "items": items,
+    }
+
+
+def check_case_updates():
+    status = get_courtlistener_status()
+    if status.get("status") != "configured":
+        return status
+    cases = get_tracked_cases()
+    events = get_recent_docket_events()
+    return {
+        "status": "configured",
+        "summary": "CourtListener monitor check completed from registered local ledgers.",
+        "tracked_case_count": len(cases.get("items") or []),
+        "recent_event_count": len(events.get("items") or []),
+        "legal_filing_from_chat": "blocked",
+    }
+
+
+def get_legal_monitor_summary():
+    status = get_courtlistener_status()
+    if status.get("status") != "configured":
+        return status
+    return {
+        "status": "configured",
+        "summary": "CourtListener is registered as a legal docket monitor, not CLAIRE memory.",
+        "tracked_cases": get_tracked_cases(),
+        "recent_docket_events": get_recent_docket_events(),
+        "legal_filing_from_chat": "blocked",
+    }
 
 
 def cmd_search(args):

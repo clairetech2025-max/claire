@@ -1,0 +1,18 @@
+{
+  "description": "Minimal Federal Register search result with optional metadata omitted",
+  "count": 1,
+  "total_pages": 1,
+  "next_page_url": null,
+  "results": [
+    {
+      "title": "AI Guidance Request for Information",
+      "type": "Notice",
+      "abstract": "Request for information about governance of artificial intelligence systems.",
+      "document_number": "2026-30001",
+      "html_url": "https://www.federalregister.gov/documents/2026/07/13/2026-30001/ai-guidance-request-for-information",
+      "pdf_url": "https://www.govinfo.gov/content/pkg/FR-2026-07-13/pdf/2026-30001.pdf",
+      "publication_date": "2026-07-13",
+      "excerpts": "Request for information about governance of artificial intelligence systems."
+    }
+  ]
+}

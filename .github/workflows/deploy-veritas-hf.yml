@@ -1,0 +1,85 @@
+name: Deploy Veritas Hugging Face Space
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "CLAIRE Git ref to deploy from"
+        required: true
+        default: "codex/claire-core-completion-20260718"
+      veritas_ref:
+        description: "Veritas Git ref to deploy from"
+        required: true
+        default: "main"
+      space_id:
+        description: "Existing Veritas Space ID, for example Blackstormhorse/Veritas_Legal"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-veritas-hf
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out CLAIRE
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: claire
+
+      - name: Check out Veritas
+        uses: actions/checkout@v4
+        with:
+          repository: clairetech2025-max/claire-veritas-legal
+          ref: ${{ inputs.veritas_ref }}
+          path: claire_repos/claire-veritas-legal
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deployment dependencies
+        working-directory: claire
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "huggingface_hub[cli]"
+
+      - name: Build and validate Space tree
+        working-directory: claire
+        run: |
+          python scripts/deploy/build_hf_tree.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build
+          python scripts/deploy/validate_hf_tree.py /tmp/veritas-hf-build
+
+      - name: Smoke health endpoint
+        working-directory: claire
+        run: |
+          python -m pip install -r /tmp/veritas-hf-build/requirements-web.txt
+          cd /tmp/veritas-hf-build
+          PYTHONPATH=/tmp/veritas-hf-build:/tmp/veritas-hf-build/web python - <<'PY'
+          from fastapi.testclient import TestClient
+          import app
+
+          response = TestClient(app.app).get("/health")
+          assert response.status_code == 200, response.text
+          PY
+
+      - name: Upload to Hugging Face
+        working-directory: claire
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ inputs.space_id }}
+        run: |
+          if [ -z "${HF_TOKEN:-}" ]; then
+            echo "HF_TOKEN secret is required" >&2
+            exit 2
+          fi
+          PATH="$HOME/.local/bin:$PATH" scripts/deploy/upload_hf_space.sh \
+            deploy/huggingface/veritas.manifest.json \
+            /tmp/veritas-hf-build \
+            "Deploy Veritas mirror from GitHub ${GITHUB_SHA}"

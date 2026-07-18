@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claire-are"
+version = "0.1.0"
+description = "Plugin-ready CLAIRE Analog Recall Engine memory module"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi",
+  "python-multipart",
+  "uvicorn",
+  "pydantic",
+  "requests",
+  "psycopg[binary,pool]>=3.2,<4",
+]
+
+[project.optional-dependencies]
+demo = ["gradio"]
+
+[tool.setuptools.packages.find]
+include = ["claire_are*", "claire_core*", "claire_vde*"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "veritas"]
+norecursedirs = [
+  ".git",
+  ".pytest_cache",
+  "creator_venv",
+  "llama.cpp",
+  "models",
+  "private_repo_payloads",
+  "venv",
+  "venv_clean",
+  "writer_mode",
+]

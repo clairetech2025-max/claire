@@ -1,0 +1,5 @@
+{
+  "status": "source-gated",
+  "rule": "Do not surface legal case memory outside explicit legal lane.",
+  "boundary": "Legal citations and case law require a legal research request or direct necessity."
+}

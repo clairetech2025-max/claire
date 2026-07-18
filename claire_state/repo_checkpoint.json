@@ -1,0 +1,7 @@
+{
+  "active_project": "CLAIRE governed memory/runtime layer",
+  "next_action": "validate runtime integration and preserve replayable traces",
+  "blockers": [
+    "local model quality limitations when NVIDIA/Nemotron provider is not configured"
+  ]
+}

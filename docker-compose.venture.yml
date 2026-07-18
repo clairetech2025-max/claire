@@ -1,0 +1,80 @@
+services:
+  venture-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.venture
+    ports:
+      - "8030:8030"
+    env_file:
+      - .env.venture.example
+    environment:
+      CLAIRE_ARE_ROOT: /data/are
+      CLAIRE_VDE_DATABASE_URL: postgresql://claire:claire_local_dev_only@postgres:5432/claire_venture
+      CLAIRE_VDE_API_READ_TOKEN: venture_read_local
+      CLAIRE_VDE_API_WRITE_TOKEN: venture_write_local
+      CLAIRE_VDE_API_ADMIN_TOKEN: venture_admin_local
+      CLAIRE_VDE_RATE_LIMIT_PER_MINUTE: "60"
+    volumes:
+      - venture_are:/data/are
+    depends_on:
+      - postgres
+      - redis
+      - minio
+      - qdrant
+      - neo4j
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: claire_venture
+      POSTGRES_USER: claire
+      POSTGRES_PASSWORD: claire_local_dev_only
+    ports:
+      - "5433:5432"
+    volumes:
+      - venture_postgres:/var/lib/postgresql/data
+      - ./migrations/venture_intelligence_postgres.sql:/docker-entrypoint-initdb.d/001_venture_intelligence.sql:ro
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+    volumes:
+      - venture_redis:/data
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: claire_local
+      MINIO_ROOT_PASSWORD: claire_local_dev_only
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - venture_minio:/data
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - venture_qdrant:/qdrant/storage
+
+  neo4j:
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: neo4j/claire_local_dev_only
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - venture_neo4j:/data
+
+volumes:
+  venture_are:
+  venture_postgres:
+  venture_redis:
+  venture_minio:
+  venture_qdrant:
+  venture_neo4j:

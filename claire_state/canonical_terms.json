@@ -1,0 +1,64 @@
+{
+  "terms": {
+    "ARE": {
+      "term": "ARE",
+      "canonical_name": "Analog Recall Engine",
+      "definition": "ARE is CLAIRE Systems' chronological external memory authority: an append-style JSONL memory primitive that records timestamped, hash-fingerprinted text outside the model so CLAIRE can recall ordered prior experience without making the language model own or rewrite memory.",
+      "origin": {
+        "source": "Original ARE implementation and CLAIRE architecture authority docs",
+        "source_files": [
+          "ORIGINAL_ARE_CODE.md",
+          "ORIGINAL_ARE_AUTHORITY.md",
+          "original_are_bridge.py",
+          "claire_state/subsystem_registry.json"
+        ],
+        "original_record_shape": {
+          "ts": "int(time.time())",
+          "sha": "sha256(text)[:10]",
+          "text": "text[:8000]"
+        }
+      },
+      "evidence": [
+        {
+          "kind": "source_code_behavior",
+          "reference": "ORIGINAL_ARE_CODE.md",
+          "summary": "The preserved original AREStore.ingest(text) creates records with ts, sha, and text, writes them to JSONL, and last_n(n) recalls records chronologically."
+        },
+        {
+          "kind": "runtime_bridge",
+          "reference": "original_are_bridge.py",
+          "summary": "append_original_are_memory(text) preserves the original ARE record shape and read_original_are_history(limit) reads ordered JSONL records with malformed rows quarantined."
+        },
+        {
+          "kind": "subsystem_registry",
+          "reference": "claire_state/subsystem_registry.json",
+          "summary": "ARE is registered as the default runtime memory authority with memory_authority=true; Trace, Veritas, and CourtListener are explicitly not memory authorities."
+        },
+        {
+          "kind": "runtime_contract",
+          "reference": "ORIGINAL_ARE_AUTHORITY.md",
+          "summary": "The documented rule says ARE is the chronological memory authority for CLAIRE and must not be replaced by vector search, SQLite, model memory, or subsystem logs."
+        }
+      ],
+      "related_terms": [
+        "Analog Recall",
+        "AREStore",
+        "recall governance",
+        "externalized memory",
+        "chronological memory authority",
+        "truth-governed AI",
+        "governed recall",
+        "original ARE JSONL"
+      ],
+      "non_authorities": [
+        "Nemotron",
+        "Trace",
+        "Veritas",
+        "CourtListener",
+        "FAISS",
+        "SQLite metadata store"
+      ],
+      "safety_rule": "ARE records may be recalled as governed memory leads, but raw memory must not be dumped into normal user-facing answers. Lane, scope, authority, Diode, Sentinel, and Trace still govern use."
+    }
+  }
+}

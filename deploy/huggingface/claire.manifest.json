@@ -1,0 +1,79 @@
+{
+  "schema_version": "claire-hf-deployment.v1",
+  "application": "CLAIRE",
+  "space_id": "Blackstormhorse/CLAIRE_Control_Interface",
+  "space_url": "https://blackstormhorse-claire-control-interface.hf.space",
+  "sdk": "docker",
+  "expected_host": "0.0.0.0",
+  "expected_port": 7860,
+  "root_source_path": "hf_claire_runtime_full",
+  "source_paths": [
+    "claire_core",
+    "claire_are",
+    "claire_continuity",
+    "claire",
+    "veritas_legal"
+  ],
+  "source_globs": [
+    "*.py"
+  ],
+  "entry_point": "app.py",
+  "startup_command": "python app.py",
+  "health_endpoint": "/",
+  "required_variable_names": [
+    "CLAIRE_CORE_ENABLED",
+    "CLAIRE_CORE_SHADOW_MODE",
+    "CLAIRE_ARE_ROOT",
+    "CLAIRE_USER_TIMEZONE"
+  ],
+  "required_secret_names": [
+    "CLAIRE_ARE_HMAC_KEY",
+    "CLAIRE_TRAILLINK_HMAC_KEY"
+  ],
+  "persistent_state": {
+    "ARE records": "persistent Space storage when mounted, otherwise demo-only ephemeral",
+    "Truth Spine records": "persistent Space storage when mounted, otherwise demo-only ephemeral",
+    "Ember handoffs": "persistent Space storage when mounted, otherwise demo-only ephemeral",
+    "uploaded evidence": "prohibited in public demo Space by default"
+  },
+  "exclude": [
+    ".env",
+    "*.env",
+    ".git/",
+    "*.key",
+    "*.pem",
+    "*.db",
+    "*.sqlite",
+    "*.log",
+    "*.gguf",
+    "*.safetensors",
+    "__pycache__/",
+    ".pytest_cache/",
+    "test_*.py",
+    "*_test.py",
+    "venv/",
+    ".venv/",
+    "data/",
+    "memory/",
+    "docs/",
+    "hf_claire_runtime_full/docs/",
+    "hf_claire_runtime_full/",
+    "hf_space/",
+    "claire_state/",
+    "exports/",
+    "models/",
+    "uploads/",
+    "indexes/",
+    "private_repo_payloads/",
+    "veritas/paper_state/",
+    "veritas/public_candles/",
+    "veritas_discovery_data/"
+  ],
+  "current_discovery": {
+    "visibility": "public",
+    "current_sha": "e6afa6e2f7c0e6ded54d738b6135029f8de3d0b9",
+    "runtime_stage": "SLEEPING",
+    "hardware": "cpu-basic",
+    "persistent_storage": "not reported"
+  }
+}

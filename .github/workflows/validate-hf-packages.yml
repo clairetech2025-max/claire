@@ -1,0 +1,93 @@
+name: Validate Hugging Face Packages
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/validate-hf-packages.yml"
+      - "deploy/huggingface/**"
+      - "scripts/deploy/**"
+      - "hf_claire_runtime_full/**"
+      - "claire_core/**"
+      - "claire_are/**"
+      - "claire_continuity/**"
+      - "claire/**"
+      - "veritas_legal/**"
+      - "*.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-claire:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out CLAIRE
+        uses: actions/checkout@v4
+        with:
+          path: claire
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build and validate CLAIRE package
+        working-directory: claire
+        run: |
+          python scripts/deploy/build_hf_tree.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build
+          python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-build
+
+      - name: Smoke CLAIRE package
+        working-directory: claire
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r /tmp/claire-hf-build/requirements.txt
+          cd /tmp/claire-hf-build
+          PYTHONPATH=/tmp/claire-hf-build python - <<'PY'
+          from claire_core.runtime.health import core_health
+          import app
+
+          assert app.app is not None
+          assert core_health()["status"] == "AVAILABLE"
+          PY
+
+  validate-veritas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out CLAIRE
+        uses: actions/checkout@v4
+        with:
+          path: claire
+
+      - name: Check out Veritas
+        uses: actions/checkout@v4
+        with:
+          repository: clairetech2025-max/claire-veritas-legal
+          ref: main
+          path: claire_repos/claire-veritas-legal
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build and validate Veritas package
+        working-directory: claire
+        run: |
+          python scripts/deploy/build_hf_tree.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build
+          python scripts/deploy/validate_hf_tree.py /tmp/veritas-hf-build
+
+      - name: Smoke Veritas package
+        working-directory: claire
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r /tmp/veritas-hf-build/requirements-web.txt
+          cd /tmp/veritas-hf-build
+          PYTHONPATH=/tmp/veritas-hf-build:/tmp/veritas-hf-build/web python - <<'PY'
+          from fastapi.testclient import TestClient
+          import app
+
+          response = TestClient(app.app).get("/health")
+          assert response.status_code == 200, response.text
+          PY

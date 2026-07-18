@@ -1,0 +1,8 @@
+{
+  "allow_loopback": true,
+  "require_approval_for_active_scans": true,
+  "allowlist": [
+    "127.0.0.1",
+    "localhost"
+  ]
+}

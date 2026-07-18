@@ -1,0 +1,1 @@
+Claire Systems builds governed AI runtime infrastructure and horse rescue/stewardship as one mission. The horses are central mission assets, not a side project. CLAIRE is the governed AI runtime; Nemotron is a replaceable language engine inside that runtime.
