@@ -5,8 +5,9 @@ Generated: 2026-07-18
 ## GitHub Source
 
 - Repository: `https://github.com/clairetech2025-max/claire`
-- Branch: `codex/claire-core-completion-20260718`
-- Last package source SHA verified: `44981a47d4208d148350ea958964f3868b411fae`
+- Branch: `main`
+- Main merge SHA: `7e724c8752218672a3238f14d83019c1717efc2e`
+- Last package source SHA verified before merge: `e6dd3875ba8857fb7cba9a81aad451a51afbc73e`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
 
@@ -17,7 +18,7 @@ CLAIRE package:
 - Manifest: `deploy/huggingface/claire.manifest.json`
 - Build tree: `/tmp/claire-hf-build`
 - Archive: `/tmp/claire-hf-build.tar.gz`
-- SHA-256: `3379618a8a37fd3803b6dc4efc25cc5292a98c4182a2554c374ba05f1b6faaae`
+- SHA-256 from latest local package archive: `54eb3e41f4f49961777876be1a6428cddc93487ed35c2e183f85f5e26152b43a`
 - Validation: passed
 - Import smoke: `app.app` imports and `claire_core.runtime.health.core_health()` reports `AVAILABLE`
 
@@ -26,7 +27,7 @@ Veritas package:
 - Manifest: `deploy/huggingface/veritas.manifest.json`
 - Build tree: `/tmp/veritas-hf-build`
 - Archive: `/tmp/veritas-hf-build.tar.gz`
-- SHA-256: `82d743d82734c28bbebb01a8be9c9289a268e5a62166466f97b2172d3d216636`
+- SHA-256 from latest local package archive: `c8135f5a40c53717852f9d7626b2ef11a1fd1f38449e732ab660c6d703458083`
 - Validation: passed
 - Import smoke: FastAPI `/health` returns HTTP 200
 
@@ -49,8 +50,19 @@ Veritas Space:
 ## Current Deployment Blockers
 
 1. Local Hugging Face CLI is not authenticated: `hf auth whoami` returns `Error: Not logged in`.
-2. The available Hugging Face connector can inspect repos and search Spaces, but does not expose a file upload/deploy command.
-3. The existing Veritas Hugging Face Space ID has not been confirmed.
+2. GitHub repository secret `HF_TOKEN` is not configured.
+3. The available Hugging Face connector can inspect repos and search Spaces, but does not expose a file upload/deploy command.
+4. The existing Veritas Hugging Face Space ID has not been confirmed.
+
+## Post-Merge Verification
+
+- PR #3 was merged into `main`.
+- Main validation from a clean worktree passed: `117 passed, 1 skipped`.
+- Main CLAIRE Hugging Face package validation passed.
+- Main Veritas Hugging Face package validation passed.
+- GitHub Actions workflows are active on `main`.
+- `Validate Hugging Face Packages` passed for both CLAIRE and Veritas.
+- `Deploy CLAIRE Hugging Face Space` was manually dispatched from `main`; it passed checkout, build, package validation, and smoke import, then stopped at the explicit `HF_TOKEN secret is required` gate.
 
 ## Upload Commands
 
