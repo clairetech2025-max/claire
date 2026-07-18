@@ -11530,7 +11530,8 @@ def creator_inventory_report() -> str:
         files = sorted([p for p in upload_dir.iterdir() if p.is_file()], key=lambda p: p.stat().st_mtime, reverse=True) if upload_dir.exists() else []
         upload_lines.append(f"- Uploaded files: {len(files)}")
         for path in files[:8]:
-            upload_lines.append(f"  - {re.sub(r'^\\d{8}_\\d{6}_', '', path.name)} ({path.stat().st_size} bytes)")
+            display_name = re.sub(r"^\d{8}_\d{6}_", "", path.name)
+            upload_lines.append(f"  - {display_name} ({path.stat().st_size} bytes)")
     except Exception as e:
         upload_lines.append(f"- Uploaded files: unknown ({e})")
 
