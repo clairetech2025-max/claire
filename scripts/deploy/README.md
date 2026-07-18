@@ -31,5 +31,13 @@ PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
   "Deploy CLAIRE mirror from approved GitHub revision"
 ```
 
+GitHub Actions workflows are also available:
+
+- `.github/workflows/deploy-claire-hf.yml`
+- `.github/workflows/deploy-veritas-hf.yml`
+
+Both workflows require the repository secret `HF_TOKEN`. The Veritas workflow
+also requires the existing Veritas Space ID as a manual workflow input.
+
 Do not deploy private databases, uploaded legal evidence, model files, live `.env`
 files, or Azure-only configuration.

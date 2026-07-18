@@ -20,9 +20,10 @@ data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 print(data.get("space_id", ""))
 PY
 )"
+space_id="${HF_SPACE_ID:-$space_id}"
 
 if [ -z "$space_id" ]; then
-  echo "manifest has no space_id; refusing upload" >&2
+  echo "manifest has no space_id and HF_SPACE_ID is unset; refusing upload" >&2
   exit 2
 fi
 
@@ -33,4 +34,8 @@ fi
 
 python scripts/deploy/build_hf_tree.py "$manifest" "$build_dir"
 python scripts/deploy/validate_hf_tree.py "$build_dir"
-hf upload "$space_id" "$build_dir" . --type space --commit-message "$commit_message"
+if [ -n "${HF_TOKEN:-}" ]; then
+  hf upload "$space_id" "$build_dir" . --type space --token "$HF_TOKEN" --commit-message "$commit_message"
+else
+  hf upload "$space_id" "$build_dir" . --type space --commit-message "$commit_message"
+fi

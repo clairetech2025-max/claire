@@ -72,6 +72,21 @@ PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
   "Deploy Veritas mirror from GitHub d568c11"
 ```
 
+## GitHub Actions Deployment
+
+Workflows:
+
+- `.github/workflows/deploy-claire-hf.yml`
+- `.github/workflows/deploy-veritas-hf.yml`
+
+Required GitHub secret:
+
+- `HF_TOKEN`
+
+The Veritas workflow additionally requires the exact existing Veritas Space ID
+as a manual workflow input. This avoids committing an unverified or private
+Space ID to source.
+
 ## Validation Commands
 
 ```bash
