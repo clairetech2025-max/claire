@@ -6,7 +6,7 @@ Generated: 2026-07-18
 
 - Repository: `https://github.com/clairetech2025-max/claire`
 - Branch: `codex/claire-core-completion-20260718`
-- Current SHA: `44981a47d4208d148350ea958964f3868b411fae`
+- Last package source SHA verified: `44981a47d4208d148350ea958964f3868b411fae`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
 
@@ -60,7 +60,7 @@ CLAIRE:
 PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
   deploy/huggingface/claire.manifest.json \
   /tmp/claire-hf-build \
-  "Deploy CLAIRE mirror from GitHub 44981a4"
+  "Deploy CLAIRE mirror from GitHub $(git rev-parse --short HEAD)"
 ```
 
 Veritas, after filling `space_id` in `deploy/huggingface/veritas.manifest.json`:
@@ -69,7 +69,7 @@ Veritas, after filling `space_id` in `deploy/huggingface/veritas.manifest.json`:
 PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
   deploy/huggingface/veritas.manifest.json \
   /tmp/veritas-hf-build \
-  "Deploy Veritas mirror from GitHub 44981a4"
+  "Deploy Veritas mirror from GitHub $(git rev-parse --short HEAD)"
 ```
 
 ## GitHub Actions Deployment
