@@ -10,6 +10,10 @@ Do not commit:
 - private legal evidence, uploads, indexes, or runtime logs
 - local model weights
 
+Runtime databases such as `claire_state/claire_memory.db` and
+`claire_state/claire_runtime_traces.db` are local state. They should be backed up
+privately and recreated or mounted at deployment time, not published as source.
+
 ## Runtime Policy
 
 - EchoShield classifies hostile or sensitive context.
