@@ -6,7 +6,7 @@ Generated: 2026-07-18
 
 - Repository: `https://github.com/clairetech2025-max/claire`
 - Branch: `codex/claire-core-completion-20260718`
-- Current SHA: `d568c11f8d6e55dd0cd18befea450e4dac640ffd`
+- Current SHA: `44981a47d4208d148350ea958964f3868b411fae`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
 
@@ -17,7 +17,7 @@ CLAIRE package:
 - Manifest: `deploy/huggingface/claire.manifest.json`
 - Build tree: `/tmp/claire-hf-build`
 - Archive: `/tmp/claire-hf-build.tar.gz`
-- SHA-256: `e3ab0d9ae457d712abcea1a4bfb548ae53ee56034d9f3da6d3e2d9d7457ec54e`
+- SHA-256: `3379618a8a37fd3803b6dc4efc25cc5292a98c4182a2554c374ba05f1b6faaae`
 - Validation: passed
 - Import smoke: `app.app` imports and `claire_core.runtime.health.core_health()` reports `AVAILABLE`
 
@@ -26,7 +26,7 @@ Veritas package:
 - Manifest: `deploy/huggingface/veritas.manifest.json`
 - Build tree: `/tmp/veritas-hf-build`
 - Archive: `/tmp/veritas-hf-build.tar.gz`
-- SHA-256: `5ba0e9cf4a5b1288ba6be14fe5b0195df26e1e928b4373f65355284a1e3f8618`
+- SHA-256: `82d743d82734c28bbebb01a8be9c9289a268e5a62166466f97b2172d3d216636`
 - Validation: passed
 - Import smoke: FastAPI `/health` returns HTTP 200
 
@@ -60,7 +60,7 @@ CLAIRE:
 PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
   deploy/huggingface/claire.manifest.json \
   /tmp/claire-hf-build \
-  "Deploy CLAIRE mirror from GitHub d568c11"
+  "Deploy CLAIRE mirror from GitHub 44981a4"
 ```
 
 Veritas, after filling `space_id` in `deploy/huggingface/veritas.manifest.json`:
@@ -69,7 +69,7 @@ Veritas, after filling `space_id` in `deploy/huggingface/veritas.manifest.json`:
 PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
   deploy/huggingface/veritas.manifest.json \
   /tmp/veritas-hf-build \
-  "Deploy Veritas mirror from GitHub d568c11"
+  "Deploy Veritas mirror from GitHub 44981a4"
 ```
 
 ## GitHub Actions Deployment
