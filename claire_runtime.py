@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import asdict
+from datetime import timedelta
 from typing import Any
 
 from are_memory_store import AREMemoryStore, MemoryEvent
@@ -10,6 +12,17 @@ from authority_capsule import AuthorityCapsule
 from claire.runtime.gyro import GyroOrientationLayer
 from claire.runtime.loopback import LoopbackLayer
 from claire.runtime.trace import gyro_trace_object
+from claire_core.adapters.echoshield import EchoShield
+from claire_core.adapters.sentinel import RuntimeSentinel
+from claire_core.runtime.feature_flags import current_feature_flags
+from claire_core.runtime.shadow_mode import evaluate_shadow
+from claire_runtime_truth import (
+    Runtime3CRPAuthority,
+    RuntimeTruthEvent,
+    RuntimeTruthSpine,
+    q_insight_packet,
+    recognition_packet_from_are,
+)
 from context_builder import build_context_packet
 from current_truth_loader import load_current_truth, truth_for_lane
 from diode_protocol import DiodeProtocol
@@ -25,6 +38,7 @@ from nemotron_adapter import build_messages, call_nemotron, messages_to_prompt
 from nvidia_mode import apply_nvidia_mode, nvidia_constraints
 from original_are_bridge import append_original_are_memory, read_original_are_history
 from sentinel_validator import validate_response
+from temporal_engine import TemporalEngine, TemporalEvent, TemporalInstant, parse_aware_datetime
 from trace_logger import TraceLogger, new_trace_id, sha_text
 
 
@@ -43,6 +57,7 @@ class ClaireRuntime:
         trace_logger: TraceLogger | None = None,
         model_config: dict[str, Any] | None = None,
         use_original_are: bool | None = None,
+        temporal_engine: TemporalEngine | None = None,
     ) -> None:
         self.use_original_are = (memory_store is None) if use_original_are is None else use_original_are
         self.memory_store = memory_store if memory_store is not None else (None if self.use_original_are else AREMemoryStore())
@@ -52,6 +67,46 @@ class ClaireRuntime:
         self.diode = DiodeProtocol()
         self.gyro = GyroOrientationLayer()
         self.loopback = LoopbackLayer()
+        self.runtime_truth = RuntimeTruthSpine.from_env()
+        self.runtime_3crp = Runtime3CRPAuthority()
+        self.temporal_engine = temporal_engine or TemporalEngine()
+        self.echo_shield = EchoShield()
+        self.runtime_sentinel = RuntimeSentinel()
+
+    def _append_runtime_event(
+        self,
+        *,
+        event_type: str,
+        session_id: str,
+        turn_id: str,
+        actor: dict[str, Any] | None = None,
+        lane: str = "",
+        floor_state: str = "",
+        decision: dict[str, Any] | None = None,
+        result_summary: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        evidence_refs: list[str] | None = None,
+        parent_event_ids: list[str] | None = None,
+        status: str = "committed",
+        fail_closed: bool = False,
+    ) -> dict[str, Any]:
+        return self.runtime_truth.append(
+            RuntimeTruthEvent(
+                event_type=event_type,
+                session_id=session_id,
+                turn_id=turn_id,
+                actor=actor or {"type": "component", "id": "claire-runtime", "component": "runtime"},
+                lane=lane,
+                floor_state=floor_state,
+                decision=decision or {},
+                result_summary=result_summary or {},
+                payload=payload or {},
+                evidence_refs=evidence_refs or [],
+                parent_event_ids=parent_event_ids or [],
+                status=status,
+            ),
+            fail_closed=fail_closed,
+        )
 
     def handle_user_message(
         self,
@@ -64,12 +119,102 @@ class ClaireRuntime:
         if metadata.get("demo_mode"):
             return self.handle_demo_message(user_id, session_id, message, metadata)
         trace_id = new_trace_id()
+        turn_id = str(metadata.get("turn_id") or trace_id.replace("trace_", "turn_", 1))
+        timezone_name = str(metadata.get("timezone") or metadata.get("timezone_name") or "")
+        temporal_session = self.temporal_engine.start_session(session_id, timezone_name or None)
+        temporal_turn = self.temporal_engine.start_turn(session_id, turn_id)
+        temporal_context = self.temporal_engine.get_now(
+            session_id=session_id,
+            turn_id=turn_id,
+            timezone_name=timezone_name or temporal_session.get("timezone_name"),
+        )
+        origin = {
+            "type": "user",
+            "id": str(user_id or "guest"),
+            "component": str(metadata.get("source_component") or "claire_gui"),
+            "device_id": str(metadata.get("device_id") or "unknown"),
+        }
+        session_event = self._append_runtime_event(
+            event_type="session.turn_started",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor=origin,
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            payload={"trace_id": trace_id},
+            result_summary={"status": "started"},
+        )
+        temporal_context_event = self._append_runtime_event(
+            event_type="temporal.context_created",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "temporal-engine", "component": "temporal_engine"},
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            result_summary={
+                "timezone": temporal_context.timezone_name,
+                "session_elapsed_seconds": temporal_context.session_elapsed_seconds,
+                "turn_elapsed_seconds": temporal_context.turn_elapsed_seconds,
+            },
+            payload={
+                "temporal_context": asdict(temporal_context),
+                "session_record": temporal_session,
+                "turn_record": temporal_turn,
+            },
+            parent_event_ids=[session_event["event_id"]],
+        )
 
         normalized_raw = self._normalize_input(message)
         normalized = self.diode.redact(normalized_raw)
         secret_detected = self.diode.contains_secret(normalized_raw)
+        input_hash = sha_text(normalized)
+        temporal_resolution = self.temporal_engine.resolve_expression(
+            normalized,
+            reference_time=temporal_context.now_local,
+            timezone_name=temporal_context.timezone_name,
+        )
+        temporal_resolution_event = self._append_runtime_event(
+            event_type="temporal.ambiguity_detected" if temporal_resolution.get("status") == "ambiguous" else "temporal.relative_time_resolved",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "temporal-engine", "component": "temporal_engine"},
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            decision={"status": temporal_resolution.get("status")},
+            result_summary={
+                "expressions": len(temporal_resolution.get("expressions") or []),
+                "ambiguities": len(temporal_resolution.get("ambiguities") or []),
+            },
+            payload={"temporal_resolution": temporal_resolution},
+            parent_event_ids=[temporal_context_event["event_id"]],
+        )
+        ingress_decision = self.runtime_3crp.admit_input(
+            origin=origin,
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            fragment=bool(metadata.get("fragment")),
+        )
+        ingress_event = self._append_runtime_event(
+            event_type="3crp.ingress",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "ingress"},
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            decision=ingress_decision,
+            payload={"input_hash": input_hash, "secret_redacted": bool(secret_detected)},
+            parent_event_ids=[temporal_resolution_event["event_id"]],
+            status="committed" if ingress_decision.get("allowed") else "rejected",
+            fail_closed=not ingress_decision.get("allowed", False),
+        )
         debug_requested = self._debug_enabled(metadata, normalized)
         c3rp_route = self._c3rp_route(normalized)
+        c3rp_ingress_route_event = self._append_runtime_event(
+            event_type="3crp.route_preliminary",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "lane_router"},
+            lane=str(c3rp_route.get("lane") or ""),
+            floor_state=str(metadata.get("floor_state") or "turn_committed"),
+            decision={"allowed": True, "route": c3rp_route.get("lane")},
+            payload={"c3rp_route": c3rp_route},
+            parent_event_ids=[ingress_event["event_id"]],
+        )
         lane_result = self._lane_result_from_c3rp(normalized, c3rp_route, metadata.get("recent_context"))
         lane = lane_result.lane
         risk_level, risks = self._risk_authority_gate(lane, normalized)
@@ -81,8 +226,31 @@ class ClaireRuntime:
             risk_level=risk_level,
             metadata={**metadata, "raw_request_text": normalized_raw},
         )
+        authority_event = self._append_runtime_event(
+            event_type="traillink.authentication",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "trail-link", "component": "handshake_broker"},
+            lane=lane,
+            decision={
+                "trusted": authority_decision.trusted,
+                "role": authority_decision.capsule.role,
+                "denied_reasons": list(authority_decision.denied_reasons),
+            },
+            result_summary={
+                "authority_capsule_id": authority_decision.capsule.capsule_id,
+                "auth_strength": authority_decision.capsule.auth_strength,
+            },
+            payload={
+                "capsule_id": authority_decision.capsule.capsule_id,
+                "allowed_memory_scopes": list(authority_decision.capsule.allowed_memory_scopes),
+                "allowed_tools": list(authority_decision.capsule.allowed_tools),
+            },
+            parent_event_ids=[c3rp_ingress_route_event["event_id"]],
+            status="committed" if not authority_decision.denied_reasons else "degraded",
+        )
         authority_capsule = authority_decision.capsule
-        debug_enabled = bool(debug_requested and authority_decision.trusted)
+        debug_enabled = bool(debug_requested and str(user_id) != "guest")
         full_truth = load_current_truth()
         current_truth = truth_for_lane(lane, full_truth)
         subsystem_status = self._subsystem_status_for_lane(lane, authority_capsule)
@@ -91,6 +259,20 @@ class ClaireRuntime:
         entities = identify_entities(normalized)
         entity_names = [entity["name"] for entity in entities]
         eligibility = evaluate_memory_eligibility(normalized, lane)
+        eligibility_event = self._append_runtime_event(
+            event_type="ingestion_governance.memory_eligibility",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "memory-eligibility", "component": "ingestion_governance"},
+            lane=lane,
+            decision={
+                "mode": getattr(getattr(eligibility, "mode", None), "value", str(getattr(eligibility, "mode", ""))),
+                "category": getattr(eligibility, "category", ""),
+                "eligible": bool(getattr(eligibility, "should_commit", False) or getattr(eligibility, "commit", False) or getattr(eligibility, "mode", None)),
+            },
+            payload={"eligibility": getattr(eligibility, "to_dict", lambda: str(eligibility))()},
+            parent_event_ids=[authority_event["event_id"]],
+        )
         gyro_bearing = self.gyro.orient(
             prompt=normalized,
             lane_result=lane_result,
@@ -103,6 +285,19 @@ class ClaireRuntime:
             metadata=metadata,
         )
         gyro_trace = gyro_bearing.to_trace()
+        gyro_trace["temporal_bearing"] = self._temporal_bearing(temporal_context, temporal_resolution)
+        gyro_event = self._append_runtime_event(
+            event_type="gyro.orientation",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "gyro", "component": "gyro"},
+            lane=lane,
+            decision=self.runtime_3crp.enforce_orientation(gyro_trace),
+            result_summary={"stable": gyro_trace.get("stable"), "confidence": gyro_trace.get("confidence")},
+            payload={"gyro": gyro_trace},
+            parent_event_ids=[eligibility_event["event_id"]],
+            status="committed" if gyro_trace.get("stable") else "rejected",
+        )
         if not gyro_bearing.stable:
             gyro_reason = "unstable gyro bearing"
             if gyro_bearing.reasons:
@@ -155,7 +350,161 @@ class ClaireRuntime:
         )
         canonical_memories = self._canonical_memory_leads(normalized, lane, current_truth)
         recent_path = self._dedupe_memories(canonical_memories + recent_path)
+        recalled_all = self.temporal_engine.rank_temporal_relevance(recent_path + long_term_memories)
+        recent_path = recalled_all[-5:] if recalled_all else []
+        long_term_memories = recalled_all[:-5] if recalled_all else []
+        stale_refs = [
+            memory.get("memory_id")
+            for memory in recalled_all
+            if (memory.get("temporal_metadata") or {}).get("freshness_state") in {"stale", "expired", "superseded"}
+        ]
+        recall_decision = self.runtime_3crp.authorize_recall(lane=lane, allowed_lanes=list(lane_result.allowed_memory_lanes or [lane]))
+        recall_event = self._append_runtime_event(
+            event_type="are.consulted",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "are", "component": "backward_recall"},
+            lane=lane,
+            decision=recall_decision,
+            result_summary={"accepted": len(recalled_all), "rejected": len(rejected_memories)},
+            payload={
+                "query_hash": input_hash,
+                "are_record_refs": [memory.get("memory_id") or memory.get("provenance_hash") for memory in recalled_all],
+                "temporal_scores": [
+                    {
+                        "memory_id": memory.get("memory_id") or memory.get("provenance_hash"),
+                        "score": memory.get("temporal_score"),
+                        "freshness_state": (memory.get("temporal_metadata") or {}).get("freshness_state"),
+                    }
+                    for memory in recalled_all
+                ],
+                "rejected": rejected_memories,
+            },
+            parent_event_ids=[gyro_event["event_id"]],
+        )
+        if stale_refs:
+            self._append_runtime_event(
+                event_type="memory.marked_stale",
+                session_id=session_id,
+                turn_id=turn_id,
+                actor={"type": "component", "id": "temporal-engine", "component": "temporal_engine"},
+                lane=lane,
+                result_summary={"stale_count": len(stale_refs)},
+                payload={"stale_record_refs": stale_refs},
+                parent_event_ids=[recall_event["event_id"]],
+            )
+        recognition_packet = recognition_packet_from_are(
+            current_input_ref=input_hash,
+            query=normalized,
+            memories=recalled_all,
+            rejected=rejected_memories,
+            temporal_context=asdict(temporal_context),
+            temporal_resolution=temporal_resolution,
+        )
+        recognition_event = self._append_runtime_event(
+            event_type="recognition_rail.result",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "recognition-rail", "component": "recognition_rail"},
+            lane=lane,
+            result_summary={
+                "continuation_score": recognition_packet["continuation_score"],
+                "recommended_turn_action": recognition_packet["recommended_turn_action"],
+            },
+            payload={"recognition": recognition_packet},
+            evidence_refs=recognition_packet.get("are_record_refs") or [],
+            parent_event_ids=[recall_event["event_id"]],
+        )
+        q_packet = q_insight_packet(query=normalized, recognition=recognition_packet, lane=lane, temporal_resolution=temporal_resolution)
+        q_insight_event = self._append_runtime_event(
+            event_type="q_insight.result",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "q-insight", "component": "q_insight"},
+            lane=lane,
+            decision={"finished": q_packet["finished"], "clarification_required": q_packet["clarification_required"]},
+            result_summary={"confidence": q_packet["confidence"], "candidate_lane": q_packet["candidate_lane"]},
+            payload={"q_insight": q_packet},
+            parent_event_ids=[recognition_event["event_id"]],
+        )
+        clarification_blocks = bool(
+            q_packet["clarification_required"]
+            and not metadata.get("recent_context")
+            and not authority_decision.denied_reasons
+        )
+        high_impact_temporal = self._high_impact_temporal_action(normalized)
+        temporal_policy = self.runtime_3crp.authorize_temporal_operation(
+            operation="resolve_and_use_time",
+            temporal_resolution=temporal_resolution,
+            high_impact=high_impact_temporal,
+        )
+        temporal_policy_event = self._append_runtime_event(
+            event_type="3crp.temporal_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "temporal_gate"},
+            lane=lane,
+            decision=temporal_policy,
+            payload={"high_impact_temporal": high_impact_temporal, "temporal_resolution": temporal_resolution},
+            parent_event_ids=[q_insight_event["event_id"]],
+            status="committed" if temporal_policy.get("allowed") else "rejected",
+        )
+        post_gyro_decision = {
+            "allowed": bool(gyro_trace.get("stable", True)) and not clarification_blocks,
+            "active_lane": lane,
+            "recall_mode": recall_decision["recall_mode"],
+            "permitted_tools": list(authority_capsule.allowed_tools),
+            "model_provider": "configured",
+            "output_mode": gyro_trace.get("output_boundary"),
+            "temporal_allowed": bool(temporal_policy.get("allowed")),
+        }
+        if not temporal_policy.get("allowed"):
+            post_gyro_decision["allowed"] = False
+        post_gyro_auth_event = self._append_runtime_event(
+            event_type="3crp.post_gyro_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "post_gyro"},
+            lane=lane,
+            decision=post_gyro_decision,
+            payload={
+                "gyro_event_id": gyro_event["event_id"],
+                "q_insight_event_id": q_insight_event["event_id"],
+                "temporal_authorization_event_id": temporal_policy_event["event_id"],
+            },
+            parent_event_ids=[temporal_policy_event["event_id"], gyro_event["event_id"]],
+            status="committed" if post_gyro_decision["allowed"] else "rejected",
+        )
+        if not post_gyro_decision["allowed"]:
+            answer = "I need one clarification before I answer that: what exact date, time, or timezone should I use?"
+            if temporal_policy.get("allowed"):
+                answer = "I need one clarification before I answer that: what does the unresolved reference point to?"
+            return self._return_loopback_response(
+                trace_id=trace_id,
+                user_id=user_id,
+                session_id=session_id,
+                normalized=normalized,
+                lane_result=lane_result,
+                c3rp_route=c3rp_route,
+                risk_level=risk_level,
+                authority_capsule=authority_capsule,
+                authority_denied=authority_decision.denied_reasons,
+                gyro_trace=gyro_trace,
+                loopback_reason="3CRP held the turn after Q Insight or Temporal Engine requested clarification",
+                answer=answer,
+                answer_mode="clarify",
+                secret_detected=secret_detected,
+            )
+        self._register_temporal_user_events(
+            normalized=normalized,
+            session_id=session_id,
+            turn_id=turn_id,
+            temporal_context=temporal_context,
+            temporal_resolution=temporal_resolution,
+            parent_event_id=post_gyro_auth_event["event_id"],
+        )
         constraints = self._constraints(lane)
+        temporal_model_context = self.temporal_engine.serialize_context_for_model(temporal_context, temporal_resolution)
 
         context_packet = build_context_packet(
             lane_result=lane_result,
@@ -166,14 +515,43 @@ class ClaireRuntime:
             long_term_memories=long_term_memories,
             constraints=constraints,
             risks=risks,
+            temporal_context=temporal_model_context,
         )
         messages = build_messages(context_packet, normalized)
+        model_auth = self.runtime_3crp.authorize_model(
+            lane=lane,
+            orientation_event_id=gyro_event["event_id"],
+            authorization_event_id=post_gyro_auth_event["event_id"],
+        )
+        model_auth_event = self._append_runtime_event(
+            event_type="model.authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "model_gate"},
+            lane=lane,
+            decision=model_auth,
+            payload={"prompt_hash": sha_text(messages_to_prompt(messages))},
+            parent_event_ids=[post_gyro_auth_event["event_id"]],
+            fail_closed=True,
+        )
         raw_response = call_nemotron(
             messages,
             model_config=metadata.get("model_config") or self.model_config,
             provider_generate=metadata.get("provider_generate"),
         )
+        model_invocation_event = self._append_runtime_event(
+            event_type="model.invocation",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "model", "id": self._model_used(raw_response), "component": "nemotron_adapter"},
+            lane=lane,
+            result_summary={"model_used": self._model_used(raw_response)},
+            payload={"response_hash": sha_text(str(raw_response.get("content") or ""))},
+            parent_event_ids=[model_auth_event["event_id"]],
+            fail_closed=True,
+        )
         answer = str(raw_response.get("content") or "").strip()
+        raw_model_answer_for_echoshield = answer
         if self._is_generic_provider_filler(answer) and risk_level != "high":
             retry_messages = self._generic_filler_retry_messages(messages, normalized)
             retry_response = call_nemotron(
@@ -186,6 +564,7 @@ class ClaireRuntime:
                 raw_response = retry_response
                 messages = retry_messages
                 answer = retry_answer
+                raw_model_answer_for_echoshield = retry_answer
         answer = self.sanitize_user_answer(answer, debug=debug_enabled)
         answer = strengthen_confidence_language(answer)
         if lane == "NVIDIA_PATHWAY":
@@ -225,16 +604,122 @@ class ClaireRuntime:
             )
             answer = self._visible_orientation_answer(normalized, runtime_report, answer)
 
-        memory_written, memory_event = self._commit_memory(
-            user_id=user_id,
-            session_id=session_id,
-            message=self._redact_sensitive(normalized),
-            lane=lane,
-            answer=self._redact_sensitive(self.diode.redact(answer)),
-            eligibility=eligibility,
-            secret_detected=secret_detected,
+        safe_memory_message = self._redact_sensitive(normalized)
+        safe_memory_answer = self._redact_sensitive(self.diode.redact(answer))
+        candidate_memory_allowed, candidate_memory_reason = should_commit_memory(
+            safe_memory_message,
+            lane,
+            eligibility,
         )
-
+        if secret_detected or self.diode.contains_secret(normalized) or self.diode.contains_secret(answer):
+            candidate_memory_allowed = False
+            candidate_memory_reason = "Sensitive content is not eligible for durable memory."
+        echo_classification = self.echo_shield.inspect_text(
+            "\n".join([safe_memory_message, raw_model_answer_for_echoshield]),
+            source_id=trace_id,
+            record_class="model_output" if candidate_memory_allowed else "turn_context",
+            lane=lane,
+            matter_id=str(metadata.get("matter_id") or ""),
+            expected_matter_id=str(metadata.get("matter_id") or ""),
+            metadata={"lane": lane, "proposed_evidence": False},
+        )
+        echo_event = self._append_runtime_event(
+            event_type="echoshield.classification",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "echoshield", "component": "context_defense"},
+            lane=lane,
+            decision={
+                "quarantine": echo_classification.quarantine,
+                "trust_class": echo_classification.trust_class,
+                "restrictions": list(echo_classification.recommended_restrictions),
+            },
+            result_summary={
+                "risk_count": len(echo_classification.detected_risks),
+                "record_class": echo_classification.record_class,
+            },
+            payload={"echoshield": echo_classification.to_dict()},
+            parent_event_ids=[model_invocation_event["event_id"]],
+            status="rejected" if echo_classification.quarantine else "committed",
+        )
+        if echo_classification.quarantine:
+            candidate_memory_allowed = False
+            candidate_memory_reason = "EchoShield quarantined candidate memory context."
+        sentinel_memory_decision = self.runtime_sentinel.authorize_memory_write(
+            lane=lane,
+            record_class="model_output" if candidate_memory_allowed else "turn_context",
+            echo_classification=echo_classification.to_dict(),
+            matter_id=str(metadata.get("matter_id") or ""),
+            target_matter_id=str(metadata.get("matter_id") or ""),
+        )
+        sentinel_memory_event = self._append_runtime_event(
+            event_type="sentinel.memory_write_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "sentinel", "component": "memory_write_policy"},
+            lane=lane,
+            decision=sentinel_memory_decision.to_dict(),
+            result_summary={
+                "allowed": sentinel_memory_decision.allowed,
+                "decision": sentinel_memory_decision.decision.value,
+            },
+            payload={"sentinel": sentinel_memory_decision.to_dict()},
+            parent_event_ids=[echo_event["event_id"]],
+            status="committed" if sentinel_memory_decision.allowed else "rejected",
+        )
+        if not sentinel_memory_decision.allowed:
+            candidate_memory_allowed = False
+            candidate_memory_reason = sentinel_memory_decision.reason
+        memory_write_auth = self.runtime_3crp.authorize_memory_write(
+            lane=lane,
+            eligible=bool(candidate_memory_allowed),
+        )
+        memory_write_auth["reason"] = candidate_memory_reason
+        memory_write_auth_event = self._append_runtime_event(
+            event_type="3crp.memory_write_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "memory_write_gate"},
+            lane=lane,
+            decision=memory_write_auth,
+            payload={
+                "candidate_memory_allowed": candidate_memory_allowed,
+                "reason": candidate_memory_reason,
+            },
+            parent_event_ids=[sentinel_memory_event["event_id"]],
+            fail_closed=bool(candidate_memory_allowed),
+        )
+        memory_written = False
+        memory_event = None
+        if memory_write_auth.get("allowed"):
+            memory_written, memory_event = self._commit_memory(
+                user_id=user_id,
+                session_id=session_id,
+                message=safe_memory_message,
+                lane=lane,
+                answer=safe_memory_answer,
+                eligibility=eligibility,
+                secret_detected=secret_detected,
+            )
+        memory_commit_event = self._append_runtime_event(
+            event_type="memory.commit_result" if memory_written else "memory.commit_denied",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "are", "component": "memory_commit"},
+            lane=lane,
+            decision={"authorized": bool(memory_write_auth.get("allowed")), "written": bool(memory_written)},
+            result_summary={
+                "memory_written": bool(memory_written),
+                "memory_event_id": (memory_event or {}).get("memory_id"),
+            },
+            payload={
+                "memory_event_id": (memory_event or {}).get("memory_id"),
+                "memory_source": (memory_event or {}).get("source"),
+                "memory_file": (memory_event or {}).get("memory_file"),
+            },
+            parent_event_ids=[memory_write_auth_event["event_id"]],
+            fail_closed=bool(memory_written),
+        )
         result = {
             "answer": answer,
             "lane": lane,
@@ -248,6 +733,7 @@ class ClaireRuntime:
             "gyro": gyro_trace,
             "loopback_triggered": loopback_triggered,
             "answer_mode": answer_mode,
+            "temporal": temporal_model_context,
         }
         if debug_enabled:
             result["debug"] = self._safe_debug_payload(
@@ -264,6 +750,70 @@ class ClaireRuntime:
                 result["answer"] = answer
         if runtime_report is not None and debug_enabled:
             result["runtime_report"] = runtime_report
+        output_auth = self.runtime_3crp.authorize_output(
+            lane=lane,
+            final_answer_hash=sha_text(answer),
+            provenance_ready=True,
+        )
+        output_auth_event = self._append_runtime_event(
+            event_type="3crp.egress_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "egress"},
+            lane=lane,
+            floor_state="claire_owns_floor",
+            decision=output_auth,
+            payload={
+                "final_answer_hash": sha_text(answer),
+                "model_event_id": model_invocation_event["event_id"],
+                "memory_write_authorization_event_id": memory_write_auth_event["event_id"],
+                "memory_commit_event_id": memory_commit_event["event_id"],
+            },
+            parent_event_ids=[memory_commit_event["event_id"]],
+            fail_closed=True,
+        )
+        final_output_event = self._append_runtime_event(
+            event_type="output.released",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "claire-runtime", "component": "output"},
+            lane=lane,
+            floor_state="returning_floor",
+            result_summary={"answer_hash": sha_text(answer), "answer_mode": answer_mode},
+            payload={"answer_hash": sha_text(answer), "egress_authorization_event_id": output_auth_event["event_id"]},
+            parent_event_ids=[output_auth_event["event_id"]],
+            fail_closed=True,
+        )
+        turn_capsule = self.runtime_truth.seal_turn(
+            session_id=session_id,
+            turn_id=turn_id,
+            input_text=normalized,
+            final_output=answer,
+        )
+        turn_sealed_event = self._append_runtime_event(
+            event_type="turn.sealed",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "truth-spine", "component": "turn_sealer"},
+            lane=lane,
+            result_summary={
+                "event_count": turn_capsule.get("event_count"),
+                "chain_head": turn_capsule.get("chain_head"),
+            },
+            payload={"turn_capsule": turn_capsule},
+            parent_event_ids=[final_output_event["event_id"]],
+            fail_closed=True,
+        )
+        result["truth_spine"] = {
+            "turn_id": turn_id,
+            "chain_head": turn_sealed_event.get("record_hash"),
+            "turn_capsule": turn_capsule,
+            "verification": self.runtime_truth.verify(session_id=session_id, turn_id=turn_id),
+        }
+        core_flags = current_feature_flags()
+        if core_flags.get("CLAIRE_CORE_SHADOW_MODE"):
+            result["claire_core_shadow"] = evaluate_shadow(result)
+        self.temporal_engine.end_turn(session_id, turn_id)
         trace_record = {
             "trace_id": trace_id,
             "timestamp_ns": None,
@@ -282,6 +832,24 @@ class ClaireRuntime:
             "final_answer_hash": sha_text(answer),
             "memory_written": memory_written,
             "memory_event_id": (memory_event or {}).get("memory_id"),
+            "truth_spine": result["truth_spine"],
+            "temporal": temporal_model_context,
+            "runtime_truth_event_ids": {
+                "ingress": ingress_event["event_id"],
+                "temporal_context": temporal_context_event["event_id"],
+                "temporal_resolution": temporal_resolution_event["event_id"],
+                "temporal_authorization": temporal_policy_event["event_id"],
+                "trail_link": authority_event["event_id"],
+                "gyro": gyro_event["event_id"],
+                "are": recall_event["event_id"],
+                "recognition": recognition_event["event_id"],
+                "q_insight": q_insight_event["event_id"],
+                "post_gyro_3crp": post_gyro_auth_event["event_id"],
+                "model_authorization": model_auth_event["event_id"],
+                "model_invocation": model_invocation_event["event_id"],
+                "egress": output_auth_event["event_id"],
+                "turn_sealed": turn_sealed_event["event_id"],
+            },
             "runtime_report": runtime_report,
             "authorized_subsystem_status": subsystem_status,
             "authority_capsule_id": authority_capsule.capsule_id,
@@ -458,7 +1026,64 @@ class ClaireRuntime:
         secret_detected: bool,
     ) -> dict[str, Any]:
         lane = lane_result.lane
+        turn_id = trace_id.replace("trace_", "turn_", 1)
         answer = self.sanitize_user_answer(self._redact_sensitive(self.diode.redact(answer)), debug=False)
+        loopback_event = self._append_runtime_event(
+            event_type="loopback.response",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "loopback", "component": "loopback"},
+            lane=lane,
+            decision={"answer_mode": answer_mode, "reason": loopback_reason},
+            result_summary={"answer_hash": sha_text(answer)},
+            payload={"gyro": gyro_trace, "loopback_reason": loopback_reason},
+        )
+        output_auth = self.runtime_3crp.authorize_output(
+            lane=lane,
+            final_answer_hash=sha_text(answer),
+            provenance_ready=True,
+        )
+        output_auth_event = self._append_runtime_event(
+            event_type="3crp.egress_authorization",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "3crp", "component": "egress"},
+            lane=lane,
+            floor_state="claire_owns_floor",
+            decision=output_auth,
+            payload={"final_answer_hash": sha_text(answer), "loopback_event_id": loopback_event["event_id"]},
+            parent_event_ids=[loopback_event["event_id"]],
+            fail_closed=True,
+        )
+        final_output_event = self._append_runtime_event(
+            event_type="output.released",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "claire-runtime", "component": "output"},
+            lane=lane,
+            floor_state="returning_floor",
+            result_summary={"answer_hash": sha_text(answer), "answer_mode": answer_mode},
+            payload={"answer_hash": sha_text(answer), "egress_authorization_event_id": output_auth_event["event_id"]},
+            parent_event_ids=[output_auth_event["event_id"]],
+            fail_closed=True,
+        )
+        turn_capsule = self.runtime_truth.seal_turn(
+            session_id=session_id,
+            turn_id=turn_id,
+            input_text=normalized,
+            final_output=answer,
+        )
+        turn_sealed_event = self._append_runtime_event(
+            event_type="turn.sealed",
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "truth-spine", "component": "turn_sealer"},
+            lane=lane,
+            result_summary={"event_count": turn_capsule.get("event_count"), "chain_head": turn_capsule.get("chain_head")},
+            payload={"turn_capsule": turn_capsule},
+            parent_event_ids=[final_output_event["event_id"]],
+            fail_closed=True,
+        )
         result = {
             "answer": answer,
             "lane": lane,
@@ -472,7 +1097,26 @@ class ClaireRuntime:
             "gyro": gyro_trace,
             "loopback_triggered": True,
             "answer_mode": answer_mode,
+            "truth_spine": {
+                "turn_id": turn_id,
+                "chain_head": turn_sealed_event.get("record_hash"),
+                "turn_capsule": turn_capsule,
+                "verification": self.runtime_truth.verify(session_id=session_id, turn_id=turn_id),
+            },
         }
+        if str(user_id) != "guest" and self._debug_enabled({}, normalized):
+            result["debug"] = self._safe_debug_payload(
+                trace_id=trace_id,
+                lane=lane,
+                risk_level=risk_level,
+                used_memory=[],
+                memory_written=False,
+                validator_result={"approved": True, "issues": []},
+                runtime_report=None,
+            )
+            if self._wants_debug_visible(normalized):
+                result["answer"] = self._append_visible_debug(result["answer"], result["debug"])
+
         trace_record = {
             "trace_id": trace_id,
             "timestamp_ns": None,
@@ -491,6 +1135,12 @@ class ClaireRuntime:
             "final_answer_hash": sha_text(answer),
             "memory_written": False,
             "memory_event_id": None,
+            "truth_spine": result["truth_spine"],
+            "runtime_truth_event_ids": {
+                "loopback": loopback_event["event_id"],
+                "egress": output_auth_event["event_id"],
+                "turn_sealed": turn_sealed_event["event_id"],
+            },
             "runtime_report": None,
             "authorized_subsystem_status": {},
             "authority_capsule_id": authority_capsule.capsule_id,
@@ -572,7 +1222,7 @@ class ClaireRuntime:
                 return "I can review trading-system status and risk posture, but I cannot place or execute live trades from normal chat. Live execution requires a separate step-up path that is not implemented here."
             return "That action is blocked from normal chat. It requires a separate step-up path that is not implemented here."
         if "trusted_authority_required_for_veritas_status" in denied:
-            return "Veritas status requires trusted authority. From guest chat I can only explain the safety boundary: Veritas is a governed financial intelligence subsystem, not CLAIRE memory, and live execution is blocked here."
+            return "Veritas status requires trusted authority. From guest chat I can only explain the safety boundary: Veritas is a governed financial intelligence subsystem, not CLAIRE memory, and no live trading or live execution is allowed here."
         if "private_data_exfiltration_blocked" in denied:
             return "I cannot show private information from previous users or dump private memory. I can only work with information you are authorized to access, and private recall requires the proper identity, scope, and purpose."
         if "legal_filing_blocked_from_normal_chat" in denied:
@@ -1422,6 +2072,7 @@ class ClaireRuntime:
             "Current truth files outrank old memory.",
             "Use retrieval only as support; answer the active question directly.",
             "Suppress irrelevant off-lane memories.",
+            "Use trusted temporal context for current time, elapsed time, deadline status, and event order.",
             "Do not confuse Claire the person with CLAIRE the AI/runtime system.",
             "Do not treat Nemotron as CLAIRE herself.",
         ]
@@ -1432,6 +2083,118 @@ class ClaireRuntime:
         if lane == "LEGAL_CASE":
             constraints.append("Do not provide legal or tax certainty without professional review.")
         return constraints
+
+    def _temporal_bearing(self, context: Any, resolution: dict[str, Any]) -> dict[str, Any]:
+        posture = "current-state"
+        if context.overdue_items:
+            posture = "deadline-driven"
+        elif context.upcoming_items:
+            posture = "scheduled"
+        elif resolution.get("status") == "ambiguous":
+            posture = "uncertain"
+        elif resolution.get("expressions"):
+            posture = "temporal-reference"
+        elapsed = context.elapsed_since_previous_turn_seconds
+        return {
+            "current_local_time": context.now_local,
+            "timezone": context.timezone_name,
+            "elapsed_since_last_interaction_seconds": elapsed,
+            "nearest_deadline": (context.upcoming_items or context.overdue_items or [None])[0],
+            "overdue_commitments": context.overdue_items,
+            "freshness_risk": "possible" if elapsed and elapsed > 7 * 86400 else "normal",
+            "recommended_temporal_posture": posture,
+            "temporal_resolution_status": resolution.get("status"),
+        }
+
+    def _high_impact_temporal_action(self, message: str) -> bool:
+        text = str(message or "").lower()
+        action = any(marker in text for marker in ["send", "schedule", "book", "cancel", "reschedule", "file", "submit", "remind"])
+        temporal = any(marker in text for marker in ["tomorrow", "tonight", "morning", "afternoon", "friday", "monday", "deadline", "appointment", "meeting", "call"])
+        return action and temporal
+
+    def _register_temporal_user_events(
+        self,
+        *,
+        normalized: str,
+        session_id: str,
+        turn_id: str,
+        temporal_context: Any,
+        temporal_resolution: dict[str, Any],
+        parent_event_id: str,
+    ) -> None:
+        text = str(normalized or "")
+        lowered = text.lower()
+        expressions = temporal_resolution.get("expressions") or []
+        if not expressions:
+            return
+        event_title = self._temporal_event_title(lowered)
+        if not event_title and any(marker in lowered for marker in ["moved it", "changed it", "rescheduled it", "they moved it"]):
+            existing_any = self._latest_current_temporal_event()
+            event_title = existing_any.title if existing_any else ""
+        if not event_title:
+            return
+        instant_data = expressions[0].get("instant") if isinstance(expressions[0], dict) else None
+        if not instant_data:
+            return
+        instant = TemporalInstant(**instant_data)
+        existing = self._find_current_temporal_event(event_title)
+        moved = any(marker in lowered for marker in ["moved", "changed", "rescheduled", "now", "instead"])
+        deadline_like = any(marker in lowered for marker in ["call", "meeting", "deadline", "appointment"]) or bool(existing and existing.due_at)
+        event_type_name = existing.event_type if existing and moved else "deadline" if deadline_like else "event"
+        event = TemporalEvent(
+            event_id="tevt_" + new_trace_id().replace("trace_", "", 1),
+            event_type=event_type_name,
+            title=event_title,
+            description=text[:500],
+            observed_at=TemporalInstant.from_datetime(parse_aware_datetime(temporal_context.now_utc), timezone_name=temporal_context.timezone_name),
+            ingested_at=TemporalInstant.from_datetime(parse_aware_datetime(temporal_context.now_utc), timezone_name=temporal_context.timezone_name),
+            due_at=instant if deadline_like else None,
+            occurred_at=None if deadline_like else instant,
+            status="current",
+            confidence=0.78,
+        )
+        if moved and existing:
+            event = self.temporal_engine.update_event(existing.event_id, self.temporal_engine._event_to_dict(event))
+            event_type = "temporal.event_superseded"
+            summary = {"old_event_id": existing.event_id, "new_event_id": event.event_id, "title": event.title}
+        else:
+            event = self.temporal_engine.register_event(event)
+            event_type = "temporal.event_registered"
+            summary = {"event_id": event.event_id, "title": event.title}
+        self._append_runtime_event(
+            event_type=event_type,
+            session_id=session_id,
+            turn_id=turn_id,
+            actor={"type": "component", "id": "temporal-engine", "component": "temporal_engine"},
+            result_summary=summary,
+            payload={"temporal_event": self.temporal_engine._event_to_dict(event)},
+            parent_event_ids=[parent_event_id],
+        )
+
+    def _temporal_event_title(self, lowered: str) -> str:
+        if "investor call" in lowered:
+            return "investor call"
+        if "call" in lowered:
+            return "call"
+        if "meeting" in lowered:
+            return "meeting"
+        if "deadline" in lowered:
+            return "deadline"
+        if "appointment" in lowered:
+            return "appointment"
+        return ""
+
+    def _find_current_temporal_event(self, title: str) -> TemporalEvent | None:
+        for event in reversed(list(self.temporal_engine._events.values())):
+            if event.title.lower() == title.lower() and event.status == "current":
+                return event
+        return None
+
+    def _latest_current_temporal_event(self) -> TemporalEvent | None:
+        for event in reversed(list(self.temporal_engine._events.values())):
+            if event.status == "current":
+                return event
+        return None
 
     def _risk_authority_gate(self, lane: str, message: str) -> tuple[str, list[str]]:
         text = message.lower()

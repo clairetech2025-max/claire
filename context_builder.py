@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from session_continuity import continuity_provider_lines
+
 
 class ContextBuilder:
     def build(
@@ -38,6 +40,7 @@ def build_context_packet(
     long_term_memories: list[dict[str, Any]],
     constraints: list[str],
     risks: list[str],
+    temporal_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     lane = lane_result.lane if hasattr(lane_result, "lane") else str(lane_result)
     packet = {
@@ -48,11 +51,14 @@ def build_context_packet(
             "relevant_entities": entities,
             "recent_path": compact_memories(recent_path),
             "long_term_memories": compact_memories(long_term_memories),
+            "cross_session_continuity": continuity_provider_lines(recent_path + long_term_memories),
             "current_truth": current_truth,
+            "temporal_context": temporal_context or {},
             "constraints": constraints,
             "risks": risks,
             "what_not_to_assume": [
                 "Do not treat model output as historical fact.",
+                "Do not invent current time, elapsed time, deadline status, event order, or freshness when temporal context is silent.",
                 "Do not cross legal, trading, horse, business, and architecture lanes unless admitted by this packet.",
                 "Do not invent current project status when current truth files are silent.",
             ],
@@ -98,6 +104,8 @@ def render_context_packet(packet: dict[str, Any]) -> str:
         ("Relevant entities", orientation.get("relevant_entities")),
         ("Recent path", orientation.get("recent_path")),
         ("Long-term memories", orientation.get("long_term_memories")),
+        ("Cross-session continuity", orientation.get("cross_session_continuity")),
+        ("Trusted temporal context", orientation.get("temporal_context")),
         ("Constraints", orientation.get("constraints")),
         ("Risks", orientation.get("risks")),
         ("What not to assume", orientation.get("what_not_to_assume")),

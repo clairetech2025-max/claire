@@ -19,6 +19,8 @@ from urllib.parse import quote_plus
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from claire_runtime_truth import RuntimeTruthEvent
+
 _VERITAS_BUILD_SHA = None
 
 try:
@@ -1336,11 +1338,12 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 
 .input-panel form {
     display: grid;
-    grid-template-columns: 1fr 74px 86px;
+    grid-template-columns: minmax(0, 1fr) 74px 86px 86px;
     gap: 9px;
 }
 
-.input-panel input {
+.input-panel input,
+.input-panel textarea {
     width: 100%;
     padding: 13px 15px;
     border: 1px solid rgba(19,216,255,0.25);
@@ -2533,6 +2536,105 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     letter-spacing: 1px;
 }
 
+.turn-control-panel {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid rgba(19,216,255,.24);
+    background: rgba(2,10,18,.58);
+    box-shadow: inset 0 0 18px rgba(19,216,255,.06);
+}
+
+.turn-state-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.turn-state-chip {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    padding: 7px 10px;
+    border: 1px solid rgba(106,255,156,.42);
+    color: var(--good);
+    background: rgba(6,29,24,.72);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.turn-state-chip.thinking,
+.turn-state-chip.orienting {
+    border-color: rgba(19,216,255,.55);
+    color: #8df6ff;
+    background: rgba(3,24,38,.78);
+}
+
+.turn-state-chip.speaking {
+    border-color: rgba(217,119,255,.55);
+    color: #ffb8f1;
+    background: rgba(30,10,36,.72);
+}
+
+.turn-state-chip.interrupted,
+.turn-state-chip.error {
+    border-color: rgba(255,93,125,.72);
+    color: #ff8aa1;
+    background: rgba(40,8,18,.78);
+}
+
+.turn-hint,
+.turn-metrics {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.turn-options {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.turn-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.turn-mini-btn {
+    min-height: 40px;
+    border: 1px solid rgba(19,216,255,.4);
+    background: rgba(5,22,36,.95);
+    color: var(--text);
+    padding: 0 12px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.turn-mini-btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+#queryInput.turn-textarea {
+    min-height: 82px;
+    resize: vertical;
+    line-height: 1.45;
+    padding-top: 14px;
+    padding-bottom: 14px;
+}
+
 .creator-status {
     color: var(--muted);
 }
@@ -2858,7 +2960,7 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
     }
 
     .input-panel form {
-        grid-template-columns: 1fr 92px;
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 8px;
     }
 
@@ -2866,11 +2968,13 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
         grid-template-columns: 1fr;
     }
 
-    .input-panel input {
+    .input-panel input,
+    .input-panel textarea {
         grid-column: 1 / -1;
     }
 
-    .input-panel input {
+    .input-panel input,
+    .input-panel textarea {
         padding: 13px 14px;
         font-size: 16px;
     }
@@ -3141,18 +3245,31 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
             <div class="stream-status" id="streamStatus">Runtime ready.</div>
         </div>
 
-        <div class="panel input-panel">
-            <div class="panel-title">Talk To Me</div>
-            <form id="queryForm" action="/" method="get" onsubmit="submitQuery(event); return false;">
-                <input id="queryInput" name="q" placeholder="Speak to Claire..." autocomplete="off" />
-                <button class="mic-btn" id="micButton" type="button" onclick="toggleMic()">MIC</button>
-                <button class="send-btn" type="button" onclick="submitQuery(event)">Send</button>
-            </form>
-            <div class="voice-toggle-row" style="margin:12px 0 0 0;">
-                <div class="voice-msg" id="voiceMsg">Voice auto-speak ready.</div>
-                <button class="toggle-btn on" id="voiceToggle" type="button" onclick="toggleVoice()">ON</button>
+            <div class="panel input-panel">
+                <div class="panel-title">Talk To Me</div>
+                <form id="queryForm" action="/" method="get" onsubmit="submitQuery(event); return false;">
+                    <textarea id="queryInput" class="turn-textarea" name="q" placeholder="Ask Claire anything..." autocomplete="off" rows="3"></textarea>
+                    <button class="mic-btn" id="micButton" type="button" onclick="toggleMic()">MIC</button>
+                    <button class="send-btn" id="doneButton" type="button" onclick="commitTurnExplicit('done')">Done</button>
+                    <button class="send-btn" type="button" onclick="submitQuery(event)">Send</button>
+                </form>
+                <div class="turn-control-panel" aria-live="polite">
+                    <div class="turn-state-row">
+                        <div class="turn-state-chip" id="turnStateChip">YOUR TURN - CLAIRE IS WAITING</div>
+                        <button class="turn-mini-btn" id="reopenTurnButton" type="button" onclick="reopenTurnDraft()" disabled>Reopen Draft</button>
+                    </div>
+                    <div class="turn-hint" id="turnHint">Enter adds a line. Ctrl+Enter, Send, Done, or saying "over" commits the full turn.</div>
+                    <div class="turn-options">
+                        <label><input id="silenceAutoCommitToggle" type="checkbox" /> Auto-commit after long silence</label>
+                        <button class="turn-mini-btn" id="playIntroButton" type="button" onclick="playClaireIntroduction()">Play Introduction</button>
+                    </div>
+                    <div class="turn-metrics" id="turnMetrics">3CRP: 0 fragments merged | 0 premature calls prevented | auto-send off</div>
+                </div>
+                <div class="voice-toggle-row" style="margin:12px 0 0 0;">
+                    <div class="voice-msg" id="voiceMsg">Voice playback off by default. Use ON when you want spoken responses.</div>
+                    <button class="toggle-btn on" id="voiceToggle" type="button" onclick="toggleVoice()">ON</button>
+                </div>
             </div>
-        </div>
 
         <div class="panel upload-panel">
             <div class="panel-title">Document Ingest</div>
@@ -3292,6 +3409,14 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                         <span class="monitor-label">Recall</span>
                         <span class="monitor-value">MEMORY</span>
                     </button>
+                    <button class="monitor-box accent-cyan" id="truthSpineBox" type="button" data-diagnostic="truth_spine" aria-label="Show Truth Spine status">
+                        <span class="monitor-label">Truth Spine</span>
+                        <span class="monitor-value" id="truthSpineStatus">UNKNOWN</span>
+                    </button>
+                    <button class="monitor-box accent-amber" id="temporalBox" type="button" data-diagnostic="temporal" aria-label="Show Temporal Engine status">
+                        <span class="monitor-label">Temporal</span>
+                        <span class="monitor-value" id="temporalStatus">UNKNOWN</span>
+                    </button>
                     <button class="monitor-box accent-pink" id="buildBox" type="button" data-diagnostic="build" aria-label="Show build state">
                         <span class="monitor-label">Build</span>
                         <span class="monitor-value">PUBLIC</span>
@@ -3395,7 +3520,70 @@ let currentAssistantMessage = null;
 let landingGreetingPlayed = sessionStorage.getItem("claireLandingGreetingPlayed") === "true";
 let lastTraceId = "";
 let voiceEnabled = localStorage.getItem("claireVoiceEnabled");
-voiceEnabled = voiceEnabled === null ? true : voiceEnabled === "true";
+voiceEnabled = voiceEnabled === null ? false : voiceEnabled === "true";
+const TURN_STORAGE_KEY = "claire3crpDraft";
+const TURN_METRICS_KEY = "claire3crpMetrics";
+const SILENCE_AUTO_COMMIT_KEY = "claire3crpSilenceAutoCommit";
+const LONG_SILENCE_MS = 12000;
+const THREE_CRP_STATES = {
+    IDLE: "IDLE",
+    USER_FLOOR_OPEN: "USER_FLOOR_OPEN",
+    USER_DRAFTING: "USER_DRAFTING",
+    COMPLETION_CHECK: "COMPLETION_CHECK",
+    TURN_COMMITTED: "TURN_COMMITTED",
+    ORIENTING: "ORIENTING",
+    ROUTING: "ROUTING",
+    THINKING: "THINKING",
+    CLAIRE_SPEAKING: "CLAIRE_SPEAKING",
+    INTERRUPTED: "INTERRUPTED",
+    RETURNING_FLOOR: "RETURNING_FLOOR",
+};
+let silenceAutoCommitEnabled = localStorage.getItem(SILENCE_AUTO_COMMIT_KEY) === "true";
+let turnSilenceTimer = null;
+let micStopShouldCommit = false;
+let turnController = {
+    state: THREE_CRP_STATES.IDLE,
+    fragments: [],
+    draft: "",
+    openedAt: 0,
+    committedPrompt: "",
+    completion: null,
+    gyro: null,
+    commitTrigger: "",
+};
+let turnMetrics = (() => {
+    try {
+        return Object.assign({
+            fragmentsMerged: 0,
+            prematureModelCallsPrevented: 0,
+            retrievalCallsPrevented: 0,
+            generatedTokensAvoided: 0,
+            inputTokensAvoided: 0,
+            committedTurns: 0,
+            explicitCommits: 0,
+            automaticCommits: 0,
+            falseEarlyCommits: 0,
+            falseDelayedCommits: 0,
+            ttsInterruptions: 0,
+            totalOpenTurnMs: 0,
+        }, JSON.parse(localStorage.getItem(TURN_METRICS_KEY) || "{}"));
+    } catch (err) {
+        return {
+            fragmentsMerged: 0,
+            prematureModelCallsPrevented: 0,
+            retrievalCallsPrevented: 0,
+            generatedTokensAvoided: 0,
+            inputTokensAvoided: 0,
+            committedTurns: 0,
+            explicitCommits: 0,
+            automaticCommits: 0,
+            falseEarlyCommits: 0,
+            falseDelayedCommits: 0,
+            ttsInterruptions: 0,
+            totalOpenTurnMs: 0,
+        };
+    }
+})();
 const PUBLIC_DEMO_BUILD = {str(PUBLIC_DEMO_BUILD).lower()};
 const CREATOR_MODE_ENABLED = {str(CREATOR_MODE_ENABLED).lower()};
 const DEMO_GUIDE_TEXT = `CLAIRE SESSION WORKSPACE
@@ -3647,7 +3835,7 @@ function updateVoiceToggle() {
     btn.innerText = voiceEnabled ? "ON" : "OFF";
     btn.classList.toggle("on", voiceEnabled);
     btn.classList.toggle("off", !voiceEnabled);
-    setVoiceMessage(voiceEnabled ? "Voice auto-speak ready." : "Voice muted.");
+    setVoiceMessage(voiceEnabled ? "Voice playback on. Barge-in enabled." : "Voice playback off.");
 }
 
 function toggleVoice() {
@@ -3660,6 +3848,262 @@ function toggleVoice() {
         idleWave();
     }
     updateVoiceToggle();
+}
+
+function saveTurnMetrics() {
+    try { localStorage.setItem(TURN_METRICS_KEY, JSON.stringify(turnMetrics)); } catch (err) {}
+}
+
+function estimateClientTokens(text) {
+    const words = String(text || "").trim().match(/\S+/g);
+    return Math.max(1, words ? words.length : 0);
+}
+
+function turnFragmentsFromText(text) {
+    return String(text || "")
+        .split(/\n+/)
+        .map(part => part.replace(/[ \t]+/g, " ").trim())
+        .filter(Boolean);
+}
+
+function canonicalDraftText() {
+    const input = document.getElementById("queryInput");
+    const text = input ? input.value : turnController.draft;
+    return turnFragmentsFromText(text).join("\n").trim();
+}
+
+function saveDraftTurn() {
+    const input = document.getElementById("queryInput");
+    const draft = input ? input.value : turnController.draft;
+    turnController.draft = draft || "";
+    turnController.fragments = turnFragmentsFromText(turnController.draft);
+    try {
+        sessionStorage.setItem(TURN_STORAGE_KEY, JSON.stringify({
+            draft: turnController.draft,
+            state: turnController.state,
+            openedAt: turnController.openedAt,
+        }));
+    } catch (err) {}
+}
+
+function restoreDraftTurn() {
+    try {
+        const raw = JSON.parse(sessionStorage.getItem(TURN_STORAGE_KEY) || "{}");
+        if (!raw.draft) return;
+        const input = document.getElementById("queryInput");
+        if (input && !input.value) input.value = raw.draft;
+        turnController.draft = raw.draft;
+        turnController.fragments = turnFragmentsFromText(raw.draft);
+        turnController.openedAt = raw.openedAt || Date.now();
+        set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Draft restored after page refresh.");
+    } catch (err) {}
+}
+
+function clearDraftTurn() {
+    turnController.draft = "";
+    turnController.fragments = [];
+    try { sessionStorage.removeItem(TURN_STORAGE_KEY); } catch (err) {}
+}
+
+function updateTurnMetricsDisplay() {
+    const el = document.getElementById("turnMetrics");
+    if (!el) return;
+    const avgOpen = turnMetrics.committedTurns
+        ? Math.round(turnMetrics.totalOpenTurnMs / turnMetrics.committedTurns / 100) / 10
+        : 0;
+    el.innerText = [
+        "3CRP: " + turnMetrics.fragmentsMerged + " fragments merged",
+        turnMetrics.prematureModelCallsPrevented + " premature model calls prevented",
+        turnMetrics.retrievalCallsPrevented + " retrieval calls prevented",
+        "avg open turn " + avgOpen + "s",
+        silenceAutoCommitEnabled ? "auto-send on" : "auto-send off",
+    ].join(" | ");
+}
+
+function updateTurnStateUI(detail) {
+    const chip = document.getElementById("turnStateChip");
+    const hint = document.getElementById("turnHint");
+    const reopen = document.getElementById("reopenTurnButton");
+    if (chip) {
+        chip.className = "turn-state-chip";
+        const state = turnController.state;
+        if ([THREE_CRP_STATES.ORIENTING, THREE_CRP_STATES.ROUTING, THREE_CRP_STATES.THINKING].includes(state)) chip.classList.add("thinking");
+        if (state === THREE_CRP_STATES.CLAIRE_SPEAKING) chip.classList.add("speaking");
+        if (state === THREE_CRP_STATES.INTERRUPTED) chip.classList.add("interrupted");
+        const labels = {
+            IDLE: "YOUR TURN - CLAIRE IS WAITING",
+            USER_FLOOR_OPEN: "YOUR TURN - CLAIRE IS WAITING",
+            USER_DRAFTING: "YOUR TURN - CLAIRE IS WAITING",
+            COMPLETION_CHECK: "Q INSIGHT CHECKING COMPLETION",
+            TURN_COMMITTED: "TURN COMMITTED",
+            ORIENTING: "ORIENTING",
+            ROUTING: "ROUTING",
+            THINKING: "THINKING",
+            CLAIRE_SPEAKING: "SPEAKING",
+            INTERRUPTED: "INTERRUPTED",
+            RETURNING_FLOOR: "RETURNING FLOOR",
+        };
+        chip.innerText = labels[state] || state;
+    }
+    if (hint) hint.innerText = detail || "Enter adds a line. Ctrl+Enter, Send, Done, or saying \"over\" commits the full turn.";
+    if (reopen) reopen.disabled = !turnController.committedPrompt || [THREE_CRP_STATES.THINKING, THREE_CRP_STATES.CLAIRE_SPEAKING].includes(turnController.state);
+    updateTurnMetricsDisplay();
+}
+
+function set3CRPState(state, detail) {
+    turnController.state = state;
+    updateTurnStateUI(detail);
+    if (typeof addLedgerEvent === "function") addLedgerEvent("3CRP " + state, detail || "turn control state changed");
+}
+
+function openUserFloor(source) {
+    if (!turnController.openedAt || [THREE_CRP_STATES.IDLE, THREE_CRP_STATES.RETURNING_FLOOR].includes(turnController.state)) {
+        turnController.openedAt = Date.now();
+    }
+    if (turnController.state === THREE_CRP_STATES.CLAIRE_SPEAKING) interruptClaireSpeech("barge-in");
+    set3CRPState(source === "voice" ? THREE_CRP_STATES.USER_FLOOR_OPEN : THREE_CRP_STATES.USER_DRAFTING, source === "voice" ? "Mic floor open. Claire will wait for Done, Mic, or \"over\"." : "Draft open. Claire will not answer until committed.");
+    saveDraftTurn();
+}
+
+function qInsightCompletionCheck(text, trigger) {
+    const clean = String(text || "").trim();
+    const lower = clean.toLowerCase();
+    const explicit = ["send", "done", "over", "ctrl_enter", "mic_done", "voice_over", "silence_timeout"].includes(trigger) || /\b(over|done)\s*[.!?]?$/.test(lower);
+    const reasons = [];
+    if (!clean) reasons.push("No user content is present.");
+    if (/(hold on|wait|one more thing|another thing|let me finish|not done|stand ?by)/i.test(lower)) reasons.push("User asked Claire to wait.");
+    if (/(and|also|plus|another thing)[: ]*$/i.test(lower)) reasons.push("Turn ends with a continuation.");
+    if (/( and| but| because| so|,)$/.test(lower)) reasons.push("Turn ends with an incomplete connector.");
+    const punctuationComplete = /[.?!'"]$/.test(clean);
+    const enoughContent = estimateClientTokens(clean) >= 6;
+    let confidence = 0.35 + (punctuationComplete ? 0.2 : 0) + (enoughContent ? 0.2 : 0) + (clean.includes("\n") ? 0.1 : 0);
+    if (/^(and|also|plus|then|because|but|except)\b/i.test(clean)) {
+        confidence -= 0.12;
+        reasons.push("Turn begins as a continuation.");
+    }
+    if (reasons.length && !explicit) confidence -= 0.25;
+    if (explicit) {
+        confidence = Math.max(confidence, 0.95);
+        reasons.push("User explicitly handed over the turn.");
+    }
+    confidence = Math.max(0, Math.min(1, Math.round(confidence * 1000) / 1000));
+    const recommendsWaiting = !explicit && (reasons.length > 0 || confidence < 0.62);
+    return {
+        complete: !recommendsWaiting,
+        confidence,
+        explicit_handoff: explicit,
+        recommends_waiting: recommendsWaiting,
+        reasons: reasons.length ? reasons : ["No continuation marker detected."],
+    };
+}
+
+function gyroOrientCommittedTurn(text) {
+    const lower = String(text || "").toLowerCase();
+    let lane = "conversation";
+    let intent = "general_assistance";
+    let memoryMode = "bounded_recall";
+    let tools = [];
+    if (/(courtlistener|case|citation|statute|ccr|docket|judge|opinion)/.test(lower)) {
+        lane = "legal_research";
+        intent = "research_or_legal_analysis";
+        memoryMode = "evidence_support";
+        tools = ["courtlistener", "web_search"];
+    } else if (/(upload|document|pdf|file|ingest)/.test(lower)) {
+        lane = "document_ingest";
+        intent = "document_processing";
+        memoryMode = "matter_scoped";
+        tools = ["document_ingest"];
+    } else if (/(why|how|architecture|are|truth spine|q insight|gyro)/.test(lower)) {
+        lane = "architecture_reasoning";
+        intent = "reasoning_first";
+        memoryMode = "support_only";
+    }
+    const words = String(text || "").match(/[A-Za-z0-9][A-Za-z0-9_-]{3,}/g) || [];
+    return {
+        current_subject: words.slice(0, 6).join(" ") || "general",
+        user_intent: intent,
+        continuation: /\b(also|and|then|same|that|this|continue)\b/.test(lower),
+        topic_change: false,
+        active_c3rp_lane: lane,
+        required_memory_mode: memoryMode,
+        required_tools: tools,
+    };
+}
+
+function trackDraftInput() {
+    const input = document.getElementById("queryInput");
+    if (!input) return;
+    if (input.value.trim() && [THREE_CRP_STATES.IDLE, THREE_CRP_STATES.RETURNING_FLOOR].includes(turnController.state)) {
+        openUserFloor("text");
+    } else if (input.value.trim()) {
+        set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Draft open. Claire is waiting for explicit handoff.");
+    }
+    saveDraftTurn();
+}
+
+function appendVoiceFragment(text) {
+    const input = document.getElementById("queryInput");
+    const clean = String(text || "").trim();
+    if (!input || !clean) return;
+    openUserFloor("voice");
+    input.value = (input.value.trim() ? input.value.trim() + "\n" : "") + clean;
+    saveDraftTurn();
+    turnMetrics.prematureModelCallsPrevented += 1;
+    turnMetrics.retrievalCallsPrevented += 1;
+    turnMetrics.inputTokensAvoided += estimateClientTokens(clean);
+    saveTurnMetrics();
+    updateTurnMetricsDisplay();
+}
+
+function scheduleLongSilenceCommit() {
+    if (turnSilenceTimer) clearTimeout(turnSilenceTimer);
+    if (!silenceAutoCommitEnabled) return;
+    turnSilenceTimer = setTimeout(() => {
+        const text = canonicalDraftText();
+        if (text && [THREE_CRP_STATES.USER_FLOOR_OPEN, THREE_CRP_STATES.USER_DRAFTING].includes(turnController.state)) {
+            commitTurn("silence_timeout");
+        }
+    }, LONG_SILENCE_MS);
+}
+
+function interruptClaireSpeech(reason) {
+    voiceRunId++;
+    if (streamAbortController) {
+        try { streamAbortController.abort(); } catch (err) {}
+        streamAbortController = null;
+    }
+    if (currentAudio) {
+        try { currentAudio.pause(); } catch (err) {}
+        currentAudio = null;
+    }
+    if (window.speechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch (err) {}
+    }
+    stopVoiceMeter();
+    idleWave();
+    turnMetrics.ttsInterruptions += 1;
+    saveTurnMetrics();
+    set3CRPState(THREE_CRP_STATES.INTERRUPTED, reason || "User interrupted Claire.");
+    setVoiceState("INTERRUPTED");
+    setVoiceMessage("Interrupted. Your turn is open.");
+}
+
+function commitTurnExplicit(trigger) {
+    return commitTurn(trigger || "done");
+}
+
+function reopenTurnDraft() {
+    const input = document.getElementById("queryInput");
+    if (!input || !turnController.committedPrompt) return;
+    input.value = turnController.committedPrompt;
+    input.focus();
+    set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Committed text restored for editing.");
+    saveDraftTurn();
+}
+
+function playClaireIntroduction() {
+    renderWorkspace({source: "CLAIRE", reply: CLAIRE_LANDING_GREETING});
+    speakText(CLAIRE_LANDING_GREETING);
 }
 
 function speechRecognitionSupported() {
@@ -3696,44 +4140,50 @@ function ensureRecognition() {
     if (!SpeechRecognition) return null;
     recognition = new SpeechRecognition();
     recognition.lang = "en-US";
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
         micListening = true;
         micFinalHandled = false;
+        micStopShouldCommit = false;
         updateMicButton();
-        setVoiceMessage("MIC LISTENING...");
+        openUserFloor("voice");
+        setVoiceMessage("LISTENING. Press Done, press Mic again, or say \"over\" to commit.");
         setVoiceState("LISTENING");
         setWaveMood("thinking");
         setMicWorkflowDebug("mic_listening", "voice_input", "PENDING");
     };
     recognition.onresult = event => {
-        let transcript = "";
+        let interim = "";
+        let finalText = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript;
+            const phrase = event.results[i][0].transcript || "";
+            if (event.results[i].isFinal) finalText += phrase;
+            else interim += phrase;
         }
-        const heard = transcript.trim();
-        const input = document.getElementById("queryInput");
-        if (input && heard) input.value = heard;
-        const isFinal = event.results[event.results.length - 1].isFinal;
-        if (heard && !isFinal) {
-            setVoiceMessage("Listening: " + heard);
+        const heardInterim = interim.trim();
+        const heardFinal = finalText.trim();
+        if (heardInterim) {
+            setVoiceMessage("USER STILL SPEAKING: " + heardInterim);
+            set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Short pauses will not commit this voice turn.");
         }
-        if (heard && isFinal) {
-            renderWorkspace({
-                source: "VOICE",
-                reply: "Voice captured:\n" + heard + "\n\nClaire is listening..."
-            });
-        }
-        if (isFinal && !micFinalHandled) {
-            micFinalHandled = true;
-            micListening = false;
-            updateMicButton();
-            setVoiceMessage("MIC CAPTURED");
-            setMicWorkflowDebug("mic_captured", "voice_input", "PENDING");
-            setTimeout(() => submitQuery(), 150);
+        if (heardFinal) {
+            const saidOver = /\bover\s*[.!?]?$/.test(heardFinal.toLowerCase());
+            const cleanFinal = heardFinal.replace(/\bover\s*[.!?]?$/i, "").trim();
+            if (cleanFinal) appendVoiceFragment(cleanFinal);
+            renderWorkspace({source: "VOICE", reply: "Voice captured:\n" + (cleanFinal || heardFinal) + "\n\nClaire is waiting for turn completion."});
+            setVoiceMessage(saidOver ? "Voice handoff detected: over." : "USER STILL SPEAKING. Press Done or Mic when finished.");
+            setMicWorkflowDebug("mic_fragment_captured", "voice_input", "PENDING");
+            if (saidOver) {
+                micFinalHandled = true;
+                micStopShouldCommit = false;
+                try { recognition.stop(); } catch (err) {}
+                setTimeout(() => commitTurn("voice_over"), 100);
+                return;
+            }
+            scheduleLongSilenceCommit();
         }
     };
     recognition.onerror = event => {
@@ -3749,9 +4199,14 @@ function ensureRecognition() {
         micListening = false;
         recognition = null;
         updateMicButton();
-        if (document.getElementById("voiceState")?.innerText === "LISTENING") {
+        if (micStopShouldCommit && canonicalDraftText()) {
+            micStopShouldCommit = false;
+            setTimeout(() => commitTurn("mic_done"), 80);
+            return;
+        }
+        if (document.getElementById("voiceState")?.innerText === "LISTENING" || turnController.state === THREE_CRP_STATES.USER_DRAFTING) {
             setVoiceState("IDLE");
-            setVoiceMessage("Voice auto-speak ready.");
+            setVoiceMessage("Voice floor closed. Press Done or Send when ready.");
             setMicWorkflowDebug("mic_idle", "voice_input", "NONE");
             idleWave();
         }
@@ -3794,12 +4249,10 @@ async function toggleMic() {
     try {
         if (micListening) {
             setMicWorkflowDebug("mic_stopping", "voice_input", "NONE");
+            micStopShouldCommit = true;
             rec.stop();
         } else {
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio = null;
-            }
+            interruptClaireSpeech("Barge-in: microphone opened while Claire was speaking.");
             setMicWorkflowDebug("mic_starting", "voice_input", "PENDING");
             micFinalHandled = false;
             rec.start();
@@ -4002,7 +4455,12 @@ function startVoiceMeter(audio) {
 
 async function speakText(text) {
     if (!voiceEnabled || !text) return;
+    if ([THREE_CRP_STATES.USER_FLOOR_OPEN, THREE_CRP_STATES.USER_DRAFTING, THREE_CRP_STATES.COMPLETION_CHECK].includes(turnController.state) || micListening) {
+        setVoiceMessage("Voice held while your turn is open.");
+        return;
+    }
     const runId = ++voiceRunId;
+    set3CRPState(THREE_CRP_STATES.CLAIRE_SPEAKING, "Claire is speaking. Mic barge-in will interrupt.");
     setVoiceMessage("VOICE LINK OPENING...");
     try {
         if (currentAudio) {
@@ -4016,12 +4474,14 @@ async function speakText(text) {
         }
         if (runId === voiceRunId) {
             setVoiceState("IDLE");
-            setVoiceMessage("Voice auto-speak ready.");
+            setVoiceMessage("Voice playback ready.");
+            set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Claire finished speaking. Your turn is open.");
             stopVoiceMeter();
         }
     } catch (err) {
         setVoiceMessage("VOICE INTERRUPTED: press ON once");
         setVoiceState("IDLE");
+        set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Voice playback ended with an interruption.");
         idleWave();
     }
 }
@@ -4113,6 +4573,7 @@ async function playSpeechChunk(text, index, total, runId) {
     await new Promise((resolve, reject) => {
         audio.onplay = () => {
             if (runId !== voiceRunId) return;
+            set3CRPState(THREE_CRP_STATES.CLAIRE_SPEAKING, "Claire is speaking. Mic barge-in will interrupt.");
             setVoiceState("SPEAKING");
             setVoiceMessage(total > 1 ? `CLAIRE SPEAKING ${index}/${total}` : "CLAIRE SPEAKING");
             startVoiceMeter(audio);
@@ -5374,7 +5835,8 @@ function clearWorkspace() {
     }
     stopVoiceMeter();
     setVoiceState("IDLE");
-    setVoiceMessage(voiceEnabled ? "Voice auto-speak ready." : "Voice muted.");
+    setVoiceMessage(voiceEnabled ? "Voice playback ready. Barge-in enabled." : "Voice playback off.");
+    set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Workspace cleared. Your turn is open.");
     setWaveMood("calm");
     setWorkflowDebug({
         endpoint: "/reply",
@@ -5793,18 +6255,54 @@ async function streamLandingGreeting() {
     setStreamStatus("Ready.", false);
     const input = document.getElementById("queryInput");
     if (input) input.focus();
-    speakText(CLAIRE_LANDING_GREETING);
 }
 
 async function submitQuery(event) {
     if (event) event.preventDefault();
+    return commitTurn("send");
+}
+
+async function commitTurn(trigger) {
     const input = document.getElementById("queryInput");
-    const q = input ? input.value.trim() : "";
+    saveDraftTurn();
+    const q = canonicalDraftText();
     if (!q) return;
+    set3CRPState(THREE_CRP_STATES.COMPLETION_CHECK, "Q Insight is checking whether the user has handed over the turn.");
+    const completion = qInsightCompletionCheck(q, trigger || "send");
+    turnController.completion = completion;
+    if (completion.recommends_waiting && !["send", "done", "over", "ctrl_enter", "mic_done", "voice_over", "silence_timeout"].includes(trigger || "")) {
+        set3CRPState(THREE_CRP_STATES.USER_DRAFTING, "Q Insight recommends waiting: " + completion.reasons.join(" "));
+        return;
+    }
+    const openedAt = turnController.openedAt || Date.now();
+    turnController.fragments = turnFragmentsFromText(q);
+    turnController.committedPrompt = q;
+    turnController.commitTrigger = trigger || "send";
+    turnMetrics.fragmentsMerged += turnController.fragments.length;
+    turnMetrics.prematureModelCallsPrevented += Math.max(0, turnController.fragments.length - 1);
+    turnMetrics.retrievalCallsPrevented += Math.max(0, turnController.fragments.length - 1);
+    turnMetrics.generatedTokensAvoided += Math.max(0, turnController.fragments.length - 1) * 80;
+    turnMetrics.inputTokensAvoided += estimateClientTokens(q);
+    turnMetrics.committedTurns += 1;
+    turnMetrics.totalOpenTurnMs += Math.max(0, Date.now() - openedAt);
+    if ((trigger || "") === "silence_timeout") turnMetrics.automaticCommits += 1;
+    else turnMetrics.explicitCommits += 1;
+    saveTurnMetrics();
+    set3CRPState(THREE_CRP_STATES.TURN_COMMITTED, "Committed " + turnController.fragments.length + " fragment(s) as one canonical prompt.");
     if (input) {
         input.value = "";
         input.focus();
     }
+    clearDraftTurn();
+    await dispatchCommittedTurn(q, {
+        trigger: trigger || "send",
+        fragments: turnController.fragments,
+        completion,
+    });
+}
+
+async function dispatchCommittedTurn(q, turnMeta) {
+    const input = document.getElementById("queryInput");
     if (isDemoUnlock(q)) {
         await launchStructuredDemoByName(demoKindForText(q));
         if (input) input.focus();
@@ -5819,36 +6317,51 @@ async function submitQuery(event) {
         return;
     }
     const outboundQ = prepareCreatorQuery(q);
+    set3CRPState(THREE_CRP_STATES.ORIENTING, "Gyro is orienting the committed turn.");
+    turnController.gyro = gyroOrientCommittedTurn(outboundQ);
+    setWorkflowDebug({
+        endpoint: "/reply",
+        route: "gyro_orientation",
+        lane: turnController.gyro.active_c3rp_lane,
+        controlLayer: "3CRP",
+        machineCalled: "NO",
+        traceId: "PENDING",
+    });
+    set3CRPState(THREE_CRP_STATES.ROUTING, "3CRP selected lane " + turnController.gyro.active_c3rp_lane + ".");
     const turnId = ++activeTurnId;
     if (streamAbortController) {
         try { streamAbortController.abort(); } catch (err) {}
         streamAbortController = null;
     }
     clearStreamStallTimer();
+    set3CRPState(THREE_CRP_STATES.THINKING, "Retrieval, memory, tools, and model are now allowed.");
     startWave();
     appendConversationMessage("user", q, "USER");
     animateQInsightLoop(false);
     setWorkflowDebug({
         endpoint: "/reply",
         route: "reply",
-        lane: "conversation",
-        controlLayer: creatorModeActive() ? "LIMITED" : "NO",
+        lane: turnController.gyro.active_c3rp_lane || "conversation",
+        controlLayer: creatorModeActive() ? "3CRP+CREATOR" : "3CRP",
         machineCalled: "NO",
         traceId: "PENDING",
     });
     try {
-        const streamUrl = "/reply?stream=true&q=" + encodeURIComponent(outboundQ);
-        const streamOptions = outboundQ.length > 1800
-            ? {
-                method: "POST",
-                body: JSON.stringify({q: outboundQ}),
-            }
-            : {};
-        if (streamOptions.method === "POST") {
-            streamOptions.headers = {"Content-Type": "application/json"};
-        }
+        const streamOptions = {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                q: outboundQ,
+                stream: true,
+                turn_meta: Object.assign({}, turnMeta || {}, {
+                    gyro: turnController.gyro,
+                    three_crp_state: turnController.state,
+                    metrics_snapshot: turnMetrics,
+                }),
+            }),
+        };
         const data = await readReplyStream(
-            streamOptions.method === "POST" ? "/reply-stream" : streamUrl,
+            "/reply",
             turnId,
             streamOptions
         );
@@ -5857,15 +6370,17 @@ async function submitQuery(event) {
             endpoint: "/reply",
             route: routeForSource(sourceKey),
             lane: String((data && data.source) || "conversation").toLowerCase().replace(/\s+/g, "_"),
-            controlLayer: sourceKey === "CREATOR" ? "LIMITED" : "NO",
+            controlLayer: sourceKey === "CREATOR" ? "3CRP+CREATOR" : "3CRP",
             machineCalled: "NO",
             traceId: (data && data.trace_id) || "NONE",
         });
         speakText(data.reply || data.output || "");
+        set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Response complete. Your turn is open.");
         if (input) input.focus();
     } catch (err) {
         if (err && err.name === "AbortError") {
             finishStreamRender(turnId, {source: "CLAIRE", reply: streamDraftText || "Interrupted. Ready for the next instruction."}, "Response interrupted.");
+            set3CRPState(THREE_CRP_STATES.INTERRUPTED, "Response interrupted before completion.");
             if (input) input.focus();
             return;
         }
@@ -5878,6 +6393,7 @@ async function submitQuery(event) {
             traceId: "NONE",
         });
         renderWorkspace({source: "ERROR", reply: String(err)});
+        set3CRPState(THREE_CRP_STATES.RETURNING_FLOOR, "Provider failed after turn commitment: " + String(err).slice(0, 120));
         if (input) input.focus();
     }
 }
@@ -6173,8 +6689,27 @@ diagnosticButtons.forEach(button => {
     button.addEventListener("click", () => runDiagnostic(button.dataset.diagnostic));
 });
 if (queryInput) {
+    queryInput.addEventListener("input", () => {
+        trackDraftInput();
+    });
     queryInput.addEventListener("keydown", event => {
-        if (event.key === "Enter" && !event.shiftKey) submitQuery(event);
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            commitTurn("ctrl_enter");
+        }
+    });
+}
+const silenceAutoCommitToggle = document.getElementById("silenceAutoCommitToggle");
+if (silenceAutoCommitToggle) {
+    silenceAutoCommitToggle.checked = silenceAutoCommitEnabled;
+    silenceAutoCommitToggle.addEventListener("change", () => {
+        silenceAutoCommitEnabled = !!silenceAutoCommitToggle.checked;
+        localStorage.setItem(SILENCE_AUTO_COMMIT_KEY, String(silenceAutoCommitEnabled));
+        updateTurnMetricsDisplay();
+        if (!silenceAutoCommitEnabled && turnSilenceTimer) {
+            clearTimeout(turnSilenceTimer);
+            turnSilenceTimer = null;
+        }
     });
 }
 const docFileInput = document.getElementById("docFile");
@@ -6188,6 +6723,8 @@ if (docFileInput) {
 }
 updateVoiceToggle();
 updateMicButton();
+restoreDraftTurn();
+updateTurnStateUI();
 renderQInsight();
 addLedgerEvent("system ready", "Conversation, Q Insight, Ledger, and proof modules online.");
 tickCreatorMode();
@@ -6237,6 +6774,8 @@ function checkStatus() {
             setState("voiceStatus", data.voice);
             setState("ingestStatus", data.ingest);
             setState("geminiStatus", data.gemini);
+            setState("truthSpineStatus", data.truth_spine && data.truth_spine.valid ? "STABLE" : "CHECK");
+            setState("temporalStatus", data.temporal_engine && data.temporal_engine.status ? data.temporal_engine.status : "CHECK");
             setState("areModule", data.are);
             setState("llmModule", data.llm);
             setState("voiceModule", data.voice);
@@ -6247,6 +6786,8 @@ function checkStatus() {
             setState("voiceStatus", "UNKNOWN");
             setState("ingestStatus", "UNKNOWN");
             setState("geminiStatus", "UNKNOWN");
+            setState("truthSpineStatus", "UNKNOWN");
+            setState("temporalStatus", "UNKNOWN");
             const log = document.getElementById("leftLog");
             if (log) log.innerText = "[STATUS ERROR] " + err.message + "\n\n" + log.innerText;
         });
@@ -6270,6 +6811,39 @@ def query_are(prompt: str):
         print("ARE error:", e)
 
     return None
+
+
+def append_gui_truth_event(
+    *,
+    event_type: str,
+    session_id: str,
+    turn_id: str,
+    actor: dict,
+    lane: str = "document_ingest",
+    decision: dict | None = None,
+    result_summary: dict | None = None,
+    payload: dict | None = None,
+    status: str = "committed",
+    fail_closed: bool = False,
+) -> dict | None:
+    if not CLAIRE_GOVERNED_RUNTIME or not getattr(CLAIRE_GOVERNED_RUNTIME, "runtime_truth", None):
+        if fail_closed:
+            raise RuntimeError("runtime Truth Spine unavailable")
+        return None
+    return CLAIRE_GOVERNED_RUNTIME.runtime_truth.append(
+        RuntimeTruthEvent(
+            event_type=event_type,
+            session_id=session_id,
+            turn_id=turn_id,
+            actor=actor,
+            lane=lane,
+            decision=decision or {},
+            result_summary=result_summary or {},
+            payload=payload or {},
+            status=status,
+        ),
+        fail_closed=fail_closed,
+    )
 
 
 def query_spectacle(prompt: str, session_id: str = "claire-public-demo") -> dict | None:
@@ -12121,29 +12695,6 @@ def casual_checkin_reply(prompt: str) -> str:
     return "I'm steady. The runtime is up, the conversation lane is open, and I'm ready for the next thing you want to test."
 
 
-def is_self_evaluation_prompt(prompt: str) -> bool:
-    cleaned = _clean_for_match(prompt)
-    return (
-        "evaluate your strengths honestly" in cleaned
-        and "ask me three thoughtful questions" in cleaned
-        and "challenge one of my assumptions" in cleaned
-    )
-
-
-def self_evaluation_reply() -> str:
-    return (
-        "I can do that. I need your answers before I can honestly complete Tasks 2-5, because you explicitly said to base the first recommendation only on your answers.\n\n"
-        "Task 1 - three questions:\n"
-        "1. What outcome matters most over the next 30 days: funding, product stability, demos, legal capability, or repository cleanup?\n"
-        "Reasoning summary: priority determines what should be protected first. Confidence: high.\n\n"
-        "2. Which system is most important to prove to an outside reviewer right now: CLAIRE core, Veritas, ARE/Truth Spine, Continuity/Ember, or the public demo stack?\n"
-        "Reasoning summary: the highest-value proof target should drive engineering order. Confidence: high.\n\n"
-        "3. What failure would hurt you most if it happened tomorrow: loss of trust, broken public demo, lost code/history, legal-evidence confusion, or model/runtime instability?\n"
-        "Reasoning summary: the worst credible failure defines the first risk-reduction move. Confidence: medium-high.\n\n"
-        "Next step: answer those three. Then I will identify the first problem to solve, challenge one assumption, explain one complex idea at three levels, and give my honest strongest/weakest capability based on this conversation."
-    )
-
-
 def should_use_governed_runtime(prompt: str) -> bool:
     if not CLAIRE_GOVERNED_RUNTIME or not claire_classify_lane:
         return False
@@ -12159,7 +12710,7 @@ def should_use_governed_runtime(prompt: str) -> bool:
 def build_governed_runtime_reply(prompt: str, debug: bool = False) -> tuple[str, str, str]:
     def go_provider_generate(messages, config):
         prompt = "\n\n".join(f"[{item.get('role', '').upper()}]\n{item.get('content', '')}" for item in messages)
-        return query_llm(prompt)
+        return query_llm(prompt, governed_prompt=True)
 
     result = CLAIRE_GOVERNED_RUNTIME.handle_user_message(
         user_id="steve",
@@ -12221,14 +12772,12 @@ def build_reply(q: str, debug: bool = False):
     direct = public_operator_tone_reply(q)
     if direct:
         return finalize_reply(q, "CLAIRE", direct)
-    if is_self_evaluation_prompt(q):
-        return finalize_reply(q, "CLAIRE", self_evaluation_reply())
     if not CLAIRE_GOVERNED_RUNTIME:
         trace_id = new_trace_id(None)
         return "CLAIRE", "CLAIRE governed runtime is unavailable; normal chat is not allowed to bypass ClaireRuntime.", trace_id
     def go_provider_generate(messages, config):
         prompt = "\n\n".join(f"[{item.get('role', '').upper()}]\n{item.get('content', '')}" for item in messages)
-        return query_llm(prompt)
+        return query_llm(prompt, governed_prompt=True)
 
     result = CLAIRE_GOVERNED_RUNTIME.handle_user_message(
         user_id="steve",
@@ -12739,7 +13288,28 @@ def _extract_provider_text(response) -> str:
     return text
 
 
-def query_llm(prompt: str, allow_gemini: bool = False) -> str:
+def compact_governed_prompt_for_llama(prompt: str, limit: int = 3600) -> str:
+    text = str(prompt or "")
+    user_blocks = re.findall(
+        r"\[USER\]\s*(.*?)(?=\n\n\[[A-Z_ -]+\]\n|\Z)",
+        text,
+        flags=re.S,
+    )
+    user_request = user_blocks[-1].strip() if user_blocks else text.strip()
+    user_request = user_request[-2200:]
+    return (
+        "You are Claire Executive Mode. Answer the current user request directly. "
+        "Be honest, practical, and concise. Do not claim live source access unless a source was actually provided. "
+        "Do not reveal hidden chain-of-thought; brief reasoning summaries and confidence levels are allowed when requested. "
+        "Do not use a canned answer. Do not claim CLAIRE already has customers, support teams, certifications, integrations, "
+        "or proven features unless those facts were included in the prompt. When asked to evaluate CLAIRE, frame the response "
+        "as buyer criteria, proof needed, risks, and walk-away conditions.\n\n"
+        "Current user request:\n"
+        + user_request
+    )[:limit]
+
+
+def query_llm(prompt: str, allow_gemini: bool = False, governed_prompt: bool = False) -> str:
 
     dev_mode = prompt.startswith("I_am_battleborn")
     clean_prompt = prompt.replace("I_am_battleborn", "", 1).strip()
@@ -12754,16 +13324,18 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
         if cmd.startswith("system"):
             return "[CLAIRE: DEV CHANNEL] System introspection placeholder. Hook not yet connected."
 
-    system_prompt = (
-        "You are in developer mode. Give direct commands and technical answers only."
-        if dev_mode
-        else EXECUTIVE_SYSTEM_PROMPT
-    )
+    if governed_prompt:
+        system_prompt = ""
+        full_prompt = prompt
+    else:
+        system_prompt = (
+            "You are in developer mode. Give direct commands and technical answers only."
+            if dev_mode
+            else EXECUTIVE_SYSTEM_PROMPT
+        )
+        full_prompt = f"{system_prompt}\n\nUser: {clean_prompt if dev_mode else prompt}"
 
-    # combine system + user into one prompt (keeps your identity + dev mode)
-    full_prompt = f"{system_prompt}\n\nUser: {clean_prompt if dev_mode else prompt}"
-
-    if allow_gemini and not dev_mode and should_use_general_engine(prompt):
+    if allow_gemini and not dev_mode and not governed_prompt and should_use_general_engine(prompt):
         gemini_reply = query_gemini(contextualize_prompt(prompt), system_prompt)
         if is_useful_reply(gemini_reply):
             return gemini_reply
@@ -12778,7 +13350,11 @@ def query_llm(prompt: str, allow_gemini: bool = False) -> str:
             "Do not flatter. State uncertainty. Provide brief reasoning summaries "
             "without hidden chain-of-thought. Keep the answer concise."
         )
-        compact_prompt = f"{compact_system_prompt}\n\nUser: {prompt}"
+        compact_prompt = (
+            compact_governed_prompt_for_llama(prompt)
+            if governed_prompt
+            else f"{compact_system_prompt}\n\nUser: {prompt}"
+        )
         try:
             retry_response = requests.post(
                 LLM_URL,
@@ -14261,12 +14837,34 @@ def _stream_text_chunks(text: str, target_chars: int = 46) -> list[str]:
     return chunks
 
 
-def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None, debug: bool = False) -> StreamingResponse:
+def persist_three_crp_turn_trace(trace_id: str, q: str, turn_meta: dict | None) -> None:
+    if not turn_meta:
+        return
+    try:
+        path = Path(TRACE_LOG)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "trace_id": trace_id,
+            "timestamp": claire_local_now().isoformat(),
+            "event": "three_crp_turn_commit",
+            "input": q,
+            "turn_meta": turn_meta,
+        }
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    except Exception as e:
+        print("3CRP turn trace write error:", e)
+
+
+def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None = None, demo_scenario: str | None = None, debug: bool = False, turn_meta: dict | None = None) -> StreamingResponse:
     async def generate():
         started = time.time()
         yield _ndjson_event({"type": "start", "source": "CLAIRE", "ts": started})
         try:
             payload = await asyncio.to_thread(_reply_payload, q, demo, trace_id, demo_scenario, debug)
+            if turn_meta:
+                payload["turn_commit"] = turn_meta
+                await asyncio.to_thread(persist_three_crp_turn_trace, str(payload.get("trace_id") or ""), q, turn_meta)
             source = payload.get("source") or "CLAIRE"
             text = str(payload.get("reply") or payload.get("answer") or payload.get("output") or "")
             yield _ndjson_event({
@@ -14274,6 +14872,7 @@ def _reply_stream_response(q: str, demo: str | None = None, trace_id: str | None
                 "source": source,
                 "trace_id": payload.get("trace_id"),
                 "chars": len(text),
+                "turn_commit": turn_meta or {},
             })
             for seq, chunk in enumerate(_stream_text_chunks(text)):
                 yield _ndjson_event({"type": "chunk", "seq": seq, "text": chunk})
@@ -14315,6 +14914,7 @@ async def reply_stream_post(request: Request):
         data.get("trace_id"),
         data.get("demo_scenario"),
         demo_bool(data.get("debug") or data.get("debug_mode")),
+        data.get("turn_meta") if isinstance(data.get("turn_meta"), dict) else None,
     )
 
 
@@ -14327,6 +14927,15 @@ async def reply_post(request: Request):
     q = str(data.get("q") or data.get("query") or data.get("prompt") or "").strip()
     if not q:
         return JSONResponse({"status": "missing query"}, status_code=400)
+    if demo_bool(data.get("stream")):
+        return _reply_stream_response(
+            q,
+            data.get("demo") or data.get("demo_mode"),
+            data.get("trace_id"),
+            data.get("demo_scenario"),
+            demo_bool(data.get("debug") or data.get("debug_mode")),
+            data.get("turn_meta") if isinstance(data.get("turn_meta"), dict) else None,
+        )
     if demo_bool(data.get("demo_mode")) and not is_demo_key_query(q):
         return JSONResponse(build_governed_demo_payload(q, user_id=str(data.get("user_id") or "steve"), session_id=str(data.get("session_id") or "gui-reply")))
     source, reply_text, trace = build_reply(q, debug=demo_bool(data.get("debug") or data.get("debug_mode")))
@@ -15294,6 +15903,33 @@ async def veritas_legal_run(request: Request):
 
     summary = engine.summary()
     explanation = claire_explains_summary(summary)
+    append_gui_truth_event(
+        event_type="veritas.evaluation",
+        session_id="gui-veritas",
+        turn_id=trace_id.replace("trace_", "turn_", 1),
+        actor={"type": "component", "id": "veritas", "component": "veritas_legal"},
+        lane="LEGAL_CASE",
+        decision={"allowed": True, "evaluation": "organized_evidence", "not_legal_advice": True},
+        result_summary={
+            "processed_files": len(processed),
+            "skipped_files": len(skipped),
+            "matter_id": matter_id,
+        },
+        payload={
+            "trace_id": trace_id,
+            "processed_refs": [
+                {
+                    "source_doc_id": item.get("source_doc_id"),
+                    "source_sha256": item.get("source_sha256"),
+                    "are_event_sha": item.get("are_event_sha"),
+                }
+                for item in processed
+            ],
+            "summary": summary,
+            "skipped_files": skipped,
+        },
+        fail_closed=True,
+    )
     return JSONResponse(
         {
             "status": f"Veritas Legal organized {len(processed)} evidence file(s).",
@@ -15338,6 +15974,26 @@ async def _ingest_one_uploaded_file(file: UploadFile) -> dict:
     ok = sum(1 for result in ingest_results if 200 <= result["status_code"] < 300)
     status_text = f"anchored {ok}/{len(ingest_results)} chunks"
     remember_upload(filename, stamped, len(text_body), len(chunks), status_text)
+    upload_turn_id = "turn_upload_" + uuid.uuid4().hex[:12]
+    append_gui_truth_event(
+        event_type="document.ingest_completed",
+        session_id="gui-upload",
+        turn_id=upload_turn_id,
+        actor={"type": "component", "id": "claire-gui", "component": "document_ingest"},
+        lane="document_ingest",
+        decision={"allowed": True, "status": status_text},
+        result_summary={"filename": filename, "chunks": len(chunks), "ingested": ok},
+        payload={
+            "filename": filename,
+            "saved_as": stamped,
+            "upload_bytes": upload_bytes,
+            "chars": len(text_body),
+            "chunks": len(chunks),
+            "ingested": ok,
+            "text_hash": hashlib.sha256(text_body.encode("utf-8", errors="ignore")).hexdigest(),
+        },
+        fail_closed=True,
+    )
     return {
         "status": status_text,
         "filename": filename,
@@ -15989,6 +16645,24 @@ def diagnostic(target: str = Query(...)):
             }
         )
 
+    if target == "temporal":
+        temporal = {"status": "UNAVAILABLE"}
+        if CLAIRE_GOVERNED_RUNTIME and getattr(CLAIRE_GOVERNED_RUNTIME, "temporal_engine", None):
+            temporal = CLAIRE_GOVERNED_RUNTIME.temporal_engine.status()
+        return JSONResponse(
+            {
+                "title": "Temporal Engine",
+                "status": temporal.get("status", "CHECK"),
+                "detail": (
+                    f"Timezone: {temporal.get('timezone', 'unknown')}\n"
+                    f"Events: {temporal.get('events', 0)}\n"
+                    f"Relations: {temporal.get('relations', 0)}\n"
+                    f"Sessions: {temporal.get('sessions', 0)}"
+                ),
+                "next": "Temporal context is injected before model calls and recorded in Truth Spine.",
+            }
+        )
+
     if target == "build":
         states = {
             "gui": service_state("claire-gui"),
@@ -16048,6 +16722,18 @@ def status():
         gemini = "LIMITED"
     else:
         gemini = "READY"
+    truth_spine = {"valid": False, "records": 0, "reason": "runtime_unavailable"}
+    if CLAIRE_GOVERNED_RUNTIME and getattr(CLAIRE_GOVERNED_RUNTIME, "runtime_truth", None):
+        try:
+            truth_spine = CLAIRE_GOVERNED_RUNTIME.runtime_truth.verify()
+        except Exception as exc:
+            truth_spine = {"valid": False, "records": 0, "reason": str(exc)}
+    temporal = {"status": "UNAVAILABLE", "reason": "runtime_unavailable"}
+    if CLAIRE_GOVERNED_RUNTIME and getattr(CLAIRE_GOVERNED_RUNTIME, "temporal_engine", None):
+        try:
+            temporal = CLAIRE_GOVERNED_RUNTIME.temporal_engine.status()
+        except Exception as exc:
+            temporal = {"status": "CHECK", "reason": str(exc)}
     payload = {
         "are": are,
         "llm": llm,
@@ -16055,6 +16741,8 @@ def status():
         "ingest": ingest,
         "gemini": gemini,
         "spectacle": spectacle,
+        "truth_spine": truth_spine,
+        "temporal_engine": temporal,
         "build": "PUBLIC_DEMO" if PUBLIC_DEMO_BUILD else "PRIVATE_FULL",
         "business_ops": {
             "mode": "draft_only",
@@ -16071,9 +16759,25 @@ def status():
             ],
         },
     }
+    try:
+        from claire_core.runtime.health import core_health
+
+        payload["claire_core"] = core_health()
+    except Exception as exc:
+        payload["claire_core"] = {"status": "ERROR", "reason": str(exc)}
     if not PUBLIC_DEMO_BUILD:
         payload["crypto"] = "SEALED" if crypto_keys_loaded() else "OFFLINE"
     return JSONResponse(payload)
+
+
+@app.get("/truth-spine/status")
+def truth_spine_status(session_id: str | None = Query(None), turn_id: str | None = Query(None)):
+    if not CLAIRE_GOVERNED_RUNTIME or not getattr(CLAIRE_GOVERNED_RUNTIME, "runtime_truth", None):
+        return JSONResponse({"valid": False, "reason": "runtime_unavailable"}, status_code=503)
+    try:
+        return JSONResponse(CLAIRE_GOVERNED_RUNTIME.runtime_truth.verify(session_id=session_id, turn_id=turn_id))
+    except Exception as exc:
+        return JSONResponse({"valid": False, "reason": str(exc)}, status_code=500)
 
 
 @app.get("/action")

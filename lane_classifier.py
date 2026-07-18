@@ -196,6 +196,18 @@ def classify_lane(message: str, recent_context: list[dict[str, Any]] | None = No
             "grounded_support",
         )
 
+    if _contains(text, ["codename", "project name", "project fact", "what changed", "current accepted version"]):
+        return LaneResult(
+            "BUSINESS_FORMATION",
+            0.70,
+            "Project-memory follow-up markers found.",
+            ["BUSINESS_FORMATION", "CLAIRE_SYSTEM_ARCHITECTURE", "GENERAL_CHAT", "SESSION"],
+            ["session_continuity", "truth_files"],
+            True,
+            "business_cautious",
+            "business",
+        )
+
     if len(recent_context) and _contains(text, ["that", "earlier", "where were we", "what did i ask", "how many", "the question"]):
         return LaneResult(
             "GENERAL_CHAT",

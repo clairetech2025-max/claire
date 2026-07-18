@@ -87,7 +87,7 @@ class LoopbackLayer:
             return self._tool_supply_chain_answer()
         if lane == "TRADING_STATION":
             if "missing source authority" in reason:
-                return "Veritas status requires trusted authority. From guest chat I can only explain the safety boundary: Veritas is a governed financial intelligence subsystem, not CLAIRE memory, and live execution is blocked here."
+                return "Veritas status requires trusted authority. From guest chat I can only explain the safety boundary: Veritas is a governed financial intelligence subsystem, not CLAIRE memory, and no live trading or live execution is allowed here."
             return "I can discuss trading-system status and risk posture, but I cannot execute or authorize live trades from normal chat."
         if lane == "LEGAL_CASE":
             if "missing source authority" in reason:
@@ -129,7 +129,7 @@ class LoopbackLayer:
         if any(term in lowered for term in ["dinner", "eat", "food"]):
             return "For dinner, pick something simple that matches your energy: protein, something fresh, and a carb if you need it. If you want fast, do eggs or chicken with rice and greens. If you want comfort, soup, pasta, or tacos works."
         return (
-            "I heard you, but the language provider did not return a useful answer. "
+            "I heard you, but the language provider returned generic filler instead of a useful answer. "
             "I will answer from my control layer instead: I am here to help with memory, evidence, governed workflow, trace review, and clear next steps."
         )
 

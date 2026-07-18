@@ -7,6 +7,7 @@ from claire_vde.federal_register import FederalRegisterCollector, FederalRegiste
 from claire_vde.ledger import OpportunityHypothesis, OpportunityLedger
 from claire_vde.pipeline import VentureDiscoveryEngine
 from claire_vde.q_insight_venture import QInsightField
+from claire_vde.reconciliation import reconcile_orphaned_evidence
 from claire_vde.recognition_rail import RecognitionRail
 from claire_vde.sentinel import VDESentinel
 from claire_vde.storage import VentureRepository
@@ -25,6 +26,7 @@ __all__ = [
     "OpportunityLedger",
     "QInsightField",
     "RecognitionRail",
+    "reconcile_orphaned_evidence",
     "StaticEvidenceCollector",
     "VDESentinel",
     "VentureRepository",

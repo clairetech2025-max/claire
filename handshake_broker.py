@@ -17,6 +17,7 @@ LANE_SCOPE_POLICY = {
     "HORSE_STEWARDSHIP": {"guest_scopes": ["PUBLIC"], "trusted_scopes": ["PUBLIC", "HORSE_STEWARDSHIP", "USER_PRIVATE"], "guest_tools": [], "trusted_tools": ["truth_files"]},
     "TRADING_STATION": {"guest_scopes": ["PUBLIC"], "trusted_scopes": ["PUBLIC", "TRADING_SENSITIVE", "COMPANY_INTERNAL"], "guest_tools": [], "trusted_tools": ["veritas_status"]},
     "LEGAL_CASE": {"guest_scopes": ["PUBLIC"], "trusted_scopes": ["PUBLIC", "LEGAL_SENSITIVE", "COMPANY_INTERNAL"], "guest_tools": [], "trusted_tools": ["legal_research"]},
+    "BUSINESS_FORMATION": {"guest_scopes": ["PUBLIC"], "trusted_scopes": ["PUBLIC", "COMPANY_INTERNAL", "USER_PRIVATE"], "guest_tools": [], "trusted_tools": ["truth_files"]},
     "CLAIRE_SYSTEM_ARCHITECTURE": {"guest_scopes": ["PUBLIC"], "trusted_scopes": ["PUBLIC", "COMPANY_INTERNAL", "OWNER_ONLY"], "guest_tools": ["repo_status"], "trusted_tools": ["repo_status", "truth_files"]},
     "CLAIRE_ARCHITECTURE": {"guest_scopes": ["PUBLIC"], "trusted_scopes": ["PUBLIC", "COMPANY_INTERNAL", "OWNER_ONLY"], "guest_tools": ["repo_status"], "trusted_tools": ["repo_status", "truth_files"]},
     "NVIDIA_PATHWAY": {"guest_scopes": ["PUBLIC"], "trusted_scopes": ["PUBLIC", "COMPANY_INTERNAL"], "guest_tools": ["repo_status"], "trusted_tools": ["repo_status", "benchmark_status"]},

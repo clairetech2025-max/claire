@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import json
+import shutil
+from pathlib import Path
+
+
+def load_manifest(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def should_exclude(path: Path, patterns: list[str]) -> bool:
+    text = path.as_posix()
+    for pattern in patterns:
+        clean = pattern.strip()
+        if not clean:
+            continue
+        if clean.endswith("/"):
+            dirname = clean.rstrip("/")
+            if text == dirname or text.startswith(clean) or dirname in path.parts:
+                return True
+        if fnmatch.fnmatch(text, clean) or fnmatch.fnmatch(path.name, clean):
+            return True
+    return False
+
+
+def copy_source(root: Path, source: str, target: Path, excludes: list[str]) -> None:
+    source_path = Path(source)
+    if not source_path.is_absolute():
+        source_path = root / source_path
+    if not source_path.exists():
+        return
+    relative_name = source_path.name if source_path.is_dir() else source_path.name
+    destination = target / relative_name
+    if source_path.is_file():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination)
+        return
+    for item in source_path.rglob("*"):
+        rel = item.relative_to(root) if item.is_relative_to(root) else item.relative_to(source_path.parent)
+        if should_exclude(rel, excludes):
+            continue
+        dest = target / rel
+        if item.is_dir():
+            dest.mkdir(parents=True, exist_ok=True)
+        elif item.is_file():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, dest)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("manifest", type=Path)
+    parser.add_argument("output", type=Path)
+    args = parser.parse_args()
+
+    root = Path.cwd()
+    manifest = load_manifest(args.manifest)
+    if args.output.exists():
+        shutil.rmtree(args.output)
+    args.output.mkdir(parents=True)
+    for source in manifest["source_paths"]:
+        copy_source(root, source, args.output, manifest.get("exclude", []))
+    (args.output / "deployment.manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+if __name__ == "__main__":
+    main()
