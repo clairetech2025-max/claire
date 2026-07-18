@@ -36,7 +36,7 @@ def copy_source(
 ) -> None:
     source_path = Path(source)
     if not source_path.is_absolute():
-        source_path = root / source_path
+        source_path = (root / source_path).resolve()
     if not source_path.exists():
         return
     destination = target / source_path.name
