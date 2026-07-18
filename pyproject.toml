@@ -9,6 +9,7 @@ description = "Plugin-ready CLAIRE Analog Recall Engine memory module"
 requires-python = ">=3.10"
 dependencies = [
   "fastapi",
+  "python-multipart",
   "uvicorn",
   "pydantic",
   "requests",
