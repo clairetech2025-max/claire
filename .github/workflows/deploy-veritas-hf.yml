@@ -60,6 +60,7 @@ jobs:
         working-directory: claire
         run: |
           python -m pip install -r /tmp/veritas-hf-build/requirements-web.txt
+          cd /tmp/veritas-hf-build
           PYTHONPATH=/tmp/veritas-hf-build:/tmp/veritas-hf-build/web python - <<'PY'
           from fastapi.testclient import TestClient
           import app

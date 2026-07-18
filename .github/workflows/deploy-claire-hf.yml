@@ -46,6 +46,7 @@ jobs:
         working-directory: claire
         run: |
           python -m pip install -r /tmp/claire-hf-build/requirements.txt
+          cd /tmp/claire-hf-build
           PYTHONPATH=/tmp/claire-hf-build python - <<'PY'
           from claire_core.runtime.health import core_health
           import app

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from claire_runtime_truth import RuntimeTruthEvent
 
+APP_DIR = Path(__file__).resolve().parent
 _VERITAS_BUILD_SHA = None
 
 try:
@@ -147,7 +148,8 @@ CLAIRE_GOVERNED_RUNTIME = ClaireRuntime() if ClaireRuntime else None
 
 
 def load_keys_env():
-    env_path = os.environ.get("CLAIRE_KEYS_ENV_PATH", "/home/LuciusPrime/claire/claire_keys.env")
+    configured_path = os.environ.get("CLAIRE_KEYS_ENV_PATH")
+    env_path = configured_path or str(APP_DIR / "claire_keys.env")
     try:
         with open(env_path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
@@ -156,6 +158,9 @@ def load_keys_env():
                     continue
                 key, value = line.split("=", 1)
                 os.environ.setdefault(key.strip(), value.strip())
+    except FileNotFoundError:
+        if configured_path:
+            print("key env load error:", f"missing configured file: {env_path}")
     except Exception as e:
         print("key env load error:", e)
 
@@ -1025,9 +1030,13 @@ except Exception:
 ARE_URL = os.environ.get("ARE_URL", "http://127.0.0.1:8002").rstrip("/")
 LLM_URL = os.environ.get("LLM_URL", "http://127.0.0.1:8080").rstrip("/")
 ARE_SPECTACLE_URL = os.environ.get("ARE_SPECTACLE_URL", "http://127.0.0.1:8010").rstrip("/")
-CLAIRE_RUNTIME_DATA_DIR = Path(os.environ.get("CLAIRE_RUNTIME_DATA_DIR", "/home/LuciusPrime/claire/data")).resolve()
-CLAIRE_STATE_DIR = Path(os.environ.get("CLAIRE_STATE_DIR", "/home/LuciusPrime/claire/claire_state")).resolve()
-CLAIRE_BASE_DIR = Path(os.environ.get("CLAIRE_BASE_DIR", str(Path(__file__).resolve().parent))).resolve()
+CLAIRE_BASE_DIR = Path(os.environ.get("CLAIRE_BASE_DIR", str(APP_DIR))).resolve()
+CLAIRE_RUNTIME_DATA_DIR = Path(
+    os.environ.get("CLAIRE_RUNTIME_DATA_DIR", str(CLAIRE_BASE_DIR / "data"))
+).resolve()
+CLAIRE_STATE_DIR = Path(
+    os.environ.get("CLAIRE_STATE_DIR", str(CLAIRE_BASE_DIR / "claire_state"))
+).resolve()
 REFLECTION_VAULT = str(CLAIRE_RUNTIME_DATA_DIR / "reflection_capsules.jsonl")
 SESSION_MEMORY = str(CLAIRE_RUNTIME_DATA_DIR / "session_memory.jsonl")
 DURABLE_MEMORY = str(CLAIRE_RUNTIME_DATA_DIR / "durable_memory.jsonl")
