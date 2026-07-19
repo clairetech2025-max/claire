@@ -43,3 +43,21 @@ def test_deployment_docs_preserve_azure_and_secret_boundaries() -> None:
     assert "HF_TOKEN" in combined
     assert "Do not expose or print secret values" in combined
     assert "Do not deploy private databases" in combined
+
+
+def test_docs_link_security_history_remediation_runbook() -> None:
+    combined = "\n".join(
+        [
+            read_doc("SECURITY.md"),
+            read_doc("RECOVERY.md"),
+            read_doc("DEPLOYMENT.md"),
+            read_doc("docs/SECURITY_HISTORY_REMEDIATION.md"),
+        ]
+    )
+
+    assert "docs/SECURITY_HISTORY_REMEDIATION.md" in combined
+    assert "Security History Scan" in combined
+    assert "git filter-repo" in combined
+    assert "force-with-lease" in combined
+    assert "rotate credentials" in combined
+    assert "does not" in combined

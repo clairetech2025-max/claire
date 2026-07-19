@@ -56,3 +56,7 @@ rotate credentials, or print secret contents.
 If a real secret appears in Git history, rotate it and remove it from history
 before publishing. Current-tree cleanup alone is not a substitute for rotation
 when a credential may have been exposed.
+
+Use `docs/SECURITY_HISTORY_REMEDIATION.md` for the approved sequence. That
+runbook keeps rotation, history rewrite approval, verification, and aftercare
+separate so remediation does not accidentally damage shared branches or Azure.

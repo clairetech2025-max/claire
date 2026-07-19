@@ -128,3 +128,10 @@ or incorrect mirror and is not a completed recovery.
 Do not restore private legal evidence, live databases, uploaded documents, or
 runtime logs into a public Space. Use sanitized demo data unless a private
 persistent storage plan has been approved.
+
+## Security History Remediation
+
+If source history must be cleaned before a public mirror or recovery release,
+use `docs/SECURITY_HISTORY_REMEDIATION.md`. Do not force-push, rotate
+credentials, or rewrite history from the recovery process unless that runbook's
+approval and verification steps are complete.
