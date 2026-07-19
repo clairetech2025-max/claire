@@ -42,8 +42,10 @@ Rollback source to the preservation branch:
 git switch backup/pre-core-completion-20260718
 ```
 
-Rollback Hugging Face by redeploying the previous known-good Space commit shown
-in the Space commit history. CLAIRE and Veritas roll back independently.
+Rollback Hugging Face by redeploying the previous known-good GitHub source
+revision through the deployment workflows. CLAIRE and Veritas roll back
+independently, and each workflow verifies the deployed `/health` identity before
+it reports success.
 
 Azure is not managed by this repository-level rollback and should be left online
 while it remains available.
@@ -80,7 +82,8 @@ PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_deploy_status.py \
 ```
 
 4. Redeploy through GitHub Actions from an approved commit or tag. Keep CLAIRE
-and Veritas rollback separate.
+and Veritas rollback separate. Use the exact CLAIRE and Veritas source SHAs from
+the last known-good validation or release note.
 
 ```bash
 gh workflow run "Deploy CLAIRE Hugging Face Space" \
@@ -93,11 +96,32 @@ gh workflow run "Deploy Veritas Hugging Face Space" \
   --repo clairetech2025-max/claire \
   --ref main \
   -f ref=<approved-git-ref> \
-  -f veritas_ref=main \
+  -f veritas_ref=<approved-veritas-git-ref> \
   -f space_id=<existing-veritas-space-id>
 ```
 
-5. Verify health, smoke behavior, and the deployed GitHub SHA from each Space.
+5. Verify health, smoke behavior, and deployed source identity from each Space.
+
+```bash
+PATH="$PWD/venv/bin:$PATH" HF_TOKEN=<set-in-shell-without-printing> \
+  venv/bin/python scripts/deploy/hf_wait_for_space.py \
+  deploy/huggingface/claire.manifest.json \
+  --expected-source-sha <approved-claire-sha> \
+  --expected-source-ref <approved-claire-ref>
+
+PATH="$PWD/venv/bin:$PATH" HF_TOKEN=<set-in-shell-without-printing> \
+  HF_SPACE_ID=<existing-veritas-space-id> \
+  venv/bin/python scripts/deploy/hf_wait_for_space.py \
+  deploy/huggingface/veritas.manifest.json \
+  --expected-source-sha <approved-claire-sha> \
+  --expected-source-ref <approved-claire-ref> \
+  --expected-included-source-sha <approved-veritas-sha>
+```
+
+The health response must include `deployment.source_git_sha` for the CLAIRE
+wrapper and, for Veritas, `deployment.included_sources[*].source_git_sha` for
+the Veritas app package. A healthy HTTP response with the wrong SHA is a stale
+or incorrect mirror and is not a completed recovery.
 
 Do not restore private legal evidence, live databases, uploaded documents, or
 runtime logs into a public Space. Use sanitized demo data unless a private

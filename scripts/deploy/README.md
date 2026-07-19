@@ -3,6 +3,8 @@
 Build a Space-specific deployment tree from a manifest:
 
 ```bash
+export CLAIRE_SOURCE_SHA="$(git rev-parse HEAD)"
+export CLAIRE_SOURCE_REF="$(git branch --show-current)"
 venv/bin/python scripts/deploy/build_hf_tree.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build
 venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-build
 venv/bin/python scripts/deploy/preflight_hf_space.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build --skip-remote
@@ -54,12 +56,22 @@ After upload, wait for runtime and health:
 
 ```bash
 PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_wait_for_space.py \
-  deploy/huggingface/claire.manifest.json
+  deploy/huggingface/claire.manifest.json \
+  --expected-source-sha "$CLAIRE_SOURCE_SHA" \
+  --expected-source-ref "$CLAIRE_SOURCE_REF"
 
 PATH="$PWD/venv/bin:$PATH" HF_SPACE_ID=<existing-veritas-space-id> \
   venv/bin/python scripts/deploy/hf_wait_for_space.py \
-  deploy/huggingface/veritas.manifest.json
+  deploy/huggingface/veritas.manifest.json \
+  --expected-source-sha "$CLAIRE_SOURCE_SHA" \
+  --expected-source-ref "$CLAIRE_SOURCE_REF" \
+  --expected-included-source-sha <veritas-source-sha>
 ```
+
+The wait script treats a stale deployment as a failure. The Space must expose a
+`deployment` object from `/health` whose `source_git_sha` and `source_git_ref`
+match the approved CLAIRE checkout. Veritas must also expose the included
+Veritas app SHA in `deployment.included_sources`.
 
 GitHub Actions workflows are also available:
 
@@ -68,6 +80,8 @@ GitHub Actions workflows are also available:
 
 Both workflows require the repository secret `HF_TOKEN`. The Veritas workflow
 also requires the existing Veritas Space ID as a manual workflow input.
+The workflows capture the actual checked-out source SHAs, upload those packaged
+trees, then require the Space health endpoint to report the same SHAs.
 
 Do not deploy private databases, uploaded legal evidence, model files, live `.env`
 files, or Azure-only configuration.

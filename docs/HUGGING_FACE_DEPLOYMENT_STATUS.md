@@ -1,14 +1,17 @@
 # Hugging Face Deployment Status
 
-Generated: 2026-07-19T04:54:26Z
+Generated: 2026-07-19T05:15:00Z
 
 ## GitHub Source
 
 - Repository: `https://github.com/clairetech2025-max/claire`
 - Branch: `main`
-- Main merge SHA: `da56a2ac46d1d513b33d3694d8288fedd233e10e`
+- Current main SHA: `2d9afc999d46f7ab18be2fd0f085fd4b15f7aaed`
+- Last package source SHA verified by GitHub Actions: `2d9afc999d46f7ab18be2fd0f085fd4b15f7aaed`
+- Last Veritas source SHA verified in package: `abf568ce0b1b28631775278e164b5edc5a109626`
+- Prior main merge SHA: `da56a2ac46d1d513b33d3694d8288fedd233e10e`
 - Last package source SHA verified after PR #4 merge: `9dded264deb1b6b3b77dfe025ae1c2b0d3986280`
-- Last Veritas source SHA verified in package: `fb8dc7620fe25735d6c7521481df9febff485e7f`
+- Prior Veritas source SHA verified in package: `fb8dc7620fe25735d6c7521481df9febff485e7f`
 - Prior main merge SHA: `7e724c8752218672a3238f14d83019c1717efc2e`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
@@ -62,6 +65,25 @@ Veritas Space:
 4. The available Hugging Face connector can inspect repos and search Spaces, but does not expose a file upload/deploy command.
 5. The existing Veritas Hugging Face Space ID has not been confirmed.
 
+## Deployed Source Identity Gate
+
+CLAIRE and Veritas deployment packages include `deployment.identity.json`.
+The application health endpoints expose that identity as a safe `deployment`
+object. The deployment workflows pass only when `scripts/deploy/hf_wait_for_space.py`
+confirms the running Space reports the expected approved source.
+
+Required post-deploy checks:
+
+- CLAIRE: `/health` must report `deployment.source_git_sha` matching the
+  checked-out CLAIRE source SHA and `deployment.source_git_ref` matching the
+  checked-out CLAIRE source ref.
+- Veritas: `/health` must report the same CLAIRE wrapper SHA/ref and must also
+  include the checked-out Veritas app SHA in
+  `deployment.included_sources[*].source_git_sha`.
+
+This prevents a stale Space from passing merely because its health endpoint
+returns HTTP 200.
+
 ## Upload Preflight
 
 The upload helper runs `scripts/deploy/preflight_hf_space.py` before `hf upload`.
@@ -103,6 +125,8 @@ Gradio Space and the prepared full-runtime package is Docker.
 - Main CLAIRE Hugging Face package validation passed.
 - Main Veritas Hugging Face package validation passed.
 - GitHub Actions workflows are active on `main`.
+- `Validate Hugging Face Packages` passed automatically on push for source-identity deployment gating on `2d9afc999d46f7ab18be2fd0f085fd4b15f7aaed`.
+- Validation run: `https://github.com/clairetech2025-max/claire/actions/runs/29674350823`
 - `Validate Hugging Face Packages` passed automatically on push for both CLAIRE and Veritas on `9dded264deb1b6b3b77dfe025ae1c2b0d3986280`.
 - Validation run: `https://github.com/clairetech2025-max/claire/actions/runs/29674009409`
 - Prior failed validation on `1c3ecfaaec23c018618e41a73e0d7acf224eefd1` exposed an invalid CLAIRE smoke-test dependency assumption; fixed by `9dded264deb1b6b3b77dfe025ae1c2b0d3986280`.

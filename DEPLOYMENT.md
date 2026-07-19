@@ -21,21 +21,28 @@ Space-specific manifests live in `deploy/huggingface/`.
 Build a sanitized CLAIRE deployment tree:
 
 ```bash
+export CLAIRE_SOURCE_SHA="$(git rev-parse HEAD)"
+export CLAIRE_SOURCE_REF="$(git branch --show-current)"
 venv/bin/python scripts/deploy/build_hf_tree.py \
   deploy/huggingface/claire.manifest.json \
   /tmp/claire-hf-build
+venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-build
 ```
 
 Build a sanitized Veritas deployment tree after the Veritas Space ID is confirmed:
 
 ```bash
+export CLAIRE_SOURCE_SHA="$(git rev-parse HEAD)"
+export CLAIRE_SOURCE_REF="$(git branch --show-current)"
 venv/bin/python scripts/deploy/build_hf_tree.py \
   deploy/huggingface/veritas.manifest.json \
   /tmp/veritas-hf-build
+venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/veritas-hf-build
 ```
 
 The build script excludes credentials, databases, uploads, logs, model weights,
-indexes, caches, and private evidence by default.
+indexes, caches, and private evidence by default. It also writes
+`deployment.identity.json`, which is exposed by each app's `/health` endpoint.
 
 Check local package readiness without contacting Hugging Face:
 
@@ -49,6 +56,23 @@ PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_deploy_status.py \
 
 Before upload, run the same command without `--skip-remote`. It must pass with
 Hugging Face authentication available and with the exact Veritas Space ID.
+
+After upload, the health wait must prove the Space is running the approved
+source revision, not merely returning HTTP 200:
+
+```bash
+PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_wait_for_space.py \
+  deploy/huggingface/claire.manifest.json \
+  --expected-source-sha "$CLAIRE_SOURCE_SHA" \
+  --expected-source-ref "$CLAIRE_SOURCE_REF"
+
+PATH="$PWD/venv/bin:$PATH" HF_SPACE_ID=<existing-veritas-space-id> \
+  venv/bin/python scripts/deploy/hf_wait_for_space.py \
+  deploy/huggingface/veritas.manifest.json \
+  --expected-source-sha "$CLAIRE_SOURCE_SHA" \
+  --expected-source-ref "$CLAIRE_SOURCE_REF" \
+  --expected-included-source-sha <veritas-source-sha>
+```
 
 ## GitHub Actions Deployment
 
@@ -92,7 +116,9 @@ gh workflow run "Deploy Veritas Hugging Face Space" \
 ```
 
 After either deployment, inspect the run and the Space health endpoint before
-calling the mirror operational.
+calling the mirror operational. The deploy workflows fail if `/health` reports a
+different `deployment.source_git_sha`, `deployment.source_git_ref`, or, for
+Veritas, an included Veritas SHA mismatch.
 
 ## Required Secret And Variable Names
 
@@ -118,6 +144,10 @@ Do not expose or print secret values in health endpoints, logs, or UI output.
 
 Deploy CLAIRE and Veritas independently. A failed Hugging Face deployment must not
 change Azure.
+
+The GitHub workflow `--ref` selects the workflow file revision. The `ref` and
+`veritas_ref` workflow inputs select the application source revisions to package.
+The workflows capture those checked-out SHAs and verify them after deployment.
 
 Do not create a new Veritas Space unless the existing Space is proven unusable or
 unavailable. Public discovery currently confirms
