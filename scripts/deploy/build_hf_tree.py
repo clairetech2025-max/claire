@@ -71,8 +71,8 @@ def included_source_identities(manifest: dict) -> list[dict]:
 
 
 def deployment_identity(manifest: dict) -> dict:
-    source_sha = os.getenv("GITHUB_SHA") or git_value(["rev-parse", "HEAD"])
-    source_ref = os.getenv("GITHUB_REF_NAME") or git_value(["branch", "--show-current"])
+    source_sha = os.getenv("CLAIRE_SOURCE_SHA") or os.getenv("GITHUB_SHA") or git_value(["rev-parse", "HEAD"])
+    source_ref = os.getenv("CLAIRE_SOURCE_REF") or os.getenv("GITHUB_REF_NAME") or git_value(["branch", "--show-current"])
     return {
         "schema_version": "claire-hf-deployment-identity.v1",
         "application": manifest.get("application") or "unknown",

@@ -73,7 +73,69 @@ def wait_for_running(space_id: str, *, timeout_seconds: int, interval_seconds: i
         time.sleep(interval_seconds)
 
 
-def wait_for_health(url: str, *, timeout_seconds: int, interval_seconds: int) -> dict[str, object]:
+def parse_health_body(body: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def included_source_matches(deployment: dict[str, Any], expected_sha: str) -> bool:
+    expected = expected_sha.strip()
+    if not expected:
+        return True
+    included = deployment.get("included_sources")
+    if not isinstance(included, list):
+        return False
+    for item in included:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("source_git_sha") or "").strip() == expected:
+            return True
+    return False
+
+
+def validate_deployment_identity(
+    health_payload: dict[str, Any],
+    *,
+    expected_source_sha: str = "",
+    expected_source_ref: str = "",
+    expected_included_source_sha: str = "",
+) -> dict[str, Any]:
+    deployment = health_payload.get("deployment")
+    if not isinstance(deployment, dict):
+        deployment = {}
+    expected_source_sha = expected_source_sha.strip()
+    expected_source_ref = expected_source_ref.strip()
+    expected_included_source_sha = expected_included_source_sha.strip()
+    if expected_source_sha and str(deployment.get("source_git_sha") or "").strip() != expected_source_sha:
+        raise RuntimeError(
+            "Health endpoint is running a different source SHA: "
+            f"expected={expected_source_sha} actual={deployment.get('source_git_sha') or 'missing'}"
+        )
+    if expected_source_ref and str(deployment.get("source_git_ref") or "").strip() != expected_source_ref:
+        raise RuntimeError(
+            "Health endpoint is running a different source ref: "
+            f"expected={expected_source_ref} actual={deployment.get('source_git_ref') or 'missing'}"
+        )
+    if expected_included_source_sha and not included_source_matches(deployment, expected_included_source_sha):
+        raise RuntimeError(
+            "Health endpoint is missing expected included source SHA: "
+            f"expected={expected_included_source_sha}"
+        )
+    return deployment
+
+
+def wait_for_health(
+    url: str,
+    *,
+    timeout_seconds: int,
+    interval_seconds: int,
+    expected_source_sha: str = "",
+    expected_source_ref: str = "",
+    expected_included_source_sha: str = "",
+) -> dict[str, object]:
     deadline = time.monotonic() + timeout_seconds
     attempts = 0
     last_status = 0
@@ -85,10 +147,18 @@ def wait_for_health(url: str, *, timeout_seconds: int, interval_seconds: int) ->
         last_status = status
         last_body = body[:500]
         if 200 <= status < 400:
+            payload = parse_health_body(body)
+            deployment = validate_deployment_identity(
+                payload,
+                expected_source_sha=expected_source_sha,
+                expected_source_ref=expected_source_ref,
+                expected_included_source_sha=expected_included_source_sha,
+            )
             return {
                 "url": url,
                 "status": status,
                 "attempts": attempts,
+                "deployment": deployment,
             }
         if time.monotonic() >= deadline:
             raise TimeoutError(
@@ -104,6 +174,13 @@ def main() -> int:
     parser.add_argument("--space-id", default="", help="Override manifest space_id for this check.")
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--interval", type=int, default=15)
+    parser.add_argument("--expected-source-sha", default="", help="Require health deployment.source_git_sha to match this SHA.")
+    parser.add_argument("--expected-source-ref", default="", help="Require health deployment.source_git_ref to match this ref.")
+    parser.add_argument(
+        "--expected-included-source-sha",
+        default="",
+        help="Require health deployment.included_sources to contain this source_git_sha.",
+    )
     args = parser.parse_args()
 
     manifest = preflight_hf_space.load_manifest(args.manifest)
@@ -126,6 +203,9 @@ def main() -> int:
             health_url(str(runtime["host"]), endpoint),
             timeout_seconds=args.timeout,
             interval_seconds=args.interval,
+            expected_source_sha=args.expected_source_sha,
+            expected_source_ref=args.expected_source_ref,
+            expected_included_source_sha=args.expected_included_source_sha,
         )
     except (RuntimeError, TimeoutError) as exc:
         print(str(exc), file=sys.stderr)

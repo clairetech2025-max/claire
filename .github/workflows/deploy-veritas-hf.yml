@@ -44,6 +44,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Capture source revisions
+        working-directory: claire
+        run: |
+          echo "CLAIRE_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "CLAIRE_SOURCE_REF=${{ inputs.ref }}" >> "$GITHUB_ENV"
+          echo "VERITAS_SOURCE_SHA=$(git -C ../claire_repos/claire-veritas-legal rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "VERITAS_SOURCE_REF=${{ inputs.veritas_ref }}" >> "$GITHUB_ENV"
+
       - name: Install deployment dependencies
         working-directory: claire
         run: |
@@ -83,7 +91,7 @@ jobs:
           PATH="$HOME/.local/bin:$PATH" scripts/deploy/upload_hf_space.sh \
             deploy/huggingface/veritas.manifest.json \
             /tmp/veritas-hf-build \
-            "Deploy Veritas mirror from GitHub ${GITHUB_SHA}"
+            "Deploy Veritas mirror from GitHub ${CLAIRE_SOURCE_SHA} / Veritas ${VERITAS_SOURCE_SHA}"
 
       - name: Wait for Space health
         working-directory: claire
@@ -94,4 +102,7 @@ jobs:
           PATH="$HOME/.local/bin:$PATH" python scripts/deploy/hf_wait_for_space.py \
             deploy/huggingface/veritas.manifest.json \
             --timeout 900 \
-            --interval 15
+            --interval 15 \
+            --expected-source-sha "${CLAIRE_SOURCE_SHA}" \
+            --expected-source-ref "${CLAIRE_SOURCE_REF}" \
+            --expected-included-source-sha "${VERITAS_SOURCE_SHA}"

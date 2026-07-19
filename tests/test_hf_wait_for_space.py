@@ -53,7 +53,11 @@ def test_wait_reports_running_space_and_health(tmp_path: Path, monkeypatch, caps
             "runtime": {"stage": "RUNNING", "hardware": "cpu-basic"},
         },
     )
-    monkeypatch.setattr(hf_wait_for_space, "http_get_json_or_text", lambda url: (200, '{"ok": true}'))
+    monkeypatch.setattr(
+        hf_wait_for_space,
+        "http_get_json_or_text",
+        lambda url: (200, '{"ok": true, "deployment": {"source_git_sha": "src123"}}'),
+    )
 
     result = run_wait(monkeypatch, manifest)
 
@@ -62,6 +66,101 @@ def test_wait_reports_running_space_and_health(tmp_path: Path, monkeypatch, caps
     assert payload["ok"] is True
     assert payload["runtime"]["runtime_stage"] == "RUNNING"
     assert payload["health"]["url"] == "https://test.hf.space/health"
+    assert payload["health"]["deployment"]["source_git_sha"] == "src123"
+
+
+def test_wait_can_require_expected_source_sha(tmp_path: Path, monkeypatch, capsys) -> None:
+    manifest = tmp_path / "manifest.json"
+    write_manifest(manifest)
+    monkeypatch.setattr(preflight_hf_space, "token_available", lambda: True)
+    monkeypatch.setattr(
+        preflight_hf_space,
+        "hub_get",
+        lambda path: {
+            "id": "Blackstormhorse/Test",
+            "sha": "abc123",
+            "host": "https://test.hf.space",
+            "sdk": "docker",
+            "runtime": {"stage": "RUNNING", "hardware": "cpu-basic"},
+        },
+    )
+    monkeypatch.setattr(
+        hf_wait_for_space,
+        "http_get_json_or_text",
+        lambda url: (200, '{"ok": true, "deployment": {"source_git_sha": "src123"}}'),
+    )
+
+    result = run_wait(monkeypatch, manifest, "--expected-source-sha", "src123")
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert payload["health"]["deployment"]["source_git_sha"] == "src123"
+
+
+def test_wait_rejects_stale_source_sha(tmp_path: Path, monkeypatch, capsys) -> None:
+    manifest = tmp_path / "manifest.json"
+    write_manifest(manifest)
+    monkeypatch.setattr(preflight_hf_space, "token_available", lambda: True)
+    monkeypatch.setattr(
+        preflight_hf_space,
+        "hub_get",
+        lambda path: {
+            "id": "Blackstormhorse/Test",
+            "sha": "abc123",
+            "host": "https://test.hf.space",
+            "sdk": "docker",
+            "runtime": {"stage": "RUNNING", "hardware": "cpu-basic"},
+        },
+    )
+    monkeypatch.setattr(
+        hf_wait_for_space,
+        "http_get_json_or_text",
+        lambda url: (200, '{"ok": true, "deployment": {"source_git_sha": "old456"}}'),
+    )
+
+    result = run_wait(monkeypatch, manifest, "--expected-source-sha", "src123")
+
+    assert result == 1
+    assert "different source SHA" in capsys.readouterr().err
+
+
+def test_wait_can_require_included_source_sha(tmp_path: Path, monkeypatch, capsys) -> None:
+    manifest = tmp_path / "manifest.json"
+    write_manifest(manifest)
+    monkeypatch.setattr(preflight_hf_space, "token_available", lambda: True)
+    monkeypatch.setattr(
+        preflight_hf_space,
+        "hub_get",
+        lambda path: {
+            "id": "Blackstormhorse/Test",
+            "sha": "abc123",
+            "host": "https://test.hf.space",
+            "sdk": "docker",
+            "runtime": {"stage": "RUNNING", "hardware": "cpu-basic"},
+        },
+    )
+    monkeypatch.setattr(
+        hf_wait_for_space,
+        "http_get_json_or_text",
+        lambda url: (
+            200,
+            json.dumps(
+                {
+                    "ok": True,
+                    "deployment": {
+                        "source_git_sha": "claire123",
+                        "included_sources": [{"name": "veritas", "source_git_sha": "veritas456"}],
+                    },
+                }
+            ),
+        ),
+    )
+
+    result = run_wait(monkeypatch, manifest, "--expected-included-source-sha", "veritas456")
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert payload["health"]["deployment"]["included_sources"][0]["source_git_sha"] == "veritas456"
 
 
 def test_wait_fails_without_auth(tmp_path: Path, monkeypatch, capsys) -> None:
