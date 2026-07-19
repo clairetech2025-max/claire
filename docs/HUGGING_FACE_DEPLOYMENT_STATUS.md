@@ -164,6 +164,7 @@ PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
 Workflows:
 
 - `.github/workflows/security-source-scan.yml`
+- `.github/workflows/security-history-scan.yml`
 - `.github/workflows/hf-deployment-readiness.yml`
 - `.github/workflows/deploy-claire-hf.yml`
 - `.github/workflows/deploy-veritas-hf.yml`
@@ -191,6 +192,27 @@ indexes. The current tree has been sanitized for the prior Azure sync placeholde
 file, but Git history still contains the old value and should be treated as
 requiring rotation/history remediation before claiming a fully clean repository
 history.
+
+Run `.github/workflows/security-history-scan.yml` for a redacted history report.
+It checks full Git history and reports commit/path/line findings without
+printing secret contents. It is intentionally report-only because actual
+history rewriting and credential rotation require explicit approval and
+coordination for shared branches.
+
+Latest local redacted history scan findings:
+
+- `3e6ad3f34d8cc06c5363e0d803d5b59bf67bdea5:tests/test_security_scan.py:20`
+  reported `openai_api_key` from a short-lived scanner fixture literal.
+- `3e6ad3f34d8cc06c5363e0d803d5b59bf67bdea5:tests/test_security_scan.py:21`
+  reported `huggingface_token` from a short-lived scanner fixture literal.
+- `3e6ad3f34d8cc06c5363e0d803d5b59bf67bdea5:tests/test_security_scan.py:22`
+  reported `github_token` from a short-lived scanner fixture literal.
+- `3e6ad3f34d8cc06c5363e0d803d5b59bf67bdea5:tests/test_security_scan.py:24`
+  reported `azure_connection_string` from a short-lived scanner fixture literal.
+- `3e6ad3f34d8cc06c5363e0d803d5b59bf67bdea5:tests/test_security_scan.py:27`
+  reported `private_key` from a short-lived scanner fixture literal.
+- `3648607d1418cf777e66faf008744760d39b83ef:claire_azure_sync.py:1`
+  reported `azure_connection_string` from the removed Azure sync placeholder.
 
 ## Validation Commands
 

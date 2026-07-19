@@ -1,0 +1,37 @@
+name: Security History Scan
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan-history:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Scan Git history
+        run: python scripts/security_history_scan.py --json --report-only | tee /tmp/security-history-scan.json
+
+      - name: Write scan summary
+        run: |
+          {
+            echo "## Security History Scan"
+            echo
+            echo "This workflow reports history findings without printing secret values."
+            echo "It is report-only because remediation may require rotation and an approved history rewrite."
+            echo
+            echo '```json'
+            cat /tmp/security-history-scan.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

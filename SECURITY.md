@@ -42,6 +42,17 @@ values, private keys, Azure connection strings, database files, logs, uploads,
 evidence folders, indexes, and other private runtime artifacts in tracked
 source.
 
+Scan Git history without printing secret values:
+
+```bash
+python scripts/security_history_scan.py --json
+```
+
+GitHub also provides the manual report-only workflow
+`.github/workflows/security-history-scan.yml`. It checks full history and writes
+commit/path/line findings to the run summary. It does not rewrite history,
+rotate credentials, or print secret contents.
+
 If a real secret appears in Git history, rotate it and remove it from history
 before publishing. Current-tree cleanup alone is not a substitute for rotation
 when a credential may have been exposed.

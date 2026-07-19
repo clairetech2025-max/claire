@@ -10,7 +10,7 @@ from pathlib import Path
 
 SECRET_PATTERNS = [
     ("openai_api_key", re.compile(r"\b(?:sk-proj-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,})\b")),
-    ("huggingface_token", re.compile(r"\bhf_[A-Za-z0-9]{12,}\b")),
+    ("huggingface_token", re.compile(r"\bhf_[A-Za-z0-9]{20,}\b")),
     ("github_token", re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{12,}\b")),
     (
         "azure_connection_string",

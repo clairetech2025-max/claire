@@ -103,6 +103,14 @@ gh workflow run "Security Source Scan" \
   --ref main
 ```
 
+Run the report-only history scan before claiming the repository is fully clean:
+
+```bash
+gh workflow run "Security History Scan" \
+  --repo clairetech2025-max/claire \
+  --ref main
+```
+
 Run the non-upload readiness workflow before either deploy workflow:
 
 ```bash

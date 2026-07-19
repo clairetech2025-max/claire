@@ -88,3 +88,13 @@ def test_security_source_scan_workflow_runs_tracked_source_scanner() -> None:
     assert "workflow_dispatch:" in workflow
     assert "python scripts/security_scan.py" in workflow
     assert "upload_hf_space.sh" not in workflow
+
+
+def test_security_history_scan_workflow_is_manual_report_only() -> None:
+    workflow = read_workflow("security-history-scan.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "push:" not in workflow
+    assert "fetch-depth: 0" in workflow
+    assert "python scripts/security_history_scan.py --json --report-only" in workflow
+    assert "upload_hf_space.sh" not in workflow
