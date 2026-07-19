@@ -1,12 +1,14 @@
 # Hugging Face Deployment Status
 
-Generated: 2026-07-19T04:13:44Z
+Generated: 2026-07-19
 
 ## GitHub Source
 
 - Repository: `https://github.com/clairetech2025-max/claire`
-- Branch: `codex/claire-core-completion-20260718`
-- Last package source SHA verified: `d7e4bff092585b8224d6724dd67db73fcdcdc566`
+- Working branch: `codex/claire-core-completion-20260718`
+- Merged upstream baseline: `origin/main` at `1c5022ec7e6ccde694f8f60a4e61e4b6b6fa3a6f`
+- Last package source SHA verified before merge refresh: `8ff33fc370c5fb2f8443cd13c4a582a61bfacc77`
+- Prior main merge SHA: `7e724c8752218672a3238f14d83019c1717efc2e`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
 
@@ -17,18 +19,18 @@ CLAIRE package:
 - Manifest: `deploy/huggingface/claire.manifest.json`
 - Build tree: `/tmp/claire-hf-build-clean`
 - Archive: `/tmp/claire-hf-build-clean.tar.gz`
-- SHA-256: `7b0d826874d0d93f5ffbafb241a4a3f741886ae78b5ca6ae6b69d3717b50d614`
-- Validation: passed
-- Import smoke: `app.app` imports and `claire_core.runtime.health.core_health()` reports `AVAILABLE`
+- SHA-256: pending refresh after the current merge commit is finalized
+- Validation: passed before merge refresh; rerun required after merge resolution
+- Import smoke: `app.app` imports and `claire_core.runtime.health.core_health()` reports `AVAILABLE` before merge refresh
 
 Veritas package:
 
 - Manifest: `deploy/huggingface/veritas.manifest.json`
 - Build tree: `/tmp/veritas-hf-build-clean`
 - Archive: `/tmp/veritas-hf-build-clean.tar.gz`
-- SHA-256: `13f393ce6896a9717d35070c7fa950270c57cd8bca103c95bcdb9676049a5138`
-- Validation: passed
-- Import smoke: FastAPI `/health` returns HTTP 200
+- SHA-256: pending refresh after the current merge commit is finalized
+- Validation: passed before merge refresh; rerun required after merge resolution
+- Import smoke: FastAPI `/health` returns HTTP 200 before merge refresh
 
 ## Existing Spaces
 
@@ -53,16 +55,16 @@ Veritas Space:
 ## Current Deployment Blockers
 
 1. Local Hugging Face CLI is not authenticated: `venv/bin/hf auth whoami` returns `Error: Not logged in`.
-2. The existing CLAIRE Space is currently a Gradio Space, while the full runtime package is Docker. The transition is technically packaged but should be explicitly approved before upload.
-3. The available Hugging Face connector can inspect repos and search Spaces, but does not expose a file upload/deploy command.
-4. The existing Veritas Hugging Face Space ID has not been confirmed.
+2. GitHub repository secret `HF_TOKEN` is not confirmed/configured for upload completion.
+3. The existing CLAIRE Space is currently a Gradio Space, while the full runtime package is Docker. The transition is technically packaged but requires explicit approval before upload.
+4. The available Hugging Face connector can inspect repos and search Spaces, but does not expose a file upload/deploy command.
+5. The existing Veritas Hugging Face Space ID has not been confirmed.
 
 ## Upload Preflight
 
-The upload helper now runs `scripts/deploy/preflight_hf_space.py` before
-`hf upload`.
+The upload helper runs `scripts/deploy/preflight_hf_space.py` before `hf upload`.
 
-Verified local package preflight:
+Verified local package preflight commands:
 
 ```bash
 venv/bin/python scripts/deploy/preflight_hf_space.py \
@@ -77,8 +79,7 @@ HF_SPACE_ID=Blackstormhorse/VERITAS_PLACEHOLDER \
   --skip-remote
 ```
 
-The full remote preflight intentionally fails in the current local environment
-with:
+The full remote preflight intentionally fails in the current local environment with:
 
 ```text
 Hugging Face authentication unavailable; set HF_TOKEN or run `hf auth login`.
@@ -86,11 +87,20 @@ Hugging Face authentication unavailable; set HF_TOKEN or run `hf auth login`.
 
 When authenticated, the preflight also inspects the existing Space and refuses
 SDK/runtime-mode transitions unless `HF_APPROVE_SDK_TRANSITION=true` is set.
-For GitHub Actions, this is exposed as the manual
-`approve_sdk_transition` workflow-dispatch input on
-`.github/workflows/deploy-claire-hf.yml`. This is currently relevant because
-`Blackstormhorse/CLAIRE_Control_Interface` is a Gradio Space and the prepared
-full-runtime package is Docker.
+For GitHub Actions, this is exposed as the manual `approve_sdk_transition`
+workflow-dispatch input on `.github/workflows/deploy-claire-hf.yml`. This is
+currently relevant because `Blackstormhorse/CLAIRE_Control_Interface` is a
+Gradio Space and the prepared full-runtime package is Docker.
+
+## Post-Merge Verification History
+
+- PR #3 was merged into `main` before this branch's latest preflight work.
+- Main validation from a clean worktree passed: `117 passed, 1 skipped`.
+- Main CLAIRE Hugging Face package validation passed.
+- Main Veritas Hugging Face package validation passed.
+- GitHub Actions workflows are active on `main`.
+- `Validate Hugging Face Packages` passed for both CLAIRE and Veritas.
+- `Deploy CLAIRE Hugging Face Space` was manually dispatched from `main`; it passed checkout, build, package validation, and smoke import, then stopped at the explicit `HF_TOKEN secret is required` gate.
 
 ## Upload Commands
 
@@ -123,6 +133,8 @@ Required GitHub secret:
 
 - `HF_TOKEN`
 
+The CLAIRE workflow additionally requires the manual `approve_sdk_transition`
+input before replacing the existing Gradio Space with the packaged Docker runtime.
 The Veritas workflow additionally requires the exact existing Veritas Space ID
 as a manual workflow input. This avoids committing an unverified or private
 Space ID to source.
@@ -130,11 +142,13 @@ Space ID to source.
 ## Validation Commands
 
 ```bash
-venv/bin/python scripts/deploy/build_hf_tree.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build
-venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-build
+venv/bin/python scripts/deploy/build_hf_tree.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build-clean
+venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-build-clean
+venv/bin/python scripts/deploy/preflight_hf_space.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build-clean --skip-remote
 
-venv/bin/python scripts/deploy/build_hf_tree.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build
-venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/veritas-hf-build
+venv/bin/python scripts/deploy/build_hf_tree.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build-clean
+venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/veritas-hf-build-clean
+HF_SPACE_ID=<existing-veritas-space-id> venv/bin/python scripts/deploy/preflight_hf_space.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build-clean --skip-remote
 ```
 
 ## Guardrails
