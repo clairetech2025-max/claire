@@ -1,3 +1,5 @@
+//go:build standalone
+
 package main
 import (
     "io"; "net/http"; "os"; "log"
