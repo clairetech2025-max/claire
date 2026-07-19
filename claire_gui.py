@@ -23,6 +23,7 @@ from claire_runtime_truth import RuntimeTruthEvent
 
 APP_DIR = Path(__file__).resolve().parent
 _VERITAS_BUILD_SHA = None
+_DEPLOYMENT_IDENTITY = None
 
 try:
     from claire_odyssey_mind import load_claire_mind_text
@@ -73,6 +74,29 @@ def _veritas_build_sha() -> str:
     except Exception:
         _VERITAS_BUILD_SHA = "unknown"
     return _VERITAS_BUILD_SHA
+
+
+def deployment_identity() -> dict:
+    global _DEPLOYMENT_IDENTITY
+    if _DEPLOYMENT_IDENTITY is not None:
+        return dict(_DEPLOYMENT_IDENTITY)
+    identity_path = APP_DIR / "deployment.identity.json"
+    try:
+        raw = json.loads(identity_path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raw = {}
+    except Exception:
+        raw = {}
+    _DEPLOYMENT_IDENTITY = {
+        "application": raw.get("application") or "CLAIRE",
+        "source_repository": raw.get("source_repository") or os.getenv("GITHUB_REPOSITORY", ""),
+        "source_git_sha": raw.get("source_git_sha") or os.getenv("GITHUB_SHA", ""),
+        "source_git_ref": raw.get("source_git_ref") or os.getenv("GITHUB_REF_NAME", ""),
+        "included_sources": raw.get("included_sources") if isinstance(raw.get("included_sources"), list) else [],
+        "build_timestamp_utc": raw.get("build_timestamp_utc") or "",
+        "space_id": raw.get("space_id") or "",
+    }
+    return dict(_DEPLOYMENT_IDENTITY)
 
 try:
     from claire_scholar import is_scholar_query, scholar_reply
@@ -16915,7 +16939,7 @@ _public_demo_init()
 @app.get("/health")
 def public_demo_health():
     service_name = "Claire Runtime Full" if not PUBLIC_DEMO_BUILD else "Claire Public Demo"
-    return JSONResponse({"status": "ok", "service": service_name})
+    return JSONResponse({"status": "ok", "service": service_name, "deployment": deployment_identity()})
 
 
 @app.get("/machine/trace/{trace_id}")

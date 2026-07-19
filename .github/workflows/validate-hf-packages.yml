@@ -67,6 +67,10 @@ jobs:
 
           assert app.app is not None
           assert core_health()["status"] == "AVAILABLE"
+          from fastapi.testclient import TestClient
+          response = TestClient(app.app).get("/health")
+          assert response.status_code == 200, response.text
+          assert response.json()["deployment"]["source_git_sha"]
           PY
 
   validate-veritas:
@@ -111,4 +115,7 @@ jobs:
 
           response = TestClient(app.app).get("/health")
           assert response.status_code == 200, response.text
+          payload = response.json()
+          assert payload["deployment"]["source_git_sha"]
+          assert payload["deployment"]["included_sources"]
           PY
