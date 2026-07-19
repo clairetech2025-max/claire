@@ -78,7 +78,9 @@ venv/bin/python scripts/deploy/build_hf_tree.py deploy/huggingface/veritas.manif
 PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_deploy_status.py \
   --target deploy/huggingface/claire.manifest.json /tmp/claire-hf-build \
   --target deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build \
-  --space-id veritas.manifest.json=<existing-veritas-space-id>
+  --space-id veritas.manifest.json=<existing-veritas-space-id> \
+  --github-repo clairetech2025-max/claire \
+  --require-github-secret HF_TOKEN
 ```
 
 4. Redeploy through GitHub Actions from an approved commit or tag. Keep CLAIRE

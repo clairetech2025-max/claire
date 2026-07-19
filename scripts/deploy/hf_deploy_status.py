@@ -60,6 +60,70 @@ def hf_auth_status() -> dict[str, object]:
     }
 
 
+def github_secret_status(repo: str, required_secrets: list[str]) -> dict[str, object]:
+    required = [secret.strip() for secret in required_secrets if secret.strip()]
+    if not repo:
+        return {
+            "checked": False,
+            "reason": "GitHub repository not provided",
+            "required_secrets": required,
+            "missing_secrets": required,
+        }
+    if not required:
+        return {
+            "checked": False,
+            "reason": "no required GitHub secrets requested",
+            "repo": repo,
+            "required_secrets": [],
+            "missing_secrets": [],
+        }
+    if not command_available("gh"):
+        return {
+            "checked": False,
+            "reason": "gh CLI unavailable",
+            "repo": repo,
+            "required_secrets": required,
+            "missing_secrets": required,
+        }
+    try:
+        result = subprocess.run(
+            ["gh", "secret", "list", "--repo", repo],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "checked": False,
+            "reason": str(exc),
+            "repo": repo,
+            "required_secrets": required,
+            "missing_secrets": required,
+        }
+    if result.returncode != 0:
+        return {
+            "checked": False,
+            "reason": (result.stderr or result.stdout).strip() or "gh secret list failed",
+            "repo": repo,
+            "required_secrets": required,
+            "missing_secrets": required,
+        }
+    present = {
+        line.split()[0].strip()
+        for line in (result.stdout or "").splitlines()
+        if line.strip()
+    }
+    missing = [secret for secret in required if secret not in present]
+    return {
+        "checked": True,
+        "repo": repo,
+        "required_secrets": required,
+        "missing_secrets": missing,
+        "present": not missing,
+    }
+
+
 def inspect_space(space_id: str, *, remote: bool) -> dict[str, object]:
     if not remote:
         return {"checked": False, "reason": "remote check disabled"}
@@ -188,6 +252,18 @@ def main() -> int:
             "MANIFEST may be the manifest path, manifest filename, or application name."
         ),
     )
+    parser.add_argument(
+        "--github-repo",
+        default="",
+        help="Optional GitHub repository, for example clairetech2025-max/claire, used to check deploy secret names.",
+    )
+    parser.add_argument(
+        "--require-github-secret",
+        action="append",
+        default=[],
+        metavar="SECRET_NAME",
+        help="Require a GitHub Actions secret name to exist in --github-repo. Secret values are never read.",
+    )
     args = parser.parse_args()
     try:
         overrides = space_id_override_map(args.space_id)
@@ -209,9 +285,13 @@ def main() -> int:
         if args.skip_remote
         else all(status["ready_for_upload"] for status in statuses)
     )
+    github_actions = github_secret_status(args.github_repo, args.require_github_secret)
+    if args.require_github_secret and github_actions.get("missing_secrets"):
+        ok = False
     payload = {
         "ok": ok,
         "mode": "local-only" if args.skip_remote else "remote-preflight",
+        "github_actions": github_actions,
         "targets": statuses,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))

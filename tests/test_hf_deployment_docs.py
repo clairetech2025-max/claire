@@ -23,6 +23,8 @@ def test_deployment_docs_require_source_identity_health_gate() -> None:
     assert "--expected-source-sha" in combined
     assert "--expected-source-ref" in combined
     assert "--expected-included-source-sha" in combined
+    assert "--github-repo clairetech2025-max/claire" in combined
+    assert "--require-github-secret HF_TOKEN" in combined
     assert "deployment.source_git_sha" in combined
     assert "deployment.included_sources" in combined
     assert "stale Space" in combined or "stale deployment" in combined

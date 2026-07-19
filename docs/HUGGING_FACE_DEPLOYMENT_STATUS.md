@@ -1,6 +1,6 @@
 # Hugging Face Deployment Status
 
-Generated: 2026-07-19T05:15:00Z
+Generated: 2026-07-19T05:22:00Z
 
 ## GitHub Source
 
@@ -60,7 +60,7 @@ Veritas Space:
 ## Current Deployment Blockers
 
 1. Local Hugging Face CLI is not authenticated: `venv/bin/hf auth whoami` returns `Error: Not logged in`.
-2. GitHub repository secret `HF_TOKEN` is not confirmed/configured for upload completion.
+2. GitHub repository secret `HF_TOKEN` is not configured for upload completion. `scripts/deploy/hf_deploy_status.py` checks secret names only and currently reports `missing_secrets: ["HF_TOKEN"]`.
 3. The existing CLAIRE Space is currently a Gradio Space, while the full runtime package is Docker. The transition is technically packaged but requires explicit approval before upload.
 4. The available Hugging Face connector can inspect repos and search Spaces, but does not expose a file upload/deploy command.
 5. The existing Veritas Hugging Face Space ID has not been confirmed.
@@ -194,8 +194,18 @@ Readiness report:
 PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_deploy_status.py \
   --target deploy/huggingface/claire.manifest.json /tmp/claire-hf-build-clean \
   --target deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build-clean \
-  --space-id veritas.manifest.json=<existing-veritas-space-id>
+  --space-id veritas.manifest.json=<existing-veritas-space-id> \
+  --github-repo clairetech2025-max/claire \
+  --require-github-secret HF_TOKEN
 ```
+
+Latest local readiness check using fresh sanitized package trees:
+
+- CLAIRE local tree: valid
+- Veritas local tree: valid
+- GitHub Actions secret check: `HF_TOKEN` missing
+- Local Hugging Face auth: unavailable
+- Remote Space inspection: skipped in local-only mode
 
 ## Guardrails
 

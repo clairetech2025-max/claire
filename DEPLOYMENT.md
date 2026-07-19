@@ -51,6 +51,8 @@ PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_deploy_status.py \
   --target deploy/huggingface/claire.manifest.json /tmp/claire-hf-build \
   --target deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build \
   --space-id veritas.manifest.json=<existing-veritas-space-id> \
+  --github-repo clairetech2025-max/claire \
+  --require-github-secret HF_TOKEN \
   --skip-remote
 ```
 
