@@ -1,12 +1,12 @@
 # Hugging Face Deployment Status
 
-Generated: 2026-07-18
+Generated: 2026-07-19T04:10:28Z
 
 ## GitHub Source
 
 - Repository: `https://github.com/clairetech2025-max/claire`
 - Branch: `codex/claire-core-completion-20260718`
-- Last package source SHA verified: `44981a47d4208d148350ea958964f3868b411fae`
+- Last package source SHA verified: `957bec6ad1211cc83638ab0e6d0db8562a9324cb`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
 
@@ -15,18 +15,18 @@ Generated: 2026-07-18
 CLAIRE package:
 
 - Manifest: `deploy/huggingface/claire.manifest.json`
-- Build tree: `/tmp/claire-hf-build`
-- Archive: `/tmp/claire-hf-build.tar.gz`
-- SHA-256: `3379618a8a37fd3803b6dc4efc25cc5292a98c4182a2554c374ba05f1b6faaae`
+- Build tree: `/tmp/claire-hf-build-clean`
+- Archive: `/tmp/claire-hf-build-clean.tar.gz`
+- SHA-256: `068f42a68a6322b9c9900f5156be1076c1b2b6ce46f293075a3f54313a51c4c8`
 - Validation: passed
 - Import smoke: `app.app` imports and `claire_core.runtime.health.core_health()` reports `AVAILABLE`
 
 Veritas package:
 
 - Manifest: `deploy/huggingface/veritas.manifest.json`
-- Build tree: `/tmp/veritas-hf-build`
-- Archive: `/tmp/veritas-hf-build.tar.gz`
-- SHA-256: `82d743d82734c28bbebb01a8be9c9289a268e5a62166466f97b2172d3d216636`
+- Build tree: `/tmp/veritas-hf-build-clean`
+- Archive: `/tmp/veritas-hf-build-clean.tar.gz`
+- SHA-256: `121fdd228415cef2713dc41ae2412dd1fa3560adf21ad8ae15eb7bca9a8fd334`
 - Validation: passed
 - Import smoke: FastAPI `/health` returns HTTP 200
 
@@ -36,8 +36,12 @@ Confirmed CLAIRE Space:
 
 - Space ID: `Blackstormhorse/CLAIRE_Control_Interface`
 - URL: `https://blackstormhorse-claire-control-interface.hf.space`
-- Previous Space SHA observed before deployment: `e6afa6e2f7c0e6ded54d738b6135029f8de3d0b9`
-- SDK in manifest: Docker
+- Current Space SHA observed before deployment: `e6afa6e2f7c0e6ded54d738b6135029f8de3d0b9`
+- Current Space SDK observed by Hub API: Gradio
+- SDK in deployment package manifest: Docker
+- Runtime state observed by Hub API: `SLEEPING`
+- Hardware requested by Hub API: `cpu-basic`
+- Note: deploying the full FastAPI runtime package would convert or replace the current lightweight Gradio Space contents inside the same existing Space. Do not run this upload without explicit approval of that Space-mode transition.
 
 Veritas Space:
 
@@ -48,9 +52,10 @@ Veritas Space:
 
 ## Current Deployment Blockers
 
-1. Local Hugging Face CLI is not authenticated: `hf auth whoami` returns `Error: Not logged in`.
-2. The available Hugging Face connector can inspect repos and search Spaces, but does not expose a file upload/deploy command.
-3. The existing Veritas Hugging Face Space ID has not been confirmed.
+1. Local Hugging Face CLI is not authenticated: `venv/bin/hf auth whoami` returns `Error: Not logged in`.
+2. The existing CLAIRE Space is currently a Gradio Space, while the full runtime package is Docker. The transition is technically packaged but should be explicitly approved before upload.
+3. The available Hugging Face connector can inspect repos and search Spaces, but does not expose a file upload/deploy command.
+4. The existing Veritas Hugging Face Space ID has not been confirmed.
 
 ## Upload Commands
 
@@ -59,7 +64,7 @@ CLAIRE:
 ```bash
 PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
   deploy/huggingface/claire.manifest.json \
-  /tmp/claire-hf-build \
+  /tmp/claire-hf-build-clean \
   "Deploy CLAIRE mirror from GitHub $(git rev-parse --short HEAD)"
 ```
 
@@ -68,7 +73,7 @@ Veritas, after filling `space_id` in `deploy/huggingface/veritas.manifest.json`:
 ```bash
 PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
   deploy/huggingface/veritas.manifest.json \
-  /tmp/veritas-hf-build \
+  /tmp/veritas-hf-build-clean \
   "Deploy Veritas mirror from GitHub $(git rev-parse --short HEAD)"
 ```
 
