@@ -1,13 +1,13 @@
 # Hugging Face Deployment Status
 
-Generated: 2026-07-19T04:38:37Z
+Generated: 2026-07-19T04:42:54Z
 
 ## GitHub Source
 
 - Repository: `https://github.com/clairetech2025-max/claire`
 - Branch: `main`
 - Main merge SHA: `da56a2ac46d1d513b33d3694d8288fedd233e10e`
-- Last package source SHA verified after PR #4 merge: `fc6f54b834b90a6e12a2c827939fae9444bddd17`
+- Last package source SHA verified after PR #4 merge: `7aaf17bf360c35eb81ed68aad7a6a06ef52178f0`
 - Prior main merge SHA: `7e724c8752218672a3238f14d83019c1717efc2e`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
@@ -102,8 +102,9 @@ Gradio Space and the prepared full-runtime package is Docker.
 - Main CLAIRE Hugging Face package validation passed.
 - Main Veritas Hugging Face package validation passed.
 - GitHub Actions workflows are active on `main`.
-- `Validate Hugging Face Packages` passed for both CLAIRE and Veritas on `fc6f54b834b90a6e12a2c827939fae9444bddd17`.
-- Validation run: `https://github.com/clairetech2025-max/claire/actions/runs/29673614128`
+- `Validate Hugging Face Packages` passed automatically on push for both CLAIRE and Veritas on `7aaf17bf360c35eb81ed68aad7a6a06ef52178f0`.
+- Validation run: `https://github.com/clairetech2025-max/claire/actions/runs/29673720507`
+- Prior validation run on `fc6f54b834b90a6e12a2c827939fae9444bddd17`: `https://github.com/clairetech2025-max/claire/actions/runs/29673614128`
 - Prior validation run on `d43cecfcefa11875b184a461ad1e8fd3c8d5de49`: `https://github.com/clairetech2025-max/claire/actions/runs/29673485653`
 - Prior validation run on `81f61d3dc929c23f7029b03c429960f64866ff4b`: `https://github.com/clairetech2025-max/claire/actions/runs/29673393293`
 - Prior validation run on `04acbf4f4729784f3327ccab7fb65706eb934a8f`: `https://github.com/clairetech2025-max/claire/actions/runs/29673302302`
