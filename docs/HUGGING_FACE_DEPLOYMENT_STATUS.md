@@ -1,6 +1,6 @@
 # Hugging Face Deployment Status
 
-Generated: 2026-07-19T04:30:13Z
+Generated: 2026-07-19T04:34:00Z
 
 ## GitHub Source
 
@@ -41,14 +41,15 @@ Confirmed CLAIRE Space:
 - Current Space SHA observed before deployment: `e6afa6e2f7c0e6ded54d738b6135029f8de3d0b9`
 - Current Space SDK observed by Hub API: Gradio
 - SDK in deployment package manifest: Docker
-- Runtime state observed by Hub API: `SLEEPING`
+- Runtime state observed by Hub API: `RUNNING`
 - Hardware requested by Hub API: `cpu-basic`
 - Note: deploying the full FastAPI runtime package would convert or replace the current lightweight Gradio Space contents inside the same existing Space. Do not run this upload without explicit approval of that Space-mode transition.
 
 Veritas Space:
 
 - Space ID: unresolved
-- Public searches did not find a matching existing Veritas Legal Space.
+- Public listing for `Blackstormhorse` shows only `Blackstormhorse/ARE_Memory_Module` and `Blackstormhorse/CLAIRE_Control_Interface`.
+- Public searches did not find a matching existing Veritas Legal Space under `Blackstormhorse`.
 - `deploy/huggingface/veritas.manifest.json` intentionally keeps `space_id` blank until the exact existing Space ID is confirmed.
 - The upload helper refuses to deploy a blank Space ID.
 

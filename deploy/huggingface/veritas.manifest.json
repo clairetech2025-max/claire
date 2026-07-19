@@ -68,7 +68,11 @@
     "indexes/"
   ],
   "current_discovery": {
-    "visibility": "not publicly visible under Blackstormhorse or Claire-Systems",
-    "blocker": "Hugging Face authentication is required to identify private Veritas Space"
+    "visibility": "not publicly visible under Blackstormhorse",
+    "public_blackstormhorse_spaces": [
+      "Blackstormhorse/ARE_Memory_Module",
+      "Blackstormhorse/CLAIRE_Control_Interface"
+    ],
+    "blocker": "Hugging Face authentication or the exact Space ID is required to identify a private or differently owned Veritas Space"
   }
 }
