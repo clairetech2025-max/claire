@@ -6,7 +6,7 @@ on:
       ref:
         description: "Git ref to deploy"
         required: true
-        default: "codex/claire-core-completion-20260718"
+        default: "main"
       approve_sdk_transition:
         description: "Approve replacing the current Gradio Space runtime with the packaged Docker runtime"
         required: true

@@ -6,7 +6,7 @@ on:
       ref:
         description: "CLAIRE Git ref to deploy from"
         required: true
-        default: "codex/claire-core-completion-20260718"
+        default: "main"
       veritas_ref:
         description: "Veritas Git ref to deploy from"
         required: true
