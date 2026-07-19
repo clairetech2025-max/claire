@@ -57,6 +57,38 @@ Veritas Space:
 3. The available Hugging Face connector can inspect repos and search Spaces, but does not expose a file upload/deploy command.
 4. The existing Veritas Hugging Face Space ID has not been confirmed.
 
+## Upload Preflight
+
+The upload helper now runs `scripts/deploy/preflight_hf_space.py` before
+`hf upload`.
+
+Verified local package preflight:
+
+```bash
+venv/bin/python scripts/deploy/preflight_hf_space.py \
+  deploy/huggingface/claire.manifest.json \
+  /tmp/claire-hf-build-clean \
+  --skip-remote
+
+HF_SPACE_ID=Blackstormhorse/VERITAS_PLACEHOLDER \
+  venv/bin/python scripts/deploy/preflight_hf_space.py \
+  deploy/huggingface/veritas.manifest.json \
+  /tmp/veritas-hf-build-clean \
+  --skip-remote
+```
+
+The full remote preflight intentionally fails in the current local environment
+with:
+
+```text
+Hugging Face authentication unavailable; set HF_TOKEN or run `hf auth login`.
+```
+
+When authenticated, the preflight also inspects the existing Space and refuses
+SDK/runtime-mode transitions unless `HF_APPROVE_SDK_TRANSITION=true` is set.
+This is currently relevant because `Blackstormhorse/CLAIRE_Control_Interface`
+is a Gradio Space and the prepared full-runtime package is Docker.
+
 ## Upload Commands
 
 CLAIRE:

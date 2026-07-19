@@ -55,6 +55,7 @@ jobs:
         run: |
           python scripts/deploy/build_hf_tree.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build
           python scripts/deploy/validate_hf_tree.py /tmp/veritas-hf-build
+          HF_SPACE_ID="${{ inputs.space_id }}" python scripts/deploy/preflight_hf_space.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build --skip-remote
 
       - name: Smoke health endpoint
         working-directory: claire

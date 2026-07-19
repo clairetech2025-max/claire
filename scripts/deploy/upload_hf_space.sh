@@ -34,6 +34,7 @@ fi
 
 python scripts/deploy/build_hf_tree.py "$manifest" "$build_dir"
 python scripts/deploy/validate_hf_tree.py "$build_dir"
+python scripts/deploy/preflight_hf_space.py "$manifest" "$build_dir"
 if [ -n "${HF_TOKEN:-}" ]; then
   hf upload "$space_id" "$build_dir" . --type space --token "$HF_TOKEN" --commit-message "$commit_message"
 else
