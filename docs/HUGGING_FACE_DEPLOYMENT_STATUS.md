@@ -163,6 +163,7 @@ PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
 
 Workflows:
 
+- `.github/workflows/security-source-scan.yml`
 - `.github/workflows/hf-deployment-readiness.yml`
 - `.github/workflows/deploy-claire-hf.yml`
 - `.github/workflows/deploy-veritas-hf.yml`
@@ -182,6 +183,14 @@ workflow. It is a non-uploading manual workflow that builds both sanitized Space
 packages, records the checked-out CLAIRE and Veritas SHAs, checks the `HF_TOKEN`
 secret name, reports whether the Veritas Space ID was supplied, and writes the
 readiness JSON into the GitHub run summary.
+
+Run `.github/workflows/security-source-scan.yml` before readiness when preparing
+a release candidate. It scans tracked source for token-shaped values, private
+keys, Azure connection strings, databases, logs, uploads, evidence folders, and
+indexes. The current tree has been sanitized for the prior Azure sync placeholder
+file, but Git history still contains the old value and should be treated as
+requiring rotation/history remediation before claiming a fully clean repository
+history.
 
 ## Validation Commands
 

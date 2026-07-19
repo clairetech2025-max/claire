@@ -77,9 +77,14 @@ Veritas app SHA in `deployment.included_sources`.
 
 GitHub Actions workflows are also available:
 
+- `.github/workflows/security-source-scan.yml`
 - `.github/workflows/hf-deployment-readiness.yml`
 - `.github/workflows/deploy-claire-hf.yml`
 - `.github/workflows/deploy-veritas-hf.yml`
+
+Run the security source scan before deployment readiness. It scans tracked
+source for token-shaped values, private keys, Azure connection strings, and
+private runtime artifacts.
 
 Run the readiness workflow first. It builds both packages, checks local package
 validity, checks the `HF_TOKEN` repository secret name, optionally inspects the

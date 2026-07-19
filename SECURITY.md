@@ -30,6 +30,18 @@ Azure-only configuration.
 
 ## Secret Scan
 
-Before pushing, scan changed files and deployment trees for secret-like strings.
+Before pushing, scan tracked files and deployment trees for secret-like strings:
+
+```bash
+python scripts/security_scan.py
+```
+
+GitHub also runs `.github/workflows/security-source-scan.yml` on pushes, pull
+requests, and manual dispatches. The scan intentionally fails on token-shaped
+values, private keys, Azure connection strings, database files, logs, uploads,
+evidence folders, indexes, and other private runtime artifacts in tracked
+source.
+
 If a real secret appears in Git history, rotate it and remove it from history
-before publishing.
+before publishing. Current-tree cleanup alone is not a substitute for rotation
+when a credential may have been exposed.

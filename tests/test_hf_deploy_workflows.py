@@ -78,3 +78,13 @@ def test_readiness_workflow_builds_both_space_packages() -> None:
     assert "validate_hf_tree.py /tmp/claire-hf-readiness" in workflow
     assert "validate_hf_tree.py /tmp/veritas-hf-readiness" in workflow
     assert "hf_deploy_status.py" in workflow
+
+
+def test_security_source_scan_workflow_runs_tracked_source_scanner() -> None:
+    workflow = read_workflow("security-source-scan.yml")
+
+    assert "push:" in workflow
+    assert "pull_request:" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "python scripts/security_scan.py" in workflow
+    assert "upload_hf_space.sh" not in workflow

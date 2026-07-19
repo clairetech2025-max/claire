@@ -95,6 +95,14 @@ gh workflow run "Validate Hugging Face Packages" \
   --ref main
 ```
 
+Run the tracked-source security scan:
+
+```bash
+gh workflow run "Security Source Scan" \
+  --repo clairetech2025-max/claire \
+  --ref main
+```
+
 Run the non-upload readiness workflow before either deploy workflow:
 
 ```bash
