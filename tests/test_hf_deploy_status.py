@@ -256,3 +256,43 @@ def test_status_blocks_missing_required_github_secret(tmp_path: Path, monkeypatc
     assert result == 2
     assert payload["ok"] is False
     assert payload["github_actions"]["missing_secrets"] == ["HF_TOKEN"]
+
+
+def test_status_report_only_preserves_failed_readiness_but_exits_zero(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    build_dir = tmp_path / "build"
+    manifest = tmp_path / "manifest.json"
+    write_valid_tree(build_dir)
+    write_manifest(manifest)
+    monkeypatch.setattr(hf_deploy_status, "hf_auth_status", lambda: {"available": True})
+    monkeypatch.setattr(
+        hf_deploy_status,
+        "github_secret_status",
+        lambda repo, required: {
+            "checked": True,
+            "repo": repo,
+            "required_secrets": required,
+            "missing_secrets": ["HF_TOKEN"],
+            "present": False,
+        },
+    )
+
+    result = run_status(
+        monkeypatch,
+        manifest,
+        build_dir,
+        "--skip-remote",
+        "--github-repo",
+        "clairetech2025-max/claire",
+        "--require-github-secret",
+        "HF_TOKEN",
+        "--report-only",
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert payload["ok"] is False
+    assert payload["github_actions"]["missing_secrets"] == ["HF_TOKEN"]

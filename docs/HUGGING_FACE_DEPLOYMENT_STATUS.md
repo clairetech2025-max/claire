@@ -163,6 +163,7 @@ PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
 
 Workflows:
 
+- `.github/workflows/hf-deployment-readiness.yml`
 - `.github/workflows/deploy-claire-hf.yml`
 - `.github/workflows/deploy-veritas-hf.yml`
 
@@ -175,6 +176,12 @@ input before replacing the existing Gradio Space with the packaged Docker runtim
 The Veritas workflow additionally requires the exact existing Veritas Space ID
 as a manual workflow input. This avoids committing an unverified or private
 Space ID to source.
+
+Run `.github/workflows/hf-deployment-readiness.yml` before either deploy
+workflow. It is a non-uploading manual workflow that builds both sanitized Space
+packages, records the checked-out CLAIRE and Veritas SHAs, checks the `HF_TOKEN`
+secret name, reports whether the Veritas Space ID was supplied, and writes the
+readiness JSON into the GitHub run summary.
 
 ## Validation Commands
 

@@ -264,6 +264,11 @@ def main() -> int:
         metavar="SECRET_NAME",
         help="Require a GitHub Actions secret name to exist in --github-repo. Secret values are never read.",
     )
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Always exit 0 after printing status JSON. The JSON ok field still reports readiness truthfully.",
+    )
     args = parser.parse_args()
     try:
         overrides = space_id_override_map(args.space_id)
@@ -295,6 +300,8 @@ def main() -> int:
         "targets": statuses,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
+    if args.report_only:
+        return 0
     return 0 if payload["ok"] else 2
 
 

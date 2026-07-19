@@ -1,0 +1,139 @@
+name: Hugging Face Deployment Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "CLAIRE Git ref to evaluate"
+        required: true
+        default: "main"
+      veritas_ref:
+        description: "Veritas Git ref to evaluate"
+        required: true
+        default: "main"
+      veritas_space_id:
+        description: "Existing Veritas Space ID, for example Blackstormhorse/Veritas_Legal"
+        required: false
+        default: ""
+      approve_claire_sdk_transition:
+        description: "Acknowledge that CLAIRE package changes the current Space SDK to Docker"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hf-deployment-readiness
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out CLAIRE
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: claire
+
+      - name: Check out Veritas
+        uses: actions/checkout@v4
+        with:
+          repository: clairetech2025-max/claire-veritas-legal
+          ref: ${{ inputs.veritas_ref }}
+          path: claire_repos/claire-veritas-legal
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Capture source revisions
+        working-directory: claire
+        run: |
+          echo "CLAIRE_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "CLAIRE_SOURCE_REF=${{ inputs.ref }}" >> "$GITHUB_ENV"
+          echo "VERITAS_SOURCE_SHA=$(git -C ../claire_repos/claire-veritas-legal rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "VERITAS_SOURCE_REF=${{ inputs.veritas_ref }}" >> "$GITHUB_ENV"
+
+      - name: Install readiness dependencies
+        working-directory: claire
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "huggingface_hub[cli]"
+
+      - name: Capture deploy prerequisite state
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -n "${HF_TOKEN:-}" ]; then
+            echo "HF_TOKEN_PRESENT=true" >> "$GITHUB_ENV"
+          else
+            echo "HF_TOKEN_PRESENT=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build local Space packages
+        working-directory: claire
+        run: |
+          python scripts/deploy/build_hf_tree.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-readiness
+          python scripts/deploy/build_hf_tree.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-readiness
+          python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-readiness
+          python scripts/deploy/validate_hf_tree.py /tmp/veritas-hf-readiness
+
+      - name: Local readiness report
+        working-directory: claire
+        run: |
+          PATH="$HOME/.local/bin:$PATH" python scripts/deploy/hf_deploy_status.py \
+            --target deploy/huggingface/claire.manifest.json /tmp/claire-hf-readiness \
+            --target deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-readiness \
+            --space-id "veritas.manifest.json=${{ inputs.veritas_space_id }}" \
+            --github-repo clairetech2025-max/claire \
+            --require-github-secret HF_TOKEN \
+            --skip-remote \
+            --report-only | tee /tmp/hf-readiness-local.json
+
+      - name: Remote readiness report
+        working-directory: claire
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ inputs.veritas_space_id }}
+          HF_APPROVE_SDK_TRANSITION: ${{ inputs.approve_claire_sdk_transition }}
+        run: |
+          if [ -z "${HF_TOKEN:-}" ] || [ -z "${HF_SPACE_ID:-}" ]; then
+            echo '{"ok": false, "skipped": true, "reason": "HF_TOKEN or Veritas Space ID unavailable"}' | tee /tmp/hf-readiness-remote.json
+            exit 0
+          fi
+          PATH="$HOME/.local/bin:$PATH" python scripts/deploy/hf_deploy_status.py \
+            --target deploy/huggingface/claire.manifest.json /tmp/claire-hf-readiness \
+            --target deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-readiness \
+            --space-id "veritas.manifest.json=${{ inputs.veritas_space_id }}" \
+            --github-repo clairetech2025-max/claire \
+            --require-github-secret HF_TOKEN \
+            --report-only | tee /tmp/hf-readiness-remote.json
+
+      - name: Write readiness summary
+        run: |
+          {
+            echo "## Hugging Face Deployment Readiness"
+            echo
+            echo "- CLAIRE ref: ${CLAIRE_SOURCE_REF}"
+            echo "- CLAIRE SHA: ${CLAIRE_SOURCE_SHA}"
+            echo "- Veritas ref: ${VERITAS_SOURCE_REF}"
+            echo "- Veritas SHA: ${VERITAS_SOURCE_SHA}"
+            echo "- HF_TOKEN configured: ${HF_TOKEN_PRESENT}"
+            echo "- Veritas Space ID supplied: ${{ inputs.veritas_space_id != '' }}"
+            echo "- CLAIRE SDK transition acknowledged: ${{ inputs.approve_claire_sdk_transition }}"
+            echo "- Upload performed: false"
+            echo
+            echo "### Local Report"
+            echo '```json'
+            cat /tmp/hf-readiness-local.json
+            echo '```'
+            echo
+            echo "### Remote Report"
+            echo '```json'
+            cat /tmp/hf-readiness-remote.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

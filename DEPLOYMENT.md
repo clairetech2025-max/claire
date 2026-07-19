@@ -95,6 +95,22 @@ gh workflow run "Validate Hugging Face Packages" \
   --ref main
 ```
 
+Run the non-upload readiness workflow before either deploy workflow:
+
+```bash
+gh workflow run "Hugging Face Deployment Readiness" \
+  --repo clairetech2025-max/claire \
+  --ref main \
+  -f ref=main \
+  -f veritas_ref=main \
+  -f veritas_space_id=<existing-veritas-space-id> \
+  -f approve_claire_sdk_transition=false
+```
+
+The readiness workflow builds both Space packages, checks the `HF_TOKEN`
+repository secret name, records the exact CLAIRE and Veritas source SHAs, and
+writes a GitHub step summary. It never uploads to Hugging Face.
+
 Deploy CLAIRE to the existing CLAIRE Space only after approving the current
 Gradio-to-Docker transition:
 

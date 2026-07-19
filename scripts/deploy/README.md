@@ -77,13 +77,19 @@ Veritas app SHA in `deployment.included_sources`.
 
 GitHub Actions workflows are also available:
 
+- `.github/workflows/hf-deployment-readiness.yml`
 - `.github/workflows/deploy-claire-hf.yml`
 - `.github/workflows/deploy-veritas-hf.yml`
 
-Both workflows require the repository secret `HF_TOKEN`. The Veritas workflow
-also requires the existing Veritas Space ID as a manual workflow input.
-The workflows capture the actual checked-out source SHAs, upload those packaged
-trees, then require the Space health endpoint to report the same SHAs.
+Run the readiness workflow first. It builds both packages, checks local package
+validity, checks the `HF_TOKEN` repository secret name, optionally inspects the
+live Spaces when credentials and the Veritas Space ID are available, and never
+uploads.
+
+Both deploy workflows require the repository secret `HF_TOKEN`. The Veritas
+workflow also requires the existing Veritas Space ID as a manual workflow input.
+The deploy workflows capture the actual checked-out source SHAs, upload those
+packaged trees, then require the Space health endpoint to report the same SHAs.
 
 Do not deploy private databases, uploaded legal evidence, model files, live `.env`
 files, or Azure-only configuration.

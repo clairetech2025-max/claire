@@ -49,3 +49,32 @@ def test_validate_workflow_runs_on_relevant_main_pushes() -> None:
     assert "- main" in workflow
     assert "deploy/huggingface/**" in workflow
     assert "scripts/deploy/**" in workflow
+
+
+def test_readiness_workflow_is_manual_and_non_uploading() -> None:
+    workflow = read_workflow("hf-deployment-readiness.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "upload_hf_space.sh" not in workflow
+    assert "hf upload" not in workflow
+    assert "Upload performed: false" in workflow
+
+
+def test_readiness_workflow_checks_required_deployment_inputs() -> None:
+    workflow = read_workflow("hf-deployment-readiness.yml")
+
+    assert "veritas_space_id" in workflow
+    assert "approve_claire_sdk_transition" in workflow
+    assert "HF_TOKEN_PRESENT" in workflow
+    assert "--require-github-secret HF_TOKEN" in workflow
+    assert "--report-only" in workflow
+
+
+def test_readiness_workflow_builds_both_space_packages() -> None:
+    workflow = read_workflow("hf-deployment-readiness.yml")
+
+    assert "deploy/huggingface/claire.manifest.json /tmp/claire-hf-readiness" in workflow
+    assert "deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-readiness" in workflow
+    assert "validate_hf_tree.py /tmp/claire-hf-readiness" in workflow
+    assert "validate_hf_tree.py /tmp/veritas-hf-readiness" in workflow
+    assert "hf_deploy_status.py" in workflow
