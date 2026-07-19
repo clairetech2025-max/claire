@@ -84,3 +84,14 @@ jobs:
             deploy/huggingface/veritas.manifest.json \
             /tmp/veritas-hf-build \
             "Deploy Veritas mirror from GitHub ${GITHUB_SHA}"
+
+      - name: Wait for Space health
+        working-directory: claire
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ inputs.space_id }}
+        run: |
+          PATH="$HOME/.local/bin:$PATH" python scripts/deploy/hf_wait_for_space.py \
+            deploy/huggingface/veritas.manifest.json \
+            --timeout 900 \
+            --interval 15

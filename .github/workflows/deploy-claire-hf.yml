@@ -75,3 +75,13 @@ jobs:
             deploy/huggingface/claire.manifest.json \
             /tmp/claire-hf-build \
             "Deploy CLAIRE mirror from GitHub ${GITHUB_SHA}"
+
+      - name: Wait for Space health
+        working-directory: claire
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          PATH="$HOME/.local/bin:$PATH" python scripts/deploy/hf_wait_for_space.py \
+            deploy/huggingface/claire.manifest.json \
+            --timeout 900 \
+            --interval 15

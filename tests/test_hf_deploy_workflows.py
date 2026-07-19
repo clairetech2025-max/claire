@@ -31,6 +31,16 @@ def test_deploy_workflows_keep_required_hf_gates() -> None:
     assert "space_id" in veritas
 
 
+def test_deploy_workflows_wait_for_space_health_after_upload() -> None:
+    claire = read_workflow("deploy-claire-hf.yml")
+    veritas = read_workflow("deploy-veritas-hf.yml")
+
+    assert "hf_wait_for_space.py" in claire
+    assert "hf_wait_for_space.py" in veritas
+    assert "Wait for Space health" in claire
+    assert "Wait for Space health" in veritas
+
+
 def test_validate_workflow_runs_on_relevant_main_pushes() -> None:
     workflow = read_workflow("validate-hf-packages.yml")
 

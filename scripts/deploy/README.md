@@ -50,6 +50,17 @@ existing Space can be inspected, and refuses SDK/runtime-mode transitions unless
 `HF_APPROVE_SDK_TRANSITION=true` is set intentionally. This prevents accidentally
 replacing a lightweight Gradio Space with a Docker runtime package.
 
+After upload, wait for runtime and health:
+
+```bash
+PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_wait_for_space.py \
+  deploy/huggingface/claire.manifest.json
+
+PATH="$PWD/venv/bin:$PATH" HF_SPACE_ID=<existing-veritas-space-id> \
+  venv/bin/python scripts/deploy/hf_wait_for_space.py \
+  deploy/huggingface/veritas.manifest.json
+```
+
 GitHub Actions workflows are also available:
 
 - `.github/workflows/deploy-claire-hf.yml`
