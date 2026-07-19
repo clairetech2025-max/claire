@@ -93,3 +93,14 @@ jobs:
             --interval 15 \
             --expected-source-sha "${CLAIRE_SOURCE_SHA}" \
             --expected-source-ref "${CLAIRE_SOURCE_REF}"
+
+      - name: Smoke deployed CLAIRE Space
+        working-directory: claire
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          PATH="$HOME/.local/bin:$PATH" python scripts/deploy/hf_smoke_space.py \
+            deploy/huggingface/claire.manifest.json \
+            --application claire \
+            --expected-source-sha "${CLAIRE_SOURCE_SHA}" \
+            --expected-source-ref "${CLAIRE_SOURCE_REF}"

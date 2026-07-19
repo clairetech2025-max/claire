@@ -75,6 +75,28 @@ The wait script treats a stale deployment as a failure. The Space must expose a
 match the approved CLAIRE checkout. Veritas must also expose the included
 Veritas app SHA in `deployment.included_sources`.
 
+After health identity passes, run safe smoke checks:
+
+```bash
+PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_smoke_space.py \
+  deploy/huggingface/claire.manifest.json \
+  --application claire \
+  --expected-source-sha "$CLAIRE_SOURCE_SHA" \
+  --expected-source-ref "$CLAIRE_SOURCE_REF"
+
+PATH="$PWD/venv/bin:$PATH" HF_SPACE_ID=<existing-veritas-space-id> \
+  venv/bin/python scripts/deploy/hf_smoke_space.py \
+  deploy/huggingface/veritas.manifest.json \
+  --application veritas \
+  --space-id "$HF_SPACE_ID" \
+  --expected-source-sha "$CLAIRE_SOURCE_SHA" \
+  --expected-source-ref "$CLAIRE_SOURCE_REF" \
+  --expected-included-source-sha <veritas-source-sha>
+```
+
+The CLAIRE smoke path uses the controlled StableRide demo contract. The Veritas
+smoke path checks the guided page and the sanitized Harbor Point demo matter.
+
 GitHub Actions workflows are also available:
 
 - `.github/workflows/security-source-scan.yml`

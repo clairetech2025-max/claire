@@ -84,6 +84,12 @@ Required post-deploy checks:
 This prevents a stale Space from passing merely because its health endpoint
 returns HTTP 200.
 
+Post-health smoke checks are now scripted in
+`scripts/deploy/hf_smoke_space.py`. The CLAIRE deploy workflow runs the
+controlled StableRide demo path after identity validation. The Veritas deploy
+workflow verifies the root UI, guided case-entry UI, and sanitized Harbor Point
+demo matter after identity validation.
+
 ## Upload Preflight
 
 The upload helper runs `scripts/deploy/preflight_hf_space.py` before `hf upload`.

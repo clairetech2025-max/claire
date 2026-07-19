@@ -120,10 +120,32 @@ PATH="$PWD/venv/bin:$PATH" HF_TOKEN=<set-in-shell-without-printing> \
   --expected-included-source-sha <approved-veritas-sha>
 ```
 
+Then run smoke checks:
+
+```bash
+PATH="$PWD/venv/bin:$PATH" HF_TOKEN=<set-in-shell-without-printing> \
+  venv/bin/python scripts/deploy/hf_smoke_space.py \
+  deploy/huggingface/claire.manifest.json \
+  --application claire \
+  --expected-source-sha <approved-claire-sha> \
+  --expected-source-ref <approved-claire-ref>
+
+PATH="$PWD/venv/bin:$PATH" HF_TOKEN=<set-in-shell-without-printing> \
+  HF_SPACE_ID=<existing-veritas-space-id> \
+  venv/bin/python scripts/deploy/hf_smoke_space.py \
+  deploy/huggingface/veritas.manifest.json \
+  --application veritas \
+  --space-id "$HF_SPACE_ID" \
+  --expected-source-sha <approved-claire-sha> \
+  --expected-source-ref <approved-claire-ref> \
+  --expected-included-source-sha <approved-veritas-sha>
+```
+
 The health response must include `deployment.source_git_sha` for the CLAIRE
 wrapper and, for Veritas, `deployment.included_sources[*].source_git_sha` for
 the Veritas app package. A healthy HTTP response with the wrong SHA is a stale
-or incorrect mirror and is not a completed recovery.
+or incorrect mirror and is not a completed recovery. A Space that passes health
+but fails the smoke script is also not a completed recovery.
 
 Do not restore private legal evidence, live databases, uploaded documents, or
 runtime logs into a public Space. Use sanitized demo data unless a private

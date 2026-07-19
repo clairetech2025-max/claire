@@ -19,7 +19,7 @@
   ],
   "entry_point": "app.py",
   "startup_command": "python app.py",
-  "health_endpoint": "/",
+  "health_endpoint": "/health",
   "required_variable_names": [
     "CLAIRE_CORE_ENABLED",
     "CLAIRE_CORE_SHADOW_MODE",

@@ -76,6 +76,27 @@ PATH="$PWD/venv/bin:$PATH" HF_SPACE_ID=<existing-veritas-space-id> \
   --expected-included-source-sha <veritas-source-sha>
 ```
 
+Then run post-deploy smoke checks against the same running Space:
+
+```bash
+PATH="$PWD/venv/bin:$PATH" HF_TOKEN=<set-in-shell-without-printing> \
+  venv/bin/python scripts/deploy/hf_smoke_space.py \
+  deploy/huggingface/claire.manifest.json \
+  --application claire \
+  --expected-source-sha "$CLAIRE_SOURCE_SHA" \
+  --expected-source-ref "$CLAIRE_SOURCE_REF"
+
+PATH="$PWD/venv/bin:$PATH" HF_TOKEN=<set-in-shell-without-printing> \
+  HF_SPACE_ID=<existing-veritas-space-id> \
+  venv/bin/python scripts/deploy/hf_smoke_space.py \
+  deploy/huggingface/veritas.manifest.json \
+  --application veritas \
+  --space-id "$HF_SPACE_ID" \
+  --expected-source-sha "$CLAIRE_SOURCE_SHA" \
+  --expected-source-ref "$CLAIRE_SOURCE_REF" \
+  --expected-included-source-sha <veritas-source-sha>
+```
+
 ## GitHub Actions Deployment
 
 Use GitHub Actions for the normal mirror deployment path. Do not upload directly
@@ -152,7 +173,9 @@ gh workflow run "Deploy Veritas Hugging Face Space" \
 After either deployment, inspect the run and the Space health endpoint before
 calling the mirror operational. The deploy workflows fail if `/health` reports a
 different `deployment.source_git_sha`, `deployment.source_git_ref`, or, for
-Veritas, an included Veritas SHA mismatch.
+Veritas, an included Veritas SHA mismatch. They then run safe post-deploy smoke
+checks: CLAIRE exercises the controlled StableRide demo path, and Veritas loads
+the guided case page plus sanitized Harbor Point demo matter.
 
 ## Required Secret And Variable Names
 

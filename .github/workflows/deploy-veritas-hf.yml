@@ -106,3 +106,17 @@ jobs:
             --expected-source-sha "${CLAIRE_SOURCE_SHA}" \
             --expected-source-ref "${CLAIRE_SOURCE_REF}" \
             --expected-included-source-sha "${VERITAS_SOURCE_SHA}"
+
+      - name: Smoke deployed Veritas Space
+        working-directory: claire
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ inputs.space_id }}
+        run: |
+          PATH="$HOME/.local/bin:$PATH" python scripts/deploy/hf_smoke_space.py \
+            deploy/huggingface/veritas.manifest.json \
+            --application veritas \
+            --space-id "${HF_SPACE_ID}" \
+            --expected-source-sha "${CLAIRE_SOURCE_SHA}" \
+            --expected-source-ref "${CLAIRE_SOURCE_REF}" \
+            --expected-included-source-sha "${VERITAS_SOURCE_SHA}"

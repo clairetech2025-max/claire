@@ -41,6 +41,19 @@ def test_deploy_workflows_wait_for_space_health_after_upload() -> None:
     assert "Wait for Space health" in veritas
 
 
+def test_deploy_workflows_smoke_spaces_after_health_identity_gate() -> None:
+    claire = read_workflow("deploy-claire-hf.yml")
+    veritas = read_workflow("deploy-veritas-hf.yml")
+
+    assert "Smoke deployed CLAIRE Space" in claire
+    assert "hf_smoke_space.py" in claire
+    assert "--application claire" in claire
+    assert "Smoke deployed Veritas Space" in veritas
+    assert "hf_smoke_space.py" in veritas
+    assert "--application veritas" in veritas
+    assert "--expected-included-source-sha" in veritas
+
+
 def test_validate_workflow_runs_on_relevant_main_pushes() -> None:
     workflow = read_workflow("validate-hf-packages.yml")
 
