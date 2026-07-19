@@ -176,17 +176,21 @@ func localModelName() string {
 }
 
 func callOpenAICompatibleProvider(url, model, prompt, source string) providerResult {
-	payload := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{
-				"role":    "system",
-				"content": "You are the dynamic language provider inside CLAIRE. Answer only from the provided prompt package. Do not invent history or use unrelated memory.",
-			},
-			{"role": "user", "content": prompt},
+	messages := []map[string]string{
+		{
+			"role":    "system",
+			"content": "You are the dynamic language provider inside CLAIRE. Answer only from the provided prompt package. Do not invent history or use unrelated memory.",
 		},
+		{"role": "user", "content": prompt},
+	}
+	payload := map[string]any{
+		"model":       model,
+		"messages":    messages,
 		"temperature": 0.35,
 		"max_tokens":  providerMaxTokens(),
+	}
+	if source == "llama" {
+		payload["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -211,8 +215,13 @@ func callOpenAICompatibleProvider(url, model, prompt, source string) providerRes
 	if err != nil {
 		return providerResult{Response: "GO provider unavailable: " + err.Error(), OK: false}
 	}
+	logProviderDiagnostic(url, source, model, messages, payload, resp.StatusCode, raw)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return providerResult{Response: fmt.Sprintf("GO provider unavailable: %s status %d", source, resp.StatusCode), OK: false}
+		detail := strings.TrimSpace(string(raw))
+		if detail == "" {
+			detail = "empty response body"
+		}
+		return providerResult{Response: fmt.Sprintf("GO provider unavailable: %s status %d: %s", source, resp.StatusCode, detail), OK: false}
 	}
 
 	visible, reasoning, err := extractProviderVisibleAndReasoning(raw)
@@ -223,6 +232,61 @@ func callOpenAICompatibleProvider(url, model, prompt, source string) providerRes
 		return providerResult{Response: "GO provider unavailable: " + source + " returned empty message content.", OK: false}
 	}
 	return providerResult{Response: strings.TrimSpace(visible), OK: true, ReasoningContent: strings.TrimSpace(reasoning)}
+}
+
+func logProviderDiagnostic(url, source, model string, messages []map[string]string, payload map[string]any, status int, body []byte) {
+	messageChecks := make([]map[string]any, 0, len(messages))
+	totalChars := 0
+	totalTokens := 0
+	for idx, message := range messages {
+		content, ok := message["content"]
+		chars := len(content)
+		tokens := len(strings.Fields(content))
+		totalChars += chars
+		totalTokens += tokens
+		messageChecks = append(messageChecks, map[string]any{
+			"index":          idx,
+			"role":           message["role"],
+			"content_type":   "string",
+			"content_string": ok,
+			"content_empty":  strings.TrimSpace(content) == "",
+			"content_chars":  chars,
+			"approx_tokens":  tokens,
+		})
+	}
+	payloadKeys := make([]string, 0, len(payload))
+	for key := range payload {
+		payloadKeys = append(payloadKeys, key)
+	}
+	record := map[string]any{
+		"endpoint_url":           url,
+		"http_method":            http.MethodPost,
+		"provider":               source,
+		"model":                  model,
+		"request_headers":        map[string]string{"Accept": "application/json", "Content-Type": "application/json"},
+		"payload_keys":           payloadKeys,
+		"message_count":          len(messages),
+		"message_roles":          providerMessageRoles(messages),
+		"message_content_checks": messageChecks,
+		"context_char_estimate":  totalChars,
+		"context_token_estimate": totalTokens,
+		"http_status":            status,
+		"response_body":          string(body),
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		log.Printf("CLAIRE_PROVIDER_DIAGNOSTIC marshal_error=%v", err)
+		return
+	}
+	log.Printf("CLAIRE_PROVIDER_DIAGNOSTIC %s", string(encoded))
+}
+
+func providerMessageRoles(messages []map[string]string) []string {
+	roles := make([]string, 0, len(messages))
+	for _, message := range messages {
+		roles = append(roles, message["role"])
+	}
+	return roles
 }
 
 func callNVIDIAProvider(prompt string) providerResult {

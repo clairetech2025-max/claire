@@ -167,6 +167,7 @@ func TestBuildProviderResponseUsesNVIDIAChatMessages(t *testing.T) {
 func TestBuildProviderResponseUsesLlamaProfile(t *testing.T) {
 	seenModel := ""
 	seenUser := ""
+	seenThinkingDisabled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -179,6 +180,11 @@ func TestBuildProviderResponseUsesLlamaProfile(t *testing.T) {
 		}
 		if msg, ok := messages[1].(map[string]any); ok {
 			seenUser, _ = msg["content"].(string)
+		}
+		if kwargs, ok := payload["chat_template_kwargs"].(map[string]any); ok {
+			if enabled, ok := kwargs["enable_thinking"].(bool); ok {
+				seenThinkingDisabled = !enabled
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -203,5 +209,33 @@ func TestBuildProviderResponseUsesLlamaProfile(t *testing.T) {
 	}
 	if seenUser != "chronology prompt" {
 		t.Fatalf("prompt not sent as user chat message: %q", seenUser)
+	}
+	if !seenThinkingDisabled {
+		t.Fatalf("llama payload did not disable thinking: %#v", seenThinkingDisabled)
+	}
+}
+
+func TestBuildProviderResponseIncludesLlamaErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"context window exceeded"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("CLAIRE_PROVIDER", "llama")
+	t.Setenv("CLAIRE_LLAMA_URL", server.URL)
+	t.Setenv("CLAIRE_LOCAL_MODEL_FILE", "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf")
+	t.Setenv("NVIDIA_API_KEY", "")
+
+	result := buildProviderResponse("long prompt")
+	if result.OK {
+		t.Fatalf("expected llama failure, got %#v", result)
+	}
+	if !strings.Contains(result.Response, "llama status 400") {
+		t.Fatalf("missing llama status in response: %q", result.Response)
+	}
+	if !strings.Contains(result.Response, "context window exceeded") {
+		t.Fatalf("missing llama error body in response: %q", result.Response)
 	}
 }

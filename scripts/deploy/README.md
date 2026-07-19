@@ -5,6 +5,7 @@ Build a Space-specific deployment tree from a manifest:
 ```bash
 venv/bin/python scripts/deploy/build_hf_tree.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build
 venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-build
+venv/bin/python scripts/deploy/preflight_hf_space.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build --skip-remote
 ```
 
 Upload requires Hugging Face authentication:
@@ -30,6 +31,12 @@ PATH="$PWD/venv/bin:$PATH" scripts/deploy/upload_hf_space.sh \
   /tmp/claire-hf-build \
   "Deploy CLAIRE mirror from approved GitHub revision"
 ```
+
+Before upload, the helper also runs `preflight_hf_space.py` without
+`--skip-remote`. That gate requires Hugging Face authentication, confirms the
+existing Space can be inspected, and refuses SDK/runtime-mode transitions unless
+`HF_APPROVE_SDK_TRANSITION=true` is set intentionally. This prevents accidentally
+replacing a lightweight Gradio Space with a Docker runtime package.
 
 GitHub Actions workflows are also available:
 

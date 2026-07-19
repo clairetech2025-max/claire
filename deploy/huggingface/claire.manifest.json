@@ -72,6 +72,8 @@
   "current_discovery": {
     "visibility": "public",
     "current_sha": "e6afa6e2f7c0e6ded54d738b6135029f8de3d0b9",
+    "current_sdk": "gradio",
+    "package_sdk": "docker",
     "runtime_stage": "SLEEPING",
     "hardware": "cpu-basic",
     "persistent_storage": "not reported"

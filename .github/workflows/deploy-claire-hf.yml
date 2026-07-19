@@ -7,6 +7,11 @@ on:
         description: "Git ref to deploy"
         required: true
         default: "codex/claire-core-completion-20260718"
+      approve_sdk_transition:
+        description: "Approve replacing the current Gradio Space runtime with the packaged Docker runtime"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,6 +46,7 @@ jobs:
         run: |
           python scripts/deploy/build_hf_tree.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build
           python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-build
+          python scripts/deploy/preflight_hf_space.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build --skip-remote
 
       - name: Smoke import
         working-directory: claire
@@ -59,6 +65,7 @@ jobs:
         working-directory: claire
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_APPROVE_SDK_TRANSITION: ${{ inputs.approve_sdk_transition }}
         run: |
           if [ -z "${HF_TOKEN:-}" ]; then
             echo "HF_TOKEN secret is required" >&2
