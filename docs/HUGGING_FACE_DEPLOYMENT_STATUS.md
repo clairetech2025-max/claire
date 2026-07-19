@@ -1,13 +1,13 @@
 # Hugging Face Deployment Status
 
-Generated: 2026-07-19T04:21:33Z
+Generated: 2026-07-19T04:24:48Z
 
 ## GitHub Source
 
 - Repository: `https://github.com/clairetech2025-max/claire`
-- Working branch: `codex/claire-core-completion-20260718`
-- Merged upstream baseline: `origin/main` at `1c5022ec7e6ccde694f8f60a4e61e4b6b6fa3a6f`
-- Last package source SHA verified after merge refresh: `70913a97cd4e1ef3a5b36abef09dedc7b3cbca67`
+- Branch: `main`
+- Main merge SHA: `da56a2ac46d1d513b33d3694d8288fedd233e10e`
+- Last package source SHA verified after PR #4 merge: `da56a2ac46d1d513b33d3694d8288fedd233e10e`
 - Prior main merge SHA: `7e724c8752218672a3238f14d83019c1717efc2e`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
@@ -17,19 +17,19 @@ Generated: 2026-07-19T04:21:33Z
 CLAIRE package:
 
 - Manifest: `deploy/huggingface/claire.manifest.json`
-- Build tree: `/tmp/claire-hf-build-clean`
-- Archive: `/tmp/claire-hf-build-clean.tar.gz`
-- SHA-256: `6ff8699838bcf3bf2390f9cbc3df5ecfb05e17d880089d250ea217c1fb0d6fe4`
-- Validation: passed after merge refresh
+- Build tree: `/tmp/claire-hf-main-build-clean`
+- Archive: `/tmp/claire-hf-main-build-clean.tar.gz`
+- SHA-256: `235cbb1ef369679785fea10e31d4f06723063e8f79891fd7b3db8f1b427563f5`
+- Validation: passed after PR #4 merge
 - Local preflight: passed with `--skip-remote`
 
 Veritas package:
 
 - Manifest: `deploy/huggingface/veritas.manifest.json`
-- Build tree: `/tmp/veritas-hf-build-clean`
-- Archive: `/tmp/veritas-hf-build-clean.tar.gz`
-- SHA-256: `c250f1d73c3bc38e7d2121358ccadbd03be77140c1e65e432068b0579f06a810`
-- Validation: passed after merge refresh
+- Build tree: `/tmp/veritas-hf-main-build-clean`
+- Archive: `/tmp/veritas-hf-main-build-clean.tar.gz`
+- SHA-256: `b5c9a80ecfdfaa78560394efc5472f692fa61fa9f2b5c45fa40cb82d127b45f1`
+- Validation: passed after PR #4 merge
 - Local preflight: passed with `--skip-remote`
 
 ## Existing Spaces
