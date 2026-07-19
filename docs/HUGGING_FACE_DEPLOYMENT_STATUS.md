@@ -86,8 +86,11 @@ Hugging Face authentication unavailable; set HF_TOKEN or run `hf auth login`.
 
 When authenticated, the preflight also inspects the existing Space and refuses
 SDK/runtime-mode transitions unless `HF_APPROVE_SDK_TRANSITION=true` is set.
-This is currently relevant because `Blackstormhorse/CLAIRE_Control_Interface`
-is a Gradio Space and the prepared full-runtime package is Docker.
+For GitHub Actions, this is exposed as the manual
+`approve_sdk_transition` workflow-dispatch input on
+`.github/workflows/deploy-claire-hf.yml`. This is currently relevant because
+`Blackstormhorse/CLAIRE_Control_Interface` is a Gradio Space and the prepared
+full-runtime package is Docker.
 
 ## Upload Commands
 
