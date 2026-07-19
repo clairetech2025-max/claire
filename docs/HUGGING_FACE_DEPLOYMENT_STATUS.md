@@ -1,13 +1,13 @@
 # Hugging Face Deployment Status
 
-Generated: 2026-07-19
+Generated: 2026-07-19T04:21:33Z
 
 ## GitHub Source
 
 - Repository: `https://github.com/clairetech2025-max/claire`
 - Working branch: `codex/claire-core-completion-20260718`
 - Merged upstream baseline: `origin/main` at `1c5022ec7e6ccde694f8f60a4e61e4b6b6fa3a6f`
-- Last package source SHA verified before merge refresh: `8ff33fc370c5fb2f8443cd13c4a582a61bfacc77`
+- Last package source SHA verified after merge refresh: `70913a97cd4e1ef3a5b36abef09dedc7b3cbca67`
 - Prior main merge SHA: `7e724c8752218672a3238f14d83019c1717efc2e`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
@@ -19,18 +19,18 @@ CLAIRE package:
 - Manifest: `deploy/huggingface/claire.manifest.json`
 - Build tree: `/tmp/claire-hf-build-clean`
 - Archive: `/tmp/claire-hf-build-clean.tar.gz`
-- SHA-256: pending refresh after the current merge commit is finalized
-- Validation: passed before merge refresh; rerun required after merge resolution
-- Import smoke: `app.app` imports and `claire_core.runtime.health.core_health()` reports `AVAILABLE` before merge refresh
+- SHA-256: `6ff8699838bcf3bf2390f9cbc3df5ecfb05e17d880089d250ea217c1fb0d6fe4`
+- Validation: passed after merge refresh
+- Local preflight: passed with `--skip-remote`
 
 Veritas package:
 
 - Manifest: `deploy/huggingface/veritas.manifest.json`
 - Build tree: `/tmp/veritas-hf-build-clean`
 - Archive: `/tmp/veritas-hf-build-clean.tar.gz`
-- SHA-256: pending refresh after the current merge commit is finalized
-- Validation: passed before merge refresh; rerun required after merge resolution
-- Import smoke: FastAPI `/health` returns HTTP 200 before merge refresh
+- SHA-256: `c250f1d73c3bc38e7d2121358ccadbd03be77140c1e65e432068b0579f06a810`
+- Validation: passed after merge refresh
+- Local preflight: passed with `--skip-remote`
 
 ## Existing Spaces
 
