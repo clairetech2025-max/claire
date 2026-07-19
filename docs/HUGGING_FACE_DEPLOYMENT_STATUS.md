@@ -1,12 +1,12 @@
 # Hugging Face Deployment Status
 
-Generated: 2026-07-19T04:10:28Z
+Generated: 2026-07-19T04:13:44Z
 
 ## GitHub Source
 
 - Repository: `https://github.com/clairetech2025-max/claire`
 - Branch: `codex/claire-core-completion-20260718`
-- Last package source SHA verified: `957bec6ad1211cc83638ab0e6d0db8562a9324cb`
+- Last package source SHA verified: `d7e4bff092585b8224d6724dd67db73fcdcdc566`
 - Preservation branch: `backup/pre-core-completion-20260718`
 - Preservation SHA: `3d5a431df96394e369f81929055e323bd13cb749`
 
@@ -17,7 +17,7 @@ CLAIRE package:
 - Manifest: `deploy/huggingface/claire.manifest.json`
 - Build tree: `/tmp/claire-hf-build-clean`
 - Archive: `/tmp/claire-hf-build-clean.tar.gz`
-- SHA-256: `068f42a68a6322b9c9900f5156be1076c1b2b6ce46f293075a3f54313a51c4c8`
+- SHA-256: `7b0d826874d0d93f5ffbafb241a4a3f741886ae78b5ca6ae6b69d3717b50d614`
 - Validation: passed
 - Import smoke: `app.app` imports and `claire_core.runtime.health.core_health()` reports `AVAILABLE`
 
@@ -26,7 +26,7 @@ Veritas package:
 - Manifest: `deploy/huggingface/veritas.manifest.json`
 - Build tree: `/tmp/veritas-hf-build-clean`
 - Archive: `/tmp/veritas-hf-build-clean.tar.gz`
-- SHA-256: `121fdd228415cef2713dc41ae2412dd1fa3560adf21ad8ae15eb7bca9a8fd334`
+- SHA-256: `13f393ce6896a9717d35070c7fa950270c57cd8bca103c95bcdb9676049a5138`
 - Validation: passed
 - Import smoke: FastAPI `/health` returns HTTP 200
 
