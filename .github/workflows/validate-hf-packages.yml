@@ -1,6 +1,20 @@
 name: Validate Hugging Face Packages
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/validate-hf-packages.yml"
+      - "deploy/huggingface/**"
+      - "scripts/deploy/**"
+      - "hf_claire_runtime_full/**"
+      - "claire_core/**"
+      - "claire_are/**"
+      - "claire_continuity/**"
+      - "claire/**"
+      - "veritas_legal/**"
+      - "*.py"
   pull_request:
     paths:
       - ".github/workflows/validate-hf-packages.yml"

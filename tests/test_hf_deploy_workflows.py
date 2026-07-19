@@ -29,3 +29,13 @@ def test_deploy_workflows_keep_required_hf_gates() -> None:
     assert "HF_APPROVE_SDK_TRANSITION" in claire
     assert "approve_sdk_transition" in claire
     assert "space_id" in veritas
+
+
+def test_validate_workflow_runs_on_relevant_main_pushes() -> None:
+    workflow = read_workflow("validate-hf-packages.yml")
+
+    assert "push:" in workflow
+    assert "branches:" in workflow
+    assert "- main" in workflow
+    assert "deploy/huggingface/**" in workflow
+    assert "scripts/deploy/**" in workflow
