@@ -8,6 +8,18 @@ venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-build
 venv/bin/python scripts/deploy/preflight_hf_space.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build --skip-remote
 ```
 
+Check readiness without uploading:
+
+```bash
+PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_deploy_status.py \
+  --target deploy/huggingface/claire.manifest.json /tmp/claire-hf-build \
+  --target deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build \
+  --space-id veritas.manifest.json=<existing-veritas-space-id>
+```
+
+Use `--skip-remote` only for local package checks. A real upload should first
+pass the remote status check with Hugging Face authentication available.
+
 Upload requires Hugging Face authentication:
 
 ```bash

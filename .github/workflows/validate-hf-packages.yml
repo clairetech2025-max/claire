@@ -37,6 +37,9 @@ jobs:
         run: |
           python scripts/deploy/build_hf_tree.py deploy/huggingface/claire.manifest.json /tmp/claire-hf-build
           python scripts/deploy/validate_hf_tree.py /tmp/claire-hf-build
+          python scripts/deploy/hf_deploy_status.py \
+            --target deploy/huggingface/claire.manifest.json /tmp/claire-hf-build \
+            --skip-remote
 
       - name: Smoke CLAIRE package
         working-directory: claire
@@ -77,6 +80,10 @@ jobs:
         run: |
           python scripts/deploy/build_hf_tree.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build
           python scripts/deploy/validate_hf_tree.py /tmp/veritas-hf-build
+          python scripts/deploy/hf_deploy_status.py \
+            --target deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build \
+            --space-id veritas.manifest.json=Blackstormhorse/VERITAS_PLACEHOLDER \
+            --skip-remote
 
       - name: Smoke Veritas package
         working-directory: claire

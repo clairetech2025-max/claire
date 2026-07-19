@@ -64,6 +64,8 @@ Veritas Space:
 ## Upload Preflight
 
 The upload helper runs `scripts/deploy/preflight_hf_space.py` before `hf upload`.
+Use `scripts/deploy/hf_deploy_status.py` for a non-destructive readiness report
+across CLAIRE and Veritas before attempting either upload.
 
 Verified local package preflight commands:
 
@@ -154,6 +156,15 @@ venv/bin/python scripts/deploy/preflight_hf_space.py deploy/huggingface/claire.m
 venv/bin/python scripts/deploy/build_hf_tree.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build-clean
 venv/bin/python scripts/deploy/validate_hf_tree.py /tmp/veritas-hf-build-clean
 HF_SPACE_ID=<existing-veritas-space-id> venv/bin/python scripts/deploy/preflight_hf_space.py deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build-clean --skip-remote
+```
+
+Readiness report:
+
+```bash
+PATH="$PWD/venv/bin:$PATH" venv/bin/python scripts/deploy/hf_deploy_status.py \
+  --target deploy/huggingface/claire.manifest.json /tmp/claire-hf-build-clean \
+  --target deploy/huggingface/veritas.manifest.json /tmp/veritas-hf-build-clean \
+  --space-id veritas.manifest.json=<existing-veritas-space-id>
 ```
 
 ## Guardrails
