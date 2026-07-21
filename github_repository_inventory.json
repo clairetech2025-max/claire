@@ -1,0 +1,3111 @@
+{
+  "local_remotes_raw": "--- /home/LuciusPrime/odyssey-claire-build\n  origin\thttps://github.com/clairetech2025-max/claire.git (fetch)\n  origin\thttps://github.com/clairetech2025-max/claire.git (push)\n  branch main\n--- /home/LuciusPrime/claire_public_releases/veritas_legal_evidence_engine\n  branch main\n--- /home/LuciusPrime/claire_repos/.github\n  origin\thttps://github.com/Claire-Systems/.github.git (fetch)\n  origin\thttps://github.com/Claire-Systems/.github.git (push)\n  branch main\n--- /home/LuciusPrime/claire_repos/bitbrain-sbc\n  origin\thttps://github.com/clairetech2025-max/-Claire-Systems-bitbrain-sbc-private.git (fetch)\n  origin\thttps://github.com/clairetech2025-max/-Claire-Systems-bitbrain-sbc-private.git (push)\n  branch main\n--- /home/LuciusPrime/claire_repos/analog--recall-engine\n  origin\thttps://github.com/Claire-Systems/analog--recall-engine.git (fetch)\n  origin\thttps://github.com/Claire-Systems/analog--recall-engine.git (push)\n  branch main\n--- /home/LuciusPrime/claire_repos/claire-veritas-legal\n  origin\thttps://github.com/clairetech2025-max/claire-veritas-legal.git (fetch)\n  origin\thttps://github.com/clairetech2025-max/claire-veritas-legal.git (push)\n  branch main\n--- /home/LuciusPrime/.codex/.tmp/plugins\n  branch master\n--- /home/LuciusPrime/claire-odyssey\n  origin\thttps://github.com/clairetech2025-max/claire.git (fetch)\n  origin\thttps://github.com/clairetech2025-max/claire.git (push)\n  branch main\n--- /home/LuciusPrime/claire/llama.cpp\n  origin\thttps://github.com/ggerganov/llama.cpp (fetch)\n  origin\thttps://github.com/ggerganov/llama.cpp (push)\n  branch master\n--- /home/LuciusPrime/claire/private_repo_payloads/are-spectacle-private\n  origin\tgit@github.com:clairetech2025-max/Claire-Systems-are-spectacle-private.git (fetch)\n  origin\tgit@github.com:clairetech2025-max/Claire-Systems-are-spectacle-private.git (push)\n  branch main\n--- /home/LuciusPrime/claire/private_repo_payloads/bitbrain-sbc-private\n  origin\tgit@github.com:clairetech2025-max/-Claire-Systems-bitbrain-sbc-private.git (fetch)\n  origin\tgit@github.com:clairetech2025-max/-Claire-Systems-bitbrain-sbc-private.git (push)\n  branch main\n--- /home/LuciusPrime/claire/private_repo_payloads/sovereign-execution-gateway-private\n  origin\tgit@github.com:clairetech2025-max/Claire-Systems-sovereign-execution-gateway-private.git (fetch)\n  origin\tgit@github.com:clairetech2025-max/Claire-Systems-sovereign-execution-gateway-private.git (push)\n  branch main\n--- /home/LuciusPrime/claire\n  origin\thttps://github.com/clairetech2025-max/claire.git (fetch)\n  origin\thttps://github.com/clairetech2025-max/claire.git (push)\n  branch codex/venture-intelligence-slice-1\n",
+  "repositories": [
+    {
+      "current_condition": {
+        "evidence": "Special .github org profile repo.",
+        "status": "DOCUMENTATION ONLY"
+      },
+      "documentation_review": {
+        "claims": [
+          {
+            "claim": "sub-millisecond",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          }
+        ],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "profile/README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 1,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "CLAIRE"
+        ],
+        "external_services": [],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Claire Systems organization profile and engineer-facing portfolio overview",
+        "fork": false,
+        "full_name": "Claire-Systems/.github",
+        "languages": [],
+        "last_commit_date": "2026-06-03T05:49:27Z",
+        "name": ".github",
+        "owner": "Claire-Systems",
+        "owner_type": "Organization",
+        "primary_language": null,
+        "repository_size_kb": 1,
+        "url": "https://github.com/Claire-Systems/.github",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/Claire-Systems__.github",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Organization profile repository.",
+      "recommendation": {
+        "action": "SAFE TO KEEP PUBLIC",
+        "confidence": "Medium",
+        "current_visibility": "Public",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate. Review-level privacy/contact/path findings should be checked.",
+        "recommended_visibility": "Public"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Veritas Legal",
+        "Analog Recall Engine / ARE",
+        "Spectacle",
+        "session continuity",
+        "BitBrain",
+        "OfficeAI",
+        "Android / Termux",
+        "commercial licensing",
+        "patents or provisional patent materials"
+      ],
+      "sample_files": [
+        "profile/README.md"
+      ],
+      "security_findings": [
+        {
+          "line": 36,
+          "path": "profile/README.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        }
+      ],
+      "status": "DOCUMENTATION ONLY",
+      "status_evidence": "Special .github org profile repo.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "ARE naming and Python implementation, likely predecessor to current claire_are package.",
+        "status": "LEGACY"
+      },
+      "documentation_review": {
+        "claims": [
+          {
+            "claim": "tamper-proof",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          },
+          {
+            "claim": "1000x faster",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          },
+          {
+            "claim": "sub-millisecond",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          },
+          {
+            "claim": "scales to millions",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          },
+          {
+            "claim": "validated",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          }
+        ],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": true,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 34,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "API_KEY",
+          "KEY"
+        ],
+        "external_services": [],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Legacy Analog Recall Engine prototype preserved for provenance and evaluation of governed recall workflows.",
+        "fork": false,
+        "full_name": "Claire-Systems/Analog-Recall-Engine-Legacy",
+        "languages": [],
+        "last_commit_date": "2026-06-02T19:15:50Z",
+        "name": "Analog-Recall-Engine-Legacy",
+        "owner": "Claire-Systems",
+        "owner_type": "Organization",
+        "primary_language": "Python",
+        "repository_size_kb": 37,
+        "url": "https://github.com/Claire-Systems/Analog-Recall-Engine-Legacy",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/Claire-Systems__Analog-Recall-Engine-Legacy",
+      "main_components": [
+        "executable/scripts: app/main.py",
+        "tests: present",
+        "storage/memory: JSONL/SQLite/memory artifacts or code present",
+        "governance: Sentinel component"
+      ],
+      "purpose": "Legacy public Analog Recall Engine implementation/reference.",
+      "recommendation": {
+        "action": "NEEDS SECURITY REVIEW",
+        "confidence": "Medium",
+        "current_visibility": "Public",
+        "reasoning": "Likely predecessor/duplicate; preserve until replacement map is finalized. Review-level privacy/contact/path findings should be checked.",
+        "recommended_visibility": "Undecided"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Veritas Legal",
+        "Analog Recall Engine / ARE",
+        "Spectacle",
+        "Truth Spine",
+        "Sentinel",
+        "Gyro",
+        "session continuity",
+        "commercial licensing",
+        "patents or provisional patent materials"
+      ],
+      "sample_files": [
+        ".gitignore",
+        ".gitkeep",
+        "README.md",
+        "app/__init__.py",
+        "app/api/__init__.py",
+        "app/api/routes.py",
+        "app/core/__init__.py",
+        "app/core/turn_engine.py",
+        "app/domain/__init__.py",
+        "app/domain/types.py",
+        "app/main.py",
+        "app/services/__init__.py",
+        "app/services/answer_planner.py",
+        "app/services/contradiction_checker.py",
+        "app/services/gyro_are.py",
+        "app/services/intake.py",
+        "app/services/intent_classifier.py",
+        "app/services/lane_router.py",
+        "app/services/lycanthrope.py",
+        "app/services/recall_service.py",
+        "app/services/recognition_rail.py",
+        "app/services/relevance_gate.py",
+        "app/services/sentinel.py",
+        "app/services/traillink.py",
+        "app/services/visor_builder.py",
+        "app/services/write_barrier.py",
+        "app/storage/__init__.py",
+        "app/storage/gravel_store.py",
+        "app/storage/session_store.py",
+        "app/storage/sqlite_store.py",
+        "app/tracing/__init__.py",
+        "app/tracing/veritas.py",
+        "tests/conftest.py",
+        "tests/test_turn_flow.py"
+      ],
+      "security_findings": [
+        {
+          "line": 198,
+          "path": "README.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 216,
+          "path": "README.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        }
+      ],
+      "status": "LEGACY",
+      "status_evidence": "ARE naming and Python implementation, likely predecessor to current claire_are package.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "Tests/manifests found; not executed during inventory audit.",
+        "tests": [
+          "tests/conftest.py",
+          "tests/test_turn_flow.py"
+        ],
+        "tests_present": true
+      },
+      "version_analysis": "Likely predecessor to current `claire_are` Truth Spine package in `clairetech2025-max/claire`; mark legacy unless needed as public reference."
+    },
+    {
+      "current_condition": {
+        "evidence": "README/profile content only or nearly only.",
+        "status": "DOCUMENTATION ONLY"
+      },
+      "documentation_review": {
+        "claims": [
+          {
+            "claim": "1000x faster",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          },
+          {
+            "claim": "validated",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          }
+        ],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": true,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 2,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [],
+        "external_services": [],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [
+          "2026"
+        ],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Analog Recall Engine: governed recall, provenance discipline, and audit-ready memory workflow research for AI systems.",
+        "fork": false,
+        "full_name": "Claire-Systems/analog--recall-engine",
+        "languages": [],
+        "last_commit_date": "2026-06-02T19:14:45Z",
+        "name": "analog--recall-engine",
+        "owner": "Claire-Systems",
+        "owner_type": "Organization",
+        "primary_language": null,
+        "repository_size_kb": 4,
+        "url": "https://github.com/Claire-Systems/analog--recall-engine",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/Claire-Systems__analog--recall-engine",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Documentation or profile repository with little/no executable code.",
+      "recommendation": {
+        "action": "NEEDS SECURITY REVIEW",
+        "confidence": "Medium",
+        "current_visibility": "Public",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate. Review-level privacy/contact/path findings should be checked.",
+        "recommended_visibility": "Public"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Veritas Legal",
+        "Analog Recall Engine / ARE",
+        "Spectacle",
+        "Truth Spine",
+        "commercial licensing"
+      ],
+      "sample_files": [
+        "LICENSE",
+        "README.md"
+      ],
+      "security_findings": [
+        {
+          "line": 90,
+          "path": "README.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 111,
+          "path": "README.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 14,
+          "path": "LICENSE",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 22,
+          "path": "LICENSE",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        }
+      ],
+      "status": "DOCUMENTATION ONLY",
+      "status_evidence": "README/profile content only or nearly only.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Training app naming and small code/docs tree.",
+        "status": "PROTOTYPE"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": true,
+        "has_license": true,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 71,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "CDPATH",
+          "CLAIRE",
+          "CLAIRE_AI_MODE",
+          "CLAIRE_LOCAL_LLM_URL",
+          "CLAIRE_MODEL",
+          "OPENAI_API_KEY",
+          "PATH",
+          "START_CLAIRE",
+          "ZIP_PATH"
+        ],
+        "external_services": [
+          "Azure",
+          "GitHub",
+          "OpenAI"
+        ],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [
+          "2026",
+          "8080"
+        ],
+        "startup": [
+          "START_CLAIRE.bat",
+          "START_CLAIRE.ps1",
+          "start_claire.py"
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Private CLAIRE Code Coach workspace: Python survival kit, PyGyro diagnostics, and AI-coder repair exercises.",
+        "fork": false,
+        "full_name": "Claire-Systems/claire-code-coach-level-1",
+        "languages": [],
+        "last_commit_date": "2026-05-21T13:48:30Z",
+        "name": "claire-code-coach-level-1",
+        "owner": "Claire-Systems",
+        "owner_type": "Organization",
+        "primary_language": "Python",
+        "repository_size_kb": 44,
+        "url": "https://github.com/Claire-Systems/claire-code-coach-level-1",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/Claire-Systems__claire-code-coach-level-1",
+      "main_components": [
+        "executable/scripts: START_CLAIRE.bat, START_CLAIRE.ps1, start_claire.py"
+      ],
+      "purpose": "Code Coach training/prototype repository.",
+      "recommendation": {
+        "action": "NEEDS SECURITY REVIEW",
+        "confidence": "Medium",
+        "current_visibility": "Private",
+        "reasoning": "Review-level credential/privacy patterns found; keep private until manually cleared.",
+        "recommended_visibility": "Private"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Analog Recall Engine / ARE",
+        "Librarian",
+        "Truth Spine",
+        "Sentinel",
+        "Gyro",
+        "Android / Termux",
+        "Azure deployment",
+        "commercial licensing"
+      ],
+      "sample_files": [
+        ".gitignore",
+        "COACH_GUIDE.md",
+        "DEMO_SCRIPT.md",
+        "EXERCISES.md",
+        "LESSON_PLAN.md",
+        "LICENSE.txt",
+        "MODULE_01_OVERVIEW.md",
+        "PYGYRO_GUIDE.md",
+        "README.md",
+        "SALES_PAGE.md",
+        "SOCIAL_POSTS.md",
+        "SOLUTIONS.md",
+        "START_CLAIRE.bat",
+        "START_CLAIRE.ps1",
+        "STUDENT_START_HERE.md",
+        "UPGRADE_ROADMAP.md",
+        "WELCOME.md",
+        "claire_ai.py",
+        "claire_brain.py",
+        "claire_coach.py",
+        "claire_players.py",
+        "claire_training/claire_guardrails.md",
+        "claire_training/claire_instructor_system_prompt.md",
+        "claire_training/claire_level_01_python_context.md",
+        "claire_training/claire_teaching_style.md",
+        "claire_training/claire_upgrade_roadmap.md",
+        "exercises/ex_01_broken_print.py",
+        "exercises/ex_02_bad_indent.py",
+        "exercises/ex_03_tabs_spaces.py",
+        "exercises/ex_04_missing_if_body.py",
+        "exercises/ex_05_broken_loop.py",
+        "exercises/ex_06_broken_function.py",
+        "exercises/ex_07_markdown_contamination.py",
+        "exercises/ex_08_nested_drift.py",
+        "exercises/ex_09_ai_paste_corruption.py",
+        "exercises/ex_10_final_repair.py",
+        "lessons/lesson_01_python_files.md",
+        "lessons/lesson_02_running_scripts.md",
+        "lessons/lesson_03_print_variables.md",
+        "lessons/lesson_04_indentation.md",
+        "lessons/lesson_05_if_blocks.md",
+        "lessons/lesson_06_loops.md",
+        "lessons/lesson_07_functions.md",
+        "lessons/lesson_08_errors.md",
+        "lessons/lesson_09_ai_paste_repair.md",
+        "lessons/lesson_10_final_project.md",
+        "levels/level_01_python.json",
+        "levels/level_02_termux_stub.json",
+        "levels/level_03_powershell_stub.json",
+        "levels/level_04_ubuntu_developer_lab_stub.json",
+        "levels/level_05_kali_parrot_operator_lab_stub.json",
+        "levels/level_06_java_stub.json",
+        "levels/level_07_javascript_web_stub.json",
+        "levels/level_08_go_backend_stub.json",
+        "levels/level_09_github_packaging_deployment_stub.json",
+        "levels/level_10_local_ai_claire_builder_stub.json",
+        "packaging/build_zip.ps1",
+        "packaging/build_zip.sh",
+        "packaging/gumroad_file_manifest.md",
+        "pygyro.py"
+      ],
+      "security_findings": [
+        {
+          "line": 178,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "claire_ai.py",
+          "redacted": "api_****get(",
+          "severity": "review",
+          "type": "token assignment"
+        }
+      ],
+      "status": "PROTOTYPE",
+      "status_evidence": "Training app naming and small code/docs tree.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Name says private; visibility must be checked against GitHub metadata.",
+        "status": "SECURITY REVIEW REQUIRED"
+      },
+      "documentation_review": {
+        "claims": [
+          {
+            "claim": "sub-millisecond",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          },
+          {
+            "claim": "validated",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          }
+        ],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": true,
+        "has_license": true,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md",
+          "README_START_HERE.txt"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 13,
+      "how_it_runs": {
+        "dependencies": [
+          "requirements.txt"
+        ],
+        "env_vars": [
+          "A_COMPLETELY_DIFFERENT_KEY",
+          "BITBRAIN_PORT",
+          "FINTECH_SECURE_TOKEN_001",
+          "GH_TOKEN",
+          "PORT"
+        ],
+        "external_services": [
+          "GitHub"
+        ],
+        "hardcoded_paths": [],
+        "installation": [
+          "pip install -r requirements.txt"
+        ],
+        "ports": [
+          "1500",
+          "15000",
+          "2026",
+          "8030"
+        ],
+        "startup": [
+          "run_bitbrain.py"
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "BitBrain SBC: sparse binary coincidence memory engine for tested sub-millisecond local recall paths and governed AI memory research.",
+        "fork": false,
+        "full_name": "clairetech2025-max/-Claire-Systems-bitbrain-sbc-private",
+        "languages": [],
+        "last_commit_date": "2026-06-02T19:33:44Z",
+        "name": "-Claire-Systems-bitbrain-sbc-private",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": "Python",
+        "repository_size_kb": 10,
+        "url": "https://github.com/clairetech2025-max/-Claire-Systems-bitbrain-sbc-private",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__-Claire-Systems-bitbrain-sbc-private",
+      "main_components": [
+        "executable/scripts: app/main.py, run_bitbrain.py",
+        "deployment: Docker/GitHub Actions/compose files present",
+        "dependencies: requirements.txt",
+        "tests: present"
+      ],
+      "purpose": "BitBrain SBC private/commercial code package or hardware-oriented prototype.",
+      "recommendation": {
+        "action": "MAKE PRIVATE",
+        "confidence": "High",
+        "current_visibility": "Public",
+        "reasoning": "Repository name says private while GitHub visibility is public; verify intent and make private unless it is deliberately sanitized.",
+        "recommended_visibility": "Private"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Analog Recall Engine / ARE",
+        "Librarian",
+        "BitBrain",
+        "OfficeAI",
+        "commercial licensing"
+      ],
+      "sample_files": [
+        ".github/workflows/build-gumroad-windows.yml",
+        ".gitignore",
+        "GUMROAD_LISTING.md",
+        "LICENSE",
+        "PRODUCT_RELEASE.md",
+        "README.md",
+        "README_START_HERE.txt",
+        "app/__init__.py",
+        "app/main.py",
+        "requirements.txt",
+        "run_bitbrain.py",
+        "sample_requests.json",
+        "tests/test_bitbrain.py"
+      ],
+      "security_findings": [
+        {
+          "line": 147,
+          "path": "README.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 173,
+          "path": "README.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 25,
+          "path": "LICENSE",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 33,
+          "path": "LICENSE",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        }
+      ],
+      "status": "SECURITY REVIEW REQUIRED",
+      "status_evidence": "Name says private; visibility must be checked against GitHub metadata.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [
+          ".github/workflows/build-gumroad-windows.yml"
+        ],
+        "manifests": [
+          "requirements.txt"
+        ],
+        "review": "Tests/manifests found; not executed during inventory audit.",
+        "tests": [
+          "tests/test_bitbrain.py"
+        ],
+        "tests_present": true
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Small/private repo; limited code evidence.",
+        "status": "EMPTY"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": false,
+        "has_readme": false,
+        "has_security_policy": false,
+        "readmes": []
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 2,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "AZURE_WEBAPP_NAME",
+          "AZURE_WEBAPP_PACKAGE_PATH",
+          "AZURE_WEBAPP_PUBLISH_PROFILE"
+        ],
+        "external_services": [
+          "Azure",
+          "GitHub"
+        ],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Private AI Audit Copilot workspace for local CSV audit review, anomaly detection, trace IDs, and explainable risk flags.",
+        "fork": false,
+        "full_name": "clairetech2025-max/AI-Audit-Copilot",
+        "languages": [],
+        "last_commit_date": "2026-05-03T06:58:58Z",
+        "name": "AI-Audit-Copilot",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": null,
+        "repository_size_kb": 3,
+        "url": "https://github.com/clairetech2025-max/AI-Audit-Copilot",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__AI-Audit-Copilot",
+      "main_components": [
+        "deployment: Docker/GitHub Actions/compose files present"
+      ],
+      "purpose": "AI audit/copilot prototype or placeholder.",
+      "recommendation": {
+        "action": "NEEDS README",
+        "confidence": "Medium",
+        "current_visibility": "Private",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate.",
+        "recommended_visibility": "Undecided"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Azure deployment"
+      ],
+      "sample_files": [
+        ".github/workflows/azure-webapps-node.yml",
+        ".github/workflows/build.yml"
+      ],
+      "security_findings": [],
+      "status": "EMPTY",
+      "status_evidence": "Small/private repo; limited code evidence.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [
+          ".github/workflows/azure-webapps-node.yml",
+          ".github/workflows/build.yml"
+        ],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Repository clone contains no working files beyond git metadata.",
+        "status": "EMPTY"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": false,
+        "has_readme": false,
+        "has_security_policy": false,
+        "readmes": []
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 0,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [],
+        "external_services": [],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "",
+        "description": "Private AI Audit Copilot legacy/duplicate workspace preserved for provenance and migration review.",
+        "fork": false,
+        "full_name": "clairetech2025-max/AI-Audit-Copilot-",
+        "languages": [],
+        "last_commit_date": "2026-05-02T23:24:28Z",
+        "name": "AI-Audit-Copilot-",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": null,
+        "repository_size_kb": 0,
+        "url": "https://github.com/clairetech2025-max/AI-Audit-Copilot-",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__AI-Audit-Copilot-",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Empty placeholder repository.",
+      "recommendation": {
+        "action": "NEEDS README",
+        "confidence": "Medium",
+        "current_visibility": "Private",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate.",
+        "recommended_visibility": "Undecided"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE"
+      ],
+      "sample_files": [],
+      "security_findings": [],
+      "status": "EMPTY",
+      "status_evidence": "Repository clone contains no working files beyond git metadata.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Prototype naming and small Python codebase.",
+        "status": "PROTOTYPE"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": true,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 4,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "BCE_DB_PATH",
+          "BCE_SECRET_KEY",
+          "DB_PATH",
+          "KEY",
+          "SECRET_KEY",
+          "SECRET_KEY_BYTES"
+        ],
+        "external_services": [
+          "GitHub"
+        ],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [
+          "1024",
+          "64000"
+        ],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Private APEX workspace for verifiable AI state transitions, append-only ledgers, replay validation, and regulated-agent research.",
+        "fork": false,
+        "full_name": "clairetech2025-max/APEX--Verifiable-State",
+        "languages": [],
+        "last_commit_date": "2026-05-03T21:51:47Z",
+        "name": "APEX--Verifiable-State",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": "Python",
+        "repository_size_kb": 20,
+        "url": "https://github.com/clairetech2025-max/APEX--Verifiable-State",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__APEX--Verifiable-State",
+      "main_components": [
+        "executable/scripts: appapex_engine.py, test_appapex_engine.py",
+        "tests: present"
+      ],
+      "purpose": "APEX/verifiable state or signal intelligence prototype.",
+      "recommendation": {
+        "action": "NEEDS CLEANUP",
+        "confidence": "Medium",
+        "current_visibility": "Private",
+        "reasoning": "Prototype/partial state; review documentation, tests, and sensitive data before broader exposure.",
+        "recommended_visibility": "Private"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Analog Recall Engine / ARE",
+        "Librarian",
+        "Truth Spine"
+      ],
+      "sample_files": [
+        ".gitignore",
+        "README.md",
+        "appapex_engine.py",
+        "test_appapex_engine.py"
+      ],
+      "security_findings": [],
+      "status": "PROTOTYPE",
+      "status_evidence": "Prototype naming and small Python codebase.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "Tests/manifests found; not executed during inventory audit.",
+        "tests": [
+          "test_appapex_engine.py"
+        ],
+        "tests_present": true
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Repository clone contains no working files beyond git metadata.",
+        "status": "EMPTY"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": false,
+        "has_readme": false,
+        "has_security_policy": false,
+        "readmes": []
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 0,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [],
+        "external_services": [],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "",
+        "description": "Private ARE workspace: governed recall experiments, memory provenance, and migration path into the Claire Systems product line.",
+        "fork": false,
+        "full_name": "clairetech2025-max/ARE",
+        "languages": [],
+        "last_commit_date": "2026-02-23T19:05:38Z",
+        "name": "ARE",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": null,
+        "repository_size_kb": 0,
+        "url": "https://github.com/clairetech2025-max/ARE",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__ARE",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Empty placeholder repository.",
+      "recommendation": {
+        "action": "NEEDS README",
+        "confidence": "Medium",
+        "current_visibility": "Private",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate.",
+        "recommended_visibility": "Undecided"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Analog Recall Engine / ARE"
+      ],
+      "sample_files": [],
+      "security_findings": [],
+      "status": "EMPTY",
+      "status_evidence": "Repository clone contains no working files beyond git metadata.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "README/profile content only or nearly only.",
+        "status": "DOCUMENTATION ONLY"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 2,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "DB_PATH",
+          "KEY",
+          "PORT",
+          "TOKEN_RE"
+        ],
+        "external_services": [
+          "OpenAI"
+        ],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [
+          "20000",
+          "3000",
+          "7999"
+        ],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Original simple ARE",
+        "fork": false,
+        "full_name": "clairetech2025-max/ARE-Librarian",
+        "languages": [],
+        "last_commit_date": "2026-06-04T08:29:03Z",
+        "name": "ARE-Librarian",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": "Python",
+        "repository_size_kb": 8,
+        "url": "https://github.com/clairetech2025-max/ARE-Librarian",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__ARE-Librarian",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Documentation or profile repository with little/no executable code.",
+      "recommendation": {
+        "action": "NEEDS SECURITY REVIEW",
+        "confidence": "Medium",
+        "current_visibility": "Private",
+        "reasoning": "Review-level credential/privacy patterns found; keep private until manually cleared.",
+        "recommended_visibility": "Private"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Analog Recall Engine / ARE",
+        "Librarian"
+      ],
+      "sample_files": [
+        "README.md",
+        "src/are_sidecar.py"
+      ],
+      "security_findings": [
+        {
+          "line": 108,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "src/are_sidecar.py",
+          "redacted": "toke****rip(",
+          "severity": "review",
+          "type": "token assignment"
+        }
+      ],
+      "status": "DOCUMENTATION ONLY",
+      "status_evidence": "README/profile content only or nearly only.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "Likely private/commercial Librarian line; compare carefully with public ARE repos before exposing."
+    },
+    {
+      "current_condition": {
+        "evidence": "Repository clone contains no working files beyond git metadata.",
+        "status": "EMPTY"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": false,
+        "has_readme": false,
+        "has_security_policy": false,
+        "readmes": []
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 0,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [],
+        "external_services": [],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "",
+        "description": "Private APEX Signal Intelligence workspace for research-only market signal dashboards, deterministic scoring, and no-execution safeguards.",
+        "fork": false,
+        "full_name": "clairetech2025-max/Claire-Systems-apex-signal-intelligence-private",
+        "languages": [],
+        "last_commit_date": "2026-05-01T20:48:21Z",
+        "name": "Claire-Systems-apex-signal-intelligence-private",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": null,
+        "repository_size_kb": 0,
+        "url": "https://github.com/clairetech2025-max/Claire-Systems-apex-signal-intelligence-private",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__Claire-Systems-apex-signal-intelligence-private",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Empty placeholder repository.",
+      "recommendation": {
+        "action": "NEEDS README",
+        "confidence": "Medium",
+        "current_visibility": "Private",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate.",
+        "recommended_visibility": "Undecided"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE"
+      ],
+      "sample_files": [],
+      "security_findings": [],
+      "status": "EMPTY",
+      "status_evidence": "Repository clone contains no working files beyond git metadata.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Private repo with Python package payload and commercial naming.",
+        "status": "COMMERCIAL / PRIVATE"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": true,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": true,
+        "readmes": [
+          "README.md",
+          "README_START_HERE.txt"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "examples": [
+            ".github/workflows/build-gumroad-windows.yml",
+            "gumroad_builds/ARE-Spectacle/github-actions/build-gumroad-windows.yml",
+            "GUMROAD_LISTING.md",
+            "gumroad_builds/ARE-Spectacle/GUMROAD_LISTING.md",
+            "PRIVATE_REPO_SETUP.md"
+          ],
+          "repository": "clairetech2025-max/claire",
+          "shared_file_count": 6
+        }
+      ],
+      "file_count": 45,
+      "how_it_runs": {
+        "dependencies": [
+          "requirements.txt"
+        ],
+        "env_vars": [
+          "ARE_SPECTACLE_PORT",
+          "GEMINI_API_KEY",
+          "GH_TOKEN",
+          "KEY",
+          "KEYWORDS",
+          "PORT"
+        ],
+        "external_services": [
+          "Azure",
+          "CourtListener",
+          "Gemini",
+          "GitHub"
+        ],
+        "hardcoded_paths": [
+          "/home/LuciusPrime/are-spectacle-v2/spectacle.log"
+        ],
+        "installation": [
+          "pip install -r requirements.txt"
+        ],
+        "ports": [
+          "8010"
+        ],
+        "startup": [
+          "run_spectacle.py"
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "ARE Spectacle private workspace: governed memory middleware, lane discipline, trace/replay, and controlled evaluation packaging.",
+        "fork": false,
+        "full_name": "clairetech2025-max/Claire-Systems-are-spectacle-private",
+        "languages": [],
+        "last_commit_date": "2026-05-02T08:57:39Z",
+        "name": "Claire-Systems-are-spectacle-private",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": "Python",
+        "repository_size_kb": 27,
+        "url": "https://github.com/clairetech2025-max/Claire-Systems-are-spectacle-private",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__Claire-Systems-are-spectacle-private",
+      "main_components": [
+        "executable/scripts: app/main.py, run_spectacle.py",
+        "deployment: Docker/GitHub Actions/compose files present",
+        "dependencies: requirements.txt",
+        "tests: present",
+        "storage/memory: JSONL/SQLite/memory artifacts or code present",
+        "governance: Sentinel component"
+      ],
+      "purpose": "Private ARE Spectacle commercial/demo package around governed memory.",
+      "recommendation": {
+        "action": "NEEDS SECURITY REVIEW",
+        "confidence": "Medium",
+        "current_visibility": "Private",
+        "reasoning": "Review-level credential/privacy patterns found; keep private until manually cleared.",
+        "recommended_visibility": "Private"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Veritas Legal",
+        "Analog Recall Engine / ARE",
+        "Spectacle",
+        "Truth Spine",
+        "Sentinel",
+        "DiodeGuard",
+        "Gyro",
+        "session continuity",
+        "legal research",
+        "Azure deployment",
+        "commercial licensing",
+        "patents or provisional patent materials"
+      ],
+      "sample_files": [
+        ".github/workflows/build-gumroad-windows.yml",
+        ".gitignore",
+        "DEPLOYMENT.md",
+        "GUMROAD_LISTING.md",
+        "PRIVATE_REPO_SETUP.md",
+        "PRODUCT_RELEASE.md",
+        "README.md",
+        "README_START_HERE.txt",
+        "app/__init__.py",
+        "app/api/__init__.py",
+        "app/api/routes.py",
+        "app/core/__init__.py",
+        "app/core/turn_engine.py",
+        "app/domain/__init__.py",
+        "app/domain/types.py",
+        "app/main.py",
+        "app/services/__init__.py",
+        "app/services/answer_planner.py",
+        "app/services/contradiction_checker.py",
+        "app/services/gyro_are.py",
+        "app/services/intake.py",
+        "app/services/intent_classifier.py",
+        "app/services/lane_router.py",
+        "app/services/lycanthrope.py",
+        "app/services/recall_service.py",
+        "app/services/recognition_rail.py",
+        "app/services/relevance_gate.py",
+        "app/services/sentinel.py",
+        "app/services/traillink.py",
+        "app/services/visor_builder.py",
+        "app/services/write_barrier.py",
+        "app/storage/__init__.py",
+        "app/storage/gravel_store.py",
+        "app/storage/session_store.py",
+        "app/storage/sqlite_store.py",
+        "app/tracing/__init__.py",
+        "app/tracing/veritas.py",
+        "docs/MARKETPLACE_LISTING.md",
+        "docs/SECURITY.md",
+        "docs/SOURCE_MAP.md",
+        "requirements.txt",
+        "run_spectacle.py",
+        "sample_requests.json",
+        "tests/conftest.py",
+        "tests/test_turn_flow.py"
+      ],
+      "security_findings": [
+        {
+          "line": 37,
+          "path": "DEPLOYMENT.md",
+          "redacted": "/hom****.log",
+          "severity": "review",
+          "type": "local absolute path"
+        }
+      ],
+      "status": "COMMERCIAL / PRIVATE",
+      "status_evidence": "Private repo with Python package payload and commercial naming.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [
+          ".github/workflows/build-gumroad-windows.yml"
+        ],
+        "manifests": [
+          "requirements.txt"
+        ],
+        "review": "Tests/manifests found; not executed during inventory audit.",
+        "tests": [
+          "tests/conftest.py",
+          "tests/test_turn_flow.py"
+        ],
+        "tests_present": true
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Private repo with execution-gateway naming.",
+        "status": "COMMERCIAL / PRIVATE"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": true,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md",
+          "README_START_HERE.txt"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 12,
+      "how_it_runs": {
+        "dependencies": [
+          "requirements.txt"
+        ],
+        "env_vars": [
+          "GH_TOKEN",
+          "PORT",
+          "SEG_PORT"
+        ],
+        "external_services": [
+          "GitHub"
+        ],
+        "hardcoded_paths": [],
+        "installation": [
+          "pip install -r requirements.txt"
+        ],
+        "ports": [
+          "1500",
+          "8020"
+        ],
+        "startup": [
+          "run_gateway.py"
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Private Sovereign Execution Gateway workspace for local truth-capsule caching, governed recall checks, confidence scoring, and replay traces.",
+        "fork": false,
+        "full_name": "clairetech2025-max/Claire-Systems-sovereign-execution-gateway-private",
+        "languages": [],
+        "last_commit_date": "2026-05-02T08:57:41Z",
+        "name": "Claire-Systems-sovereign-execution-gateway-private",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": "Python",
+        "repository_size_kb": 7,
+        "url": "https://github.com/clairetech2025-max/Claire-Systems-sovereign-execution-gateway-private",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__Claire-Systems-sovereign-execution-gateway-private",
+      "main_components": [
+        "executable/scripts: app/main.py, run_gateway.py",
+        "deployment: Docker/GitHub Actions/compose files present",
+        "dependencies: requirements.txt",
+        "tests: present"
+      ],
+      "purpose": "Private sovereign execution gateway prototype/package.",
+      "recommendation": {
+        "action": "KEEP PRIVATE",
+        "confidence": "High",
+        "current_visibility": "Private",
+        "reasoning": "Commercial/proprietary product or private package naming.",
+        "recommended_visibility": "Private"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Analog Recall Engine / ARE",
+        "Truth Spine",
+        "commercial licensing"
+      ],
+      "sample_files": [
+        ".github/workflows/build-gumroad-windows.yml",
+        ".gitignore",
+        "GUMROAD_LISTING.md",
+        "PRODUCT_RELEASE.md",
+        "README.md",
+        "README_START_HERE.txt",
+        "app/__init__.py",
+        "app/main.py",
+        "requirements.txt",
+        "run_gateway.py",
+        "sample_requests.json",
+        "tests/test_gateway.py"
+      ],
+      "security_findings": [],
+      "status": "COMMERCIAL / PRIVATE",
+      "status_evidence": "Private repo with execution-gateway naming.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [
+          ".github/workflows/build-gumroad-windows.yml"
+        ],
+        "manifests": [
+          "requirements.txt"
+        ],
+        "review": "Tests/manifests found; not executed during inventory audit.",
+        "tests": [
+          "tests/test_gateway.py"
+        ],
+        "tests_present": true
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Repository clone contains no working files beyond git metadata.",
+        "status": "EMPTY"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": false,
+        "has_readme": false,
+        "has_security_policy": false,
+        "readmes": []
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 0,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [],
+        "external_services": [],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "",
+        "description": "Private OfficeAI / BitBrain 500 Agent workspace: governed multi-agent orchestration, deterministic routing, audit trails, and review controls.",
+        "fork": false,
+        "full_name": "clairetech2025-max/OfficeAI-500-Sovereign-Mesh",
+        "languages": [],
+        "last_commit_date": "2026-05-02T22:11:36Z",
+        "name": "OfficeAI-500-Sovereign-Mesh",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": null,
+        "repository_size_kb": 0,
+        "url": "https://github.com/clairetech2025-max/OfficeAI-500-Sovereign-Mesh",
+        "visibility": "PRIVATE"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__OfficeAI-500-Sovereign-Mesh",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Empty placeholder repository.",
+      "recommendation": {
+        "action": "NEEDS README",
+        "confidence": "Medium",
+        "current_visibility": "Private",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate.",
+        "recommended_visibility": "Undecided"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "OfficeAI"
+      ],
+      "sample_files": [],
+      "security_findings": [],
+      "status": "EMPTY",
+      "status_evidence": "Repository clone contains no working files beyond git metadata.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "README/profile content only or nearly only.",
+        "status": "DOCUMENTATION ONLY"
+      },
+      "documentation_review": {
+        "claims": [
+          {
+            "claim": "production-ready",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          },
+          {
+            "claim": "validated",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          },
+          {
+            "claim": "compliance-ready",
+            "evidence": "Claim appears in docs; no benchmark/test validation was run in this audit.",
+            "support": "UNKNOWN"
+          }
+        ],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": true,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 2,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "REPORTING"
+        ],
+        "external_services": [],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [
+          "2026"
+        ],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "OfficeAI / BitBrain 500 Agent: governed multi-agent orchestration with deterministic routing, audit trails, and review controls.",
+        "fork": false,
+        "full_name": "clairetech2025-max/OfficeAI-500-Sovereign-Mesh-README.md",
+        "languages": [],
+        "last_commit_date": "2026-06-02T19:36:08Z",
+        "name": "OfficeAI-500-Sovereign-Mesh-README.md",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": null,
+        "repository_size_kb": 4,
+        "url": "https://github.com/clairetech2025-max/OfficeAI-500-Sovereign-Mesh-README.md",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__OfficeAI-500-Sovereign-Mesh-README.md",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Documentation or profile repository with little/no executable code.",
+      "recommendation": {
+        "action": "SAFE TO KEEP PUBLIC",
+        "confidence": "Medium",
+        "current_visibility": "Public",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate. Review-level privacy/contact/path findings should be checked.",
+        "recommended_visibility": "Public"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Veritas Legal",
+        "Analog Recall Engine / ARE",
+        "BitBrain",
+        "OfficeAI",
+        "commercial licensing"
+      ],
+      "sample_files": [
+        "LICENSE",
+        "README.md"
+      ],
+      "security_findings": [
+        {
+          "line": 224,
+          "path": "README.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 251,
+          "path": "README.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 25,
+          "path": "LICENSE",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 33,
+          "path": "LICENSE",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        }
+      ],
+      "status": "DOCUMENTATION ONLY",
+      "status_evidence": "README/profile content only or nearly only.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "README/profile content only or nearly only.",
+        "status": "DOCUMENTATION ONLY"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 1,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "CLAIRE"
+        ],
+        "external_services": [],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Private Session Capsule Protocol workspace for AI session continuity, handoff recovery, and local-first operational state preservation.",
+        "fork": false,
+        "full_name": "clairetech2025-max/bootstrap_session_capsule_protocol",
+        "languages": [],
+        "last_commit_date": "2026-05-20T13:53:21Z",
+        "name": "bootstrap_session_capsule_protocol",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": null,
+        "repository_size_kb": 3,
+        "url": "https://github.com/clairetech2025-max/bootstrap_session_capsule_protocol",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__bootstrap_session_capsule_protocol",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Documentation or profile repository with little/no executable code.",
+      "recommendation": {
+        "action": "SAFE TO KEEP PUBLIC",
+        "confidence": "Medium",
+        "current_visibility": "Public",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate.",
+        "recommended_visibility": "Public"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Analog Recall Engine / ARE",
+        "Sentinel",
+        "Gyro",
+        "session continuity",
+        "Session Capsule Protocol",
+        "patents or provisional patent materials"
+      ],
+      "sample_files": [
+        "README.md"
+      ],
+      "security_findings": [],
+      "status": "DOCUMENTATION ONLY",
+      "status_evidence": "README/profile content only or nearly only.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "Large active monorepo with working live services but dirty worktree, many prototypes, and security review findings.",
+        "status": "PARTIAL"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": true,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "gumroad_builds/ARE-Spectacle/README_START_HERE.txt"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "examples": [
+            ".github/workflows/build-gumroad-windows.yml",
+            "gumroad_builds/ARE-Spectacle/github-actions/build-gumroad-windows.yml",
+            "GUMROAD_LISTING.md",
+            "gumroad_builds/ARE-Spectacle/GUMROAD_LISTING.md",
+            "PRIVATE_REPO_SETUP.md"
+          ],
+          "repository": "clairetech2025-max/Claire-Systems-are-spectacle-private",
+          "shared_file_count": 6
+        }
+      ],
+      "file_count": 78,
+      "how_it_runs": {
+        "dependencies": [
+          "go.mod"
+        ],
+        "env_vars": [
+          "ARE_ADD_URL",
+          "ARE_INGEST_URL",
+          "ARE_SPECTACLE_PORT",
+          "ARE_URL",
+          "AZURE_CONNECTION_STRING",
+          "CLAIRE",
+          "CLAIRE_ARE_INGEST_URL",
+          "CLAIRE_CORE",
+          "CLAIRE_CORE_HOME",
+          "CLAIRE_CORE_PORT",
+          "CLAIRE_INGEST_TOKEN",
+          "CLAIRE_SERVER",
+          "COURTLISTENER_API_KEY",
+          "GH_TOKEN",
+          "INGEST_TOKEN",
+          "INGEST_URL",
+          "KEYS",
+          "KEYS_FILE",
+          "KEYWORDS",
+          "LLM_URL",
+          "LOAD_PATH",
+          "NO_ACTION_PATH",
+          "OPENALEX_URL",
+          "PATH",
+          "PORT",
+          "PORTFOLIO",
+          "REPORT_READY",
+          "SECRET",
+          "SEMANTIC_SCHOLAR_API_KEY",
+          "SEMANTIC_SCHOLAR_URL"
+        ],
+        "external_services": [
+          "Azure",
+          "CourtListener",
+          "GitHub",
+          "Hugging Face",
+          "OpenAI",
+          "llama.cpp"
+        ],
+        "hardcoded_paths": [
+          "/home/LuciusPrime/claire",
+          "/home/LuciusPrime/claire/are.log",
+          "/home/LuciusPrime/claire/certs/cert.pem",
+          "/home/LuciusPrime/claire/certs/key.pem",
+          "/home/LuciusPrime/claire/claire_gui.py",
+          "/home/LuciusPrime/claire/claire_keys.env",
+          "/home/LuciusPrime/claire/claire_node.go",
+          "/home/LuciusPrime/claire/data",
+          "/home/LuciusPrime/claire/data/claire_core_v1",
+          "/home/LuciusPrime/claire/data/memory_vault.jsonl",
+          "/home/LuciusPrime/claire/data/parser_output.jsonl",
+          "/home/LuciusPrime/claire/data/parser_temp"
+        ],
+        "installation": [
+          "go mod download"
+        ],
+        "ports": [
+          "1024",
+          "1117",
+          "1200",
+          "1300",
+          "1440",
+          "16000",
+          "1853",
+          "1974",
+          "1977",
+          "1983",
+          "2000",
+          "2024",
+          "2026",
+          "2626",
+          "30363",
+          "3531",
+          "4000",
+          "4096",
+          "4200",
+          "4433"
+        ],
+        "startup": [
+          "LAUNCH.sh",
+          "gumroad_builds/ARE-Spectacle/run_spectacle.py",
+          "run_are.sh"
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "CLAIRE public demo/runtime workspace for governed AI interaction, ARE recall, Sentinel policy validation, and trace/replay proof scenarios.",
+        "fork": false,
+        "full_name": "clairetech2025-max/claire",
+        "languages": [],
+        "last_commit_date": "2026-07-12T18:28:26Z",
+        "name": "claire",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": "Python",
+        "repository_size_kb": 3183,
+        "url": "https://github.com/clairetech2025-max/claire",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__claire",
+      "main_components": [
+        "main entry point: main.py, server.py, claire_gui.py, ARE_SERVER.py, main.go",
+        "executable/scripts: ARE_SERVER.py, ARE_SERVER_LOCKED.py, LAUNCH.sh, apex/apex_server.py, boot_claire.sh, bootstrap.sh, claire_bootstrap.sh, claire_bootstrap_v2.sh, claire_sovereign_boot.sh, educate_domains.py",
+        "dependencies: go.mod",
+        "tests: present",
+        "UI: HTML/static assets present",
+        "storage/memory: JSONL/SQLite/memory artifacts or code present",
+        "legal research: CourtListener component",
+        "governance: Sentinel component"
+      ],
+      "purpose": "Primary CLAIRE monorepo: public GUI/runtime, ARE package, Veritas integrations, Venture subsystem, demos, deployment scripts, and many legacy/prototype components.",
+      "recommendation": {
+        "action": "NEEDS SECURITY REVIEW",
+        "confidence": "Medium",
+        "current_visibility": "Public",
+        "reasoning": "Main product repository contains infrastructure paths, public contact details, runtime/deployment code, and possible sensitive history; review before deciding public/private.",
+        "recommended_visibility": "Private"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Veritas Legal",
+        "Analog Recall Engine / ARE",
+        "Spectacle",
+        "Truth Spine",
+        "Sentinel",
+        "DiodeGuard",
+        "Gyro",
+        "session continuity",
+        "BitBrain",
+        "OfficeAI",
+        "voice system",
+        "legal research",
+        "Azure deployment",
+        "commercial licensing",
+        "patents or provisional patent materials"
+      ],
+      "sample_files": [
+        ".gitignore",
+        "AGENTS.md",
+        "ARE_SERVER.py",
+        "ARE_SERVER_LOCKED.py",
+        "LAUNCH.sh",
+        "MARKET_ANALYSIS_REPORT.md",
+        "Veritas_parser.py",
+        "answer_planner.py",
+        "apex/Claire's Odyssey ",
+        "apex/apex_server.py",
+        "apex/investor_primary.py",
+        "apex/investor_scout.py",
+        "app/services/write_barrier.py",
+        "archimedes_demo.py",
+        "boot_claire.sh",
+        "bootstrap.sh",
+        "build_kraken_market_memory.py",
+        "centaur_demo.sh.",
+        "claire_are_loader.py",
+        "claire_azure_sync.py",
+        "claire_bootstrap.sh",
+        "claire_bootstrap_v2.sh",
+        "claire_core_v1.py",
+        "claire_courtlistener.py",
+        "claire_double_pulse.sh",
+        "claire_gui.html",
+        "claire_gui.py",
+        "claire_gui.py.save",
+        "claire_gui_WORKING.py",
+        "claire_ingest_bridge.py",
+        "claire_parser",
+        "claire_parser.py",
+        "claire_pulse_final.sh",
+        "claire_reader.py",
+        "claire_reflect.py",
+        "claire_scholar.py",
+        "claire_sovereign_boot.sh",
+        "claire_voice_kernel.txt",
+        "crush_to_gold.py",
+        "educate_domains.py",
+        "go.mod",
+        "gumroad_builds/ARE-Spectacle/GUMROAD_LISTING.md",
+        "gumroad_builds/ARE-Spectacle/PRIVATE_REPO_SETUP.md",
+        "gumroad_builds/ARE-Spectacle/README_START_HERE.txt",
+        "gumroad_builds/ARE-Spectacle/build_windows_nuitka.ps1",
+        "gumroad_builds/ARE-Spectacle/github-actions/build-gumroad-windows.yml",
+        "gumroad_builds/ARE-Spectacle/push_after_private_repo_created.ps1",
+        "gumroad_builds/ARE-Spectacle/push_after_private_repo_created.sh",
+        "gumroad_builds/ARE-Spectacle/run_spectacle.py",
+        "gumroad_builds/ARE-Spectacle/sample_requests.json",
+        "gumroad_builds/BUILD_PATTERN.md",
+        "gumroad_builds/BitBrain-SBC/push_after_private_repo_created.ps1",
+        "gumroad_builds/BitBrain-SBC/push_after_private_repo_created.sh",
+        "gumroad_builds/CREATE_PRIVATE_REPOS.md",
+        "gumroad_builds/PRODUCT_ROSTER.md",
+        "gumroad_builds/Sovereign-Execution-Gateway/push_after_private_repo_created.ps1",
+        "gumroad_builds/Sovereign-Execution-Gateway/push_after_private_repo_created.sh",
+        "hello.go",
+        "intent_classifier.py",
+        "lane_router.py"
+      ],
+      "security_findings": [
+        {
+          "line": 564,
+          "path": "claire_parser",
+          "redacted": "/hom****sonl",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 569,
+          "path": "claire_parser",
+          "redacted": "/hom****temp",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 232,
+          "path": "claire_core_v1.py",
+          "redacted": "/hom****e_v1",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 8,
+          "path": "LAUNCH.sh",
+          "redacted": "/hom****aire",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 13,
+          "path": "claire_pulse_final.sh",
+          "redacted": "/hom****e.go",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 3,
+          "path": "run_are.sh",
+          "redacted": "/hom****aire",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 84,
+          "path": "MARKET_ANALYSIS_REPORT.md",
+          "redacted": "lice****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 668,
+          "path": "claire_parser.py",
+          "redacted": "/hom****sonl",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 673,
+          "path": "claire_parser.py",
+          "redacted": "/hom****temp",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 3,
+          "path": "centaur_demo.sh.",
+          "redacted": "/hom****data",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 4,
+          "path": "centaur_demo.sh.",
+          "redacted": "/hom****logs",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 14,
+          "path": "ARE_SERVER.py",
+          "redacted": "/hom****sonl",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 24,
+          "path": "claire_reader.py",
+          "redacted": "/hom****aire",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 8,
+          "path": "claire_sovereign_boot.sh",
+          "redacted": "/hom****.env",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 10,
+          "path": "claire_sovereign_boot.sh",
+          "redacted": "/hom****.env",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 19,
+          "path": "claire_sovereign_boot.sh",
+          "redacted": "/hom****aire",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 38,
+          "path": "claire_sovereign_boot.sh",
+          "redacted": "/hom****edge",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 1,
+          "note": "Looks like placeholder/example connection string; still unsafe pattern for a public repo and should be replaced with env-based example.",
+          "path": "claire_azure_sync.py",
+          "redacted": "Defa****+w==",
+          "severity": "review",
+          "type": "Azure connection string"
+        },
+        {
+          "line": 7,
+          "path": "claire_bootstrap.sh",
+          "redacted": "/hom****aire",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 6,
+          "path": "claire_are_loader.py",
+          "redacted": "/hom****sonl",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 12,
+          "path": "claire_ingest_bridge.py",
+          "redacted": "/hom****aire",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 14,
+          "path": "bootstrap.sh",
+          "redacted": "/hom****aire",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 17,
+          "path": "bootstrap.sh",
+          "redacted": "/hom****vate",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 18,
+          "path": "bootstrap.sh",
+          "redacted": "/hom****.log",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 22,
+          "path": "bootstrap.sh",
+          "redacted": "/hom****rver",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 23,
+          "path": "bootstrap.sh",
+          "redacted": "/hom****gguf",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 24,
+          "path": "bootstrap.sh",
+          "redacted": "/hom****.log",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 29,
+          "path": "bootstrap.sh",
+          "redacted": "/hom****.log",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 4,
+          "path": "recovered_claire_gui.py",
+          "redacted": "/hom****i.py",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 137,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "claire_scholar.py",
+          "redacted": "api_****get(",
+          "severity": "review",
+          "type": "token assignment"
+        },
+        {
+          "line": 24,
+          "path": "claire_reflect.py",
+          "redacted": "/hom****aire",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 8,
+          "path": "sovereign_proxy.go",
+          "redacted": "/hom****eam_",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 13,
+          "path": "sovereign_proxy.go",
+          "redacted": "/hom****.pem",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 16,
+          "path": "claire_bootstrap_v2.sh",
+          "redacted": "/hom****e.go",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 24,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "claire_courtlistener.py",
+          "redacted": "toke****env(",
+          "severity": "review",
+          "type": "token assignment"
+        },
+        {
+          "line": 10,
+          "path": "sentinel_core/sentinel_ingest.py",
+          "redacted": "/hom****aire",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 6,
+          "path": "sentinel_core/are_server.py",
+          "redacted": "/hom****sonl",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 41,
+          "path": "gumroad_builds/CREATE_PRIVATE_REPOS.md",
+          "redacted": "/hom****vate",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 46,
+          "path": "gumroad_builds/CREATE_PRIVATE_REPOS.md",
+          "redacted": "git@****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 69,
+          "path": "gumroad_builds/CREATE_PRIVATE_REPOS.md",
+          "redacted": "/hom****d.sh",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 77,
+          "path": "gumroad_builds/CREATE_PRIVATE_REPOS.md",
+          "redacted": "/hom****d.sh",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 3,
+          "path": "gumroad_builds/ARE-Spectacle/push_after_private_repo_created.ps1",
+          "redacted": "git@****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 4,
+          "path": "gumroad_builds/ARE-Spectacle/push_after_private_repo_created.ps1",
+          "redacted": "/hom****vate",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 4,
+          "path": "gumroad_builds/ARE-Spectacle/push_after_private_repo_created.sh",
+          "redacted": "git@****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 5,
+          "path": "gumroad_builds/ARE-Spectacle/push_after_private_repo_created.sh",
+          "redacted": "/hom****vate",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 3,
+          "path": "gumroad_builds/Sovereign-Execution-Gateway/push_after_private_repo_created.ps1",
+          "redacted": "git@****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 4,
+          "path": "gumroad_builds/Sovereign-Execution-Gateway/push_after_private_repo_created.ps1",
+          "redacted": "/hom****vate",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 4,
+          "path": "gumroad_builds/Sovereign-Execution-Gateway/push_after_private_repo_created.sh",
+          "redacted": "git@****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 5,
+          "path": "gumroad_builds/Sovereign-Execution-Gateway/push_after_private_repo_created.sh",
+          "redacted": "/hom****vate",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 3,
+          "path": "gumroad_builds/BitBrain-SBC/push_after_private_repo_created.ps1",
+          "redacted": "git@****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 4,
+          "path": "gumroad_builds/BitBrain-SBC/push_after_private_repo_created.ps1",
+          "redacted": "/hom****vate",
+          "severity": "review",
+          "type": "local absolute path"
+        },
+        {
+          "line": 4,
+          "path": "gumroad_builds/BitBrain-SBC/push_after_private_repo_created.sh",
+          "redacted": "git@****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 5,
+          "path": "gumroad_builds/BitBrain-SBC/push_after_private_repo_created.sh",
+          "redacted": "/hom****vate",
+          "severity": "review",
+          "type": "local absolute path"
+        }
+      ],
+      "status": "PARTIAL",
+      "status_evidence": "Large active monorepo with working live services but dirty worktree, many prototypes, and security review findings.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [
+          "go.mod"
+        ],
+        "review": "Tests/manifests found; not executed during inventory audit.",
+        "tests": [
+          "test_memory_routing.py"
+        ],
+        "tests_present": true
+      },
+      "version_analysis": "Current integration monorepo and successor/consumer of several smaller prototypes."
+    },
+    {
+      "current_condition": {
+        "evidence": "README/profile content only or nearly only.",
+        "status": "DOCUMENTATION ONLY"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": false,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md",
+          "Readme.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 2,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "CLAIRE"
+        ],
+        "external_services": [
+          "Gemini",
+          "GitHub"
+        ],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "CLAIRE Code Coach Level 1: Python survival kit for AI coders, PyGyro diagnostics, and terminal-native code repair practice.",
+        "fork": false,
+        "full_name": "clairetech2025-max/claire-code-coach-level-1.",
+        "languages": [],
+        "last_commit_date": "2026-05-21T00:39:00Z",
+        "name": "claire-code-coach-level-1.",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": null,
+        "repository_size_kb": 2,
+        "url": "https://github.com/clairetech2025-max/claire-code-coach-level-1.",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__claire-code-coach-level-1.",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Documentation or profile repository with little/no executable code.",
+      "recommendation": {
+        "action": "SAFE TO KEEP PUBLIC",
+        "confidence": "Medium",
+        "current_visibility": "Public",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate.",
+        "recommended_visibility": "Public"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Gyro"
+      ],
+      "sample_files": [
+        "README.md",
+        "Readme.md"
+      ],
+      "security_findings": [],
+      "status": "DOCUMENTATION ONLY",
+      "status_evidence": "README/profile content only or nearly only.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    },
+    {
+      "current_condition": {
+        "evidence": "FastAPI web app, tests, live service evidence, CourtListener/EDGAR code present.",
+        "status": "MOSTLY WORKING"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": true,
+        "has_gitignore": true,
+        "has_license": true,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md",
+          "README_VERITAS_LEGAL.md",
+          "web/rules/README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 55,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "CLAIRE",
+          "CLAIRE_API_URL",
+          "CLAIRE_LICENSE_SECRET",
+          "CLAIRE_LLAMA_ROOT",
+          "CLAIRE_MODEL_ID",
+          "CLAIRE_STATE_DIR",
+          "CONSTITUTIONAL_API_KEY",
+          "COURTLISTENER_API_KEY",
+          "COURTLISTENER_TOKEN",
+          "LEGAL_INTENT_KEYWORDS",
+          "SECRET_SOURCES",
+          "URL"
+        ],
+        "external_services": [
+          "CourtListener",
+          "GitHub",
+          "Hugging Face",
+          "SEC EDGAR",
+          "llama.cpp"
+        ],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [
+          "1200",
+          "12345",
+          "1360",
+          "1400",
+          "16782",
+          "1717",
+          "1998",
+          "2000",
+          "2013",
+          "2024",
+          "2026",
+          "2483",
+          "38989",
+          "4096",
+          "4331",
+          "64000",
+          "8000",
+          "8080"
+        ],
+        "startup": [
+          "start_veritas_legal.bat",
+          "start_veritas_legal.ps1"
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Local-first litigation intelligence workspace for evidence reconstruction, chronology analysis, grounded citation tracing, and private matter memory.",
+        "fork": false,
+        "full_name": "clairetech2025-max/claire-veritas-legal",
+        "languages": [],
+        "last_commit_date": "2026-07-13T08:22:32Z",
+        "name": "claire-veritas-legal",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": "Python",
+        "repository_size_kb": 310,
+        "url": "https://github.com/clairetech2025-max/claire-veritas-legal",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__claire-veritas-legal",
+      "main_components": [
+        "main entry point: web/app.py",
+        "executable/scripts: start_veritas_legal.bat, start_veritas_legal.ps1, tests/test_veritas_claire_runtime.py, veritas_claire_runtime.py, web/app.py, web/static/app.js",
+        "deployment: Docker/GitHub Actions/compose files present",
+        "tests: present",
+        "UI: HTML/static assets present",
+        "storage/memory: JSONL/SQLite/memory artifacts or code present",
+        "legal research: CourtListener component",
+        "public-source research: SEC EDGAR component"
+      ],
+      "purpose": "Standalone Veritas Legal workstation for matter/evidence workflow, CourtListener and EDGAR-backed legal research, firm authority, and document production.",
+      "recommendation": {
+        "action": "NEEDS SECURITY REVIEW",
+        "confidence": "Medium",
+        "current_visibility": "Public",
+        "reasoning": "Main product repository contains infrastructure paths, public contact details, runtime/deployment code, and possible sensitive history; review before deciding public/private.",
+        "recommended_visibility": "Private"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Veritas Legal",
+        "Analog Recall Engine / ARE",
+        "Truth Spine",
+        "DiodeGuard",
+        "Gyro",
+        "session continuity",
+        "legal research",
+        "Hugging Face demos",
+        "commercial licensing"
+      ],
+      "sample_files": [
+        ".env.example",
+        ".github/workflows/smoke.yml",
+        ".gitignore",
+        "COMMERCIAL_BRANCH.md",
+        "COMMERCIAL_OVERVIEW.md",
+        "CONNECTORS.md",
+        "LICENSE",
+        "README.md",
+        "README_VERITAS_LEGAL.md",
+        "SELLABLE_PACKAGE.md",
+        "SESSION.md",
+        "courtlistener_client.py",
+        "demo_seed.py",
+        "edgar_client.py",
+        "examples/chat-creator-question.json",
+        "examples/chat-creator-unlock.json",
+        "examples/courtlistener-ingest.json",
+        "examples/courtlistener-search.json",
+        "license_manager.py",
+        "memory_io.py",
+        "palantir_parser.py",
+        "requirements-web.txt",
+        "smoke_test.py",
+        "start_veritas_legal.bat",
+        "start_veritas_legal.ps1",
+        "tests/test_courtlistener_client.py",
+        "tests/test_edgar_client.py",
+        "tests/test_veritas_claire_runtime.py",
+        "tests/test_veritas_court_listener.py",
+        "tests/test_veritas_edgar.py",
+        "tests/test_veritas_firm_authority.py",
+        "tests/test_veritas_front_door.py",
+        "veritas_bias_guard.py",
+        "veritas_claire_runtime.py",
+        "veritas_court_listener.py",
+        "veritas_edgar.py",
+        "veritas_source_trace.py",
+        "veritas_teacher_mode.py",
+        "veritas_workflow_guard.py",
+        "web/__init__.py",
+        "web/app.py",
+        "web/index.html",
+        "web/models.py",
+        "web/rules/README.md",
+        "web/rules/federal_district_civil.json",
+        "web/rules/nd_california.json",
+        "web/services/__init__.py",
+        "web/services/config.py",
+        "web/services/courtlistener.py",
+        "web/services/dockets.py",
+        "web/services/legal_intel.py",
+        "web/services/llm.py",
+        "web/services/workspace.py",
+        "web/static/app.js",
+        "web/static/styles.css"
+      ],
+      "security_findings": [
+        {
+          "line": 15,
+          "path": "edgar_client.py",
+          "redacted": "stev****s.ai",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 68,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "courtlistener_client.py",
+          "redacted": "toke****str]",
+          "severity": "review",
+          "type": "token assignment"
+        },
+        {
+          "line": 39,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "tests/test_courtlistener_client.py",
+          "redacted": "toke****test",
+          "severity": "review",
+          "type": "token assignment"
+        },
+        {
+          "line": 57,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "tests/test_courtlistener_client.py",
+          "redacted": "toke****test",
+          "severity": "review",
+          "type": "token assignment"
+        },
+        {
+          "line": 72,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "tests/test_courtlistener_client.py",
+          "redacted": "toke****test",
+          "severity": "review",
+          "type": "token assignment"
+        },
+        {
+          "line": 80,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "tests/test_courtlistener_client.py",
+          "redacted": "toke****test",
+          "severity": "review",
+          "type": "token assignment"
+        },
+        {
+          "line": 42,
+          "path": "tests/test_veritas_firm_authority.py",
+          "redacted": "555)****0100",
+          "severity": "review",
+          "type": "phone-like"
+        },
+        {
+          "line": 43,
+          "path": "tests/test_veritas_firm_authority.py",
+          "redacted": "firm****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 60,
+          "path": "tests/test_veritas_firm_authority.py",
+          "redacted": "jord****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 61,
+          "path": "tests/test_veritas_firm_authority.py",
+          "redacted": "555)****0101",
+          "severity": "review",
+          "type": "phone-like"
+        },
+        {
+          "line": 73,
+          "path": "tests/test_veritas_firm_authority.py",
+          "redacted": "case****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 85,
+          "path": "tests/test_veritas_firm_authority.py",
+          "redacted": "tayl****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 447,
+          "path": "web/index.html",
+          "redacted": "000)****0000",
+          "severity": "review",
+          "type": "phone-like"
+        },
+        {
+          "line": 451,
+          "path": "web/index.html",
+          "redacted": "firm****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 504,
+          "path": "web/index.html",
+          "redacted": "alex****.com",
+          "severity": "review",
+          "type": "email address"
+        },
+        {
+          "line": 508,
+          "path": "web/index.html",
+          "redacted": "000)****0000",
+          "severity": "review",
+          "type": "phone-like"
+        },
+        {
+          "line": 1202,
+          "note": "Code variable/parameter pattern; review manually, not confirmed exposed secret.",
+          "path": "web/app.py",
+          "redacted": "toke****get(",
+          "severity": "review",
+          "type": "token assignment"
+        }
+      ],
+      "status": "MOSTLY WORKING",
+      "status_evidence": "FastAPI web app, tests, live service evidence, CourtListener/EDGAR code present.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [
+          ".github/workflows/smoke.yml"
+        ],
+        "manifests": [],
+        "review": "Tests/manifests found; not executed during inventory audit.",
+        "tests": [
+          "tests/test_courtlistener_client.py",
+          "tests/test_edgar_client.py",
+          "tests/test_veritas_claire_runtime.py",
+          "tests/test_veritas_court_listener.py",
+          "tests/test_veritas_edgar.py",
+          "tests/test_veritas_firm_authority.py",
+          "tests/test_veritas_front_door.py"
+        ],
+        "tests_present": true
+      },
+      "version_analysis": "Standalone Veritas Legal product line; overlaps conceptually with CLAIRE monorepo Veritas routes but has independent web app."
+    },
+    {
+      "current_condition": {
+        "evidence": "README/profile content only or nearly only.",
+        "status": "DOCUMENTATION ONLY"
+      },
+      "documentation_review": {
+        "claims": [],
+        "has_contrib": false,
+        "has_env_example": false,
+        "has_gitignore": true,
+        "has_license": false,
+        "has_readme": true,
+        "has_security_policy": false,
+        "readmes": [
+          "README.md"
+        ]
+      },
+      "duplication_analysis": [
+        {
+          "summary": "No strong identical-file duplicate detected in shallow current-tree scan."
+        }
+      ],
+      "file_count": 3,
+      "how_it_runs": {
+        "dependencies": [
+          "No manifest found."
+        ],
+        "env_vars": [
+          "CLAIRE"
+        ],
+        "external_services": [
+          "GitHub"
+        ],
+        "hardcoded_paths": [],
+        "installation": [
+          "Not identified from files."
+        ],
+        "ports": [
+          "2026"
+        ],
+        "startup": [
+          "Not identified from files/README."
+        ]
+      },
+      "identity": {
+        "archived": false,
+        "default_branch": "main",
+        "description": "Portable continuity protocol for AI sessions: preserves state, failures, next steps, and do-not-repeat instructions so future sessions restore context instead of starting cold.",
+        "fork": false,
+        "full_name": "clairetech2025-max/session_capsule_protocol",
+        "languages": [],
+        "last_commit_date": "2026-06-03T14:15:17Z",
+        "name": "session_capsule_protocol",
+        "owner": "clairetech2025-max",
+        "owner_type": "Personal account",
+        "primary_language": null,
+        "repository_size_kb": 9,
+        "url": "https://github.com/clairetech2025-max/session_capsule_protocol",
+        "visibility": "PUBLIC"
+      },
+      "local_checkout": "/tmp/github_inventory_audit/repos/clairetech2025-max__session_capsule_protocol",
+      "main_components": [
+        "No significant executable components identified from file tree."
+      ],
+      "purpose": "Documentation or profile repository with little/no executable code.",
+      "recommendation": {
+        "action": "SAFE TO KEEP PUBLIC",
+        "confidence": "Medium",
+        "current_visibility": "Public",
+        "reasoning": "Low executable risk, but docs/positioning should be accurate.",
+        "recommended_visibility": "Public"
+      },
+      "relationship_to_claire_systems": [
+        "CLAIRE",
+        "Veritas Legal",
+        "Analog Recall Engine / ARE",
+        "Sentinel",
+        "Gyro",
+        "session continuity",
+        "Session Capsule Protocol",
+        "patents or provisional patent materials"
+      ],
+      "sample_files": [
+        ".gitignore",
+        "README.md",
+        "Session Capsule Protocol proof artifacts"
+      ],
+      "security_findings": [],
+      "status": "DOCUMENTATION ONLY",
+      "status_evidence": "README/profile content only or nearly only.",
+      "test_build_review": {
+        "docker": [],
+        "github_actions": [],
+        "manifests": [],
+        "review": "No tests identified from file names.",
+        "tests": [],
+        "tests_present": false
+      },
+      "version_analysis": "No definitive predecessor/successor relationship proven beyond duplicate-file scan and naming heuristics."
+    }
+  ],
+  "summary": {
+    "archived_repositories": 0,
+    "documentation_only": 7,
+    "duplicate_candidates": 2,
+    "legacy_candidates": 1,
+    "missing_license": 15,
+    "missing_readme": 5,
+    "possible_secrets": 10,
+    "private_repositories": 10,
+    "prototypes": 2,
+    "public_repositories": 10,
+    "recommended_private": 8,
+    "recommended_public": 6,
+    "repositories_requiring_immediate_attention": 8,
+    "total_repositories": 20,
+    "working_repositories": 1
+  }
+}

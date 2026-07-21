@@ -125,9 +125,20 @@ class RuntimeTruthSpine:
             self._append_degraded(degraded)
             return degraded
 
+    def _acquire_lock(self, fh, timeout: float = 5.0) -> None:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Truth Spine lock not acquired within {timeout}s: {self.path}")
+                time.sleep(0.05)
+
     def _append_safe_event(self, event: dict[str, Any]) -> dict[str, Any]:
         with self.path.open("a+", encoding="utf-8") as fh:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            self._acquire_lock(fh)
             try:
                 previous_hash, sequence, event_ids = self._state_from_open_file(fh)
                 if event["event_id"] in event_ids:

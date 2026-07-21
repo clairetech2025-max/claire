@@ -1,0 +1,52 @@
+CLAIRE MODEL INVENTORY
+generated_utc: 20260616_003720
+sha256: not computed in this pass; compute for selected models before upload if approved
+
+filename: qwen2.5-7b-instruct-q4_k_m.gguf
+size_bytes: 2801795072
+path: /home/LuciusPrime/claire/models/qwen2.5-7b-instruct-q4_k_m.gguf
+model_name: qwen2.5-7b-instruct-q4_k_m
+downloadable_later: likely yes if upstream model/voice source is known; verify before relying on re-download
+sha256: NOT_COMPUTED
+recommended_action: inventory first; upload only if not reproducibly downloadable or explicitly approved
+
+filename: Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+size_bytes: 986048768
+path: /home/LuciusPrime/claire/models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+model_name: Qwen2.5-1.5B-Instruct-Q4_K_M
+downloadable_later: likely yes if upstream model/voice source is known; verify before relying on re-download
+sha256: NOT_COMPUTED
+recommended_action: inventory first; upload only if not reproducibly downloadable or explicitly approved
+
+filename: en_GB-cori-high.onnx
+size_bytes: 114219352
+path: /home/LuciusPrime/claire/models/piper/en_GB-cori-high/en_GB-cori-high.onnx
+model_name: en_GB-cori-high
+downloadable_later: likely yes if upstream model/voice source is known; verify before relying on re-download
+sha256: NOT_COMPUTED
+recommended_action: inventory first; upload only if not reproducibly downloadable or explicitly approved
+
+filename: en_US-lessac-medium.onnx
+size_bytes: 63201294
+path: /home/LuciusPrime/claire/models/piper/en_US-lessac-medium/en_US-lessac-medium.onnx
+model_name: en_US-lessac-medium
+downloadable_later: likely yes if upstream model/voice source is known; verify before relying on re-download
+sha256: NOT_COMPUTED
+recommended_action: inventory first; upload only if not reproducibly downloadable or explicitly approved
+
+filename: en_US-amy-medium.onnx
+size_bytes: 63201294
+path: /home/LuciusPrime/claire/models/piper/en_US-amy-medium/en_US-amy-medium.onnx
+model_name: en_US-amy-medium
+downloadable_later: likely yes if upstream model/voice source is known; verify before relying on re-download
+sha256: NOT_COMPUTED
+recommended_action: inventory first; upload only if not reproducibly downloadable or explicitly approved
+
+filename: en_GB-alba-medium.onnx
+size_bytes: 63201294
+path: /home/LuciusPrime/claire/models/piper/en_GB-alba-medium/en_GB-alba-medium.onnx
+model_name: en_GB-alba-medium
+downloadable_later: likely yes if upstream model/voice source is known; verify before relying on re-download
+sha256: NOT_COMPUTED
+recommended_action: inventory first; upload only if not reproducibly downloadable or explicitly approved
+

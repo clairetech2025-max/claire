@@ -38,6 +38,28 @@ claire_state/faiss_memory_map.jsonl
 private_faiss/
 local_faiss/
 
+# Preservation exclusions (2026-07-21 emergency rescue branch)
+# Model weights (multi-GB binaries, not source)
+/models
+# Audit clones of OTHER GitHub repos (already preserved on GitHub natively;
+# some contain broken/partial embedded git repos that block `git add -A`)
+github_cleanup_audit/
+# Generated benchmark run output (source scripts themselves are kept)
+benchmark_results/
+# Veritas trading runtime/data artifacts (not source)
+veritas/*.db
+veritas/are_data/
+veritas/public_candles/
+veritas/run_logs/
+veritas/paper_state/
+veritas/paper_state_archive*/
+veritas/paper_state_money_readiness*/
+veritas/.veritas_backtest_report.json
+# Sentinel runtime action log (generated, not source)
+claire_state/sentinel/
+# Local test output artifacts
+test-artifacts/
+
 *.sqlite3
 trace/
 traces/
