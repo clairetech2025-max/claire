@@ -107,17 +107,56 @@ needs a look," not as a guarantee that every file inside shares one uniform fate
 Nothing was deleted from Azure. All exclusions are `.gitignore` additions only —
 the underlying files remain exactly where they were.
 
-## Google Drive backup — status
+## Google Drive backup — verified this session
 
-`EVACUATION_MANIFEST.txt` (preserved in this rescue commit) describes a
-**planning-only** Google Drive backup structure (`CLAIRE_SYSTEMS_BACKUP/` with
-numbered subfolders) — its own text explicitly states "no files moved,
-compressed, uploaded, deleted, or decrypted." This session did not independently
-verify a completed Drive backup because that check has not yet been run against
-the live Drive account with folder counts, sizes, and a manifest/checksum
-comparison as instructed. **Do not treat any Google Drive backup as confirmed
-until that verification is explicitly performed and reported.** This is called
-out as an open item, not silently assumed complete.
+`EVACUATION_MANIFEST.txt`'s own planned folder name (`CLAIRE_SYSTEMS_BACKUP/`)
+was **not found** — that specific structure was never created; the manifest's
+own text confirms it was planning-only. However, three separate, real backup
+efforts **do** exist in the same Drive account (`clairetech2025@gmail.com`),
+found via direct search and confirmed via file metadata and content, not assumed:
+
+| Folder | Created | Contents (verified) | Currency vs. today (2026-07-21) |
+|---|---|---|---|
+| `claire_source/` | 2026-04-21 | Single stale snapshot of `claire_gui.py` (227,455 bytes, dated 2026-04-20) + README | **Badly stale** — the live file is now 693,317 bytes; this snapshot predates 3 months of development |
+| `CLAIRE_AZURE_EVACUATION_20260701/bundles/` | 2026-07-01 | One 149,804,717-byte (~143MB) `claire_azure_redeploy_bundle_20260701_051144.tar.gz` | Not opened/decompressed this session; existence, size, and creation date confirmed via Drive metadata only |
+| `CLAIRE_FULL_PRESERVATION_2026/` | 2026-07-11 | See below — the most rigorous of the three | **10 days stale** relative to today; does not include this session's work (Truth Spine fix, `claire_vde` additions, this inventory) |
+
+`CLAIRE_FULL_PRESERVATION_2026/02_source_snapshots/` is genuinely well-built:
+7 source-only tarballs covering `claire`, `claire-veritas-legal`,
+`analog-recall-engine`, `veritas-legal-evidence-engine-public`,
+`are-spectacle-v2`, `odyssey-claire-build`, and `historical-claire-engine-source`,
+each paired with a `git status`/`git log` snapshot at backup time, plus a full
+`claire_git_head_20260711T004059Z.tar.gz` git bundle (777,738 bytes) of the main
+repo, a worktree patch, and — critically — a `SOURCE_ONLY_BUNDLE_MANIFEST.json`
+and `SOURCE_ONLY_BUNDLE_CHECKSUMS.sha256` recording SHA256 hashes and exact
+source paths for every bundle. That manifest's own exclusion policy ("excludes
+venvs/caches/raw data/databases/jsonl/model weights/secrets/env files/keys/
+tokens/private runtime state") matches this session's Category D reasoning
+independently.
+
+`CLAIRE_FULL_PRESERVATION_2026/04_read_only_disk_inventory/` **independently
+confirms the model-weights backup** flagged as unverified elsewhere in this
+document: it documents a checksummed backup at
+`CLAIRE_SAFE_STORAGE/claire_backup_20260616_163412/` on the separate mounted
+disk `/mnt/inspect_nvme0n2p1` (170,426 files, 31.5GB scanned), with its own
+`VERIFY.log`, `SHA256SOURCE_*`/`SHA256DEST_*` hash files, and a `MANIFEST_files.txt`
+— a real, checksummed backup, not an assumption. The same inventory flags that a
+separate 440GB disk (`/dev/nvme1n1`) is attached but unmounted and unidentified,
+and explicitly recommends Azure portal confirmation before any use — carrying
+that caution forward here rather than re-verifying it independently this session.
+
+**What this session did NOT do**: download and decompress any of these bundles
+to do a byte-level diff or checksum re-verification against the live Azure
+source. Verification here is based on Drive-side metadata, the bundle manifest's
+own recorded checksums, and content snippets — strong evidence that real,
+structured backups exist and are recent, but not an independent re-hash of
+their contents against disk. If that stronger guarantee is needed, it's the
+next concrete step, not something to assume from this pass.
+
+**Bottom line**: a Google Drive backup is confirmed to exist and is real, but
+the newest one is 10 days behind the current GitHub rescue branches produced
+this session — **the GitHub rescue branches, not Drive, are the most current
+preserved source right now.**
 
 ## How to restore each component
 
