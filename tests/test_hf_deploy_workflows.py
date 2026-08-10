@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -8,6 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def read_workflow(name: str) -> str:
     return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+
+
+def test_claire_manifest_includes_editable_install_metadata() -> None:
+    manifest = json.loads(
+        (ROOT / "deploy" / "huggingface" / "claire.manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert "pyproject.toml" in manifest["source_paths"]
 
 
 def test_deploy_workflows_default_to_authoritative_main() -> None:

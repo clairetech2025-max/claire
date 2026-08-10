@@ -8,6 +8,7 @@
   "expected_port": 7860,
   "root_source_path": "hf_claire_runtime_full",
   "source_paths": [
+    "pyproject.toml",
     "claire_core",
     "claire_are",
     "claire_continuity",
