@@ -17,9 +17,9 @@ from diode_protocol import DiodeProtocol
 
 
 SCHEMA = "claire.persona"
-VERSION = 1
+VERSION = 2
 CANONICAL_EXPANSION = "Cognizant Lucid Autonomous Iterative Recall Environment"
-DEFAULT_PERSONA_PATH = Path(__file__).resolve().parent / "configs" / "claire_persona.v1.json"
+DEFAULT_PERSONA_PATH = Path(__file__).resolve().parent / "configs" / "claire_persona.v2.json"
 FORBIDDEN_KEYS = {"api_key", "token", "credential", "password", "secret", "creator_mode", "shell"}
 
 
@@ -41,16 +41,28 @@ def load_persona(path: str | Path | None = None) -> dict[str, Any]:
 
 def compact_persona(persona: dict[str, Any]) -> dict[str, Any]:
     """Return the bounded representation supplied to any model provider."""
+    influences = []
+    for category, entries in (persona.get("odyssey_influences") or {}).items():
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            lessons = [str(item).strip() for item in entry.get("lessons") or [] if str(item).strip()]
+            if name and lessons:
+                influences.append({"category": category, "name": name, "lessons": lessons})
     return {
         "schema": persona["schema"],
         "version": persona["version"],
         "name": persona["name"],
         "canonical_expansion": persona["canonical_expansion"],
         "role": persona["role"],
+        "guiding_archetype": persona.get("guiding_archetype"),
         "core_traits": list(persona.get("core_traits") or []),
         "conversation_style": list(persona.get("conversation_style") or []),
         "decision_style": list(persona.get("decision_style") or []),
         "guiding_principles": list(persona.get("guiding_principles") or []),
+        "odyssey_influences": influences,
+        "influence_synthesis_rules": list(persona.get("influence_synthesis_rules") or []),
         "persona_source": list(persona.get("persona_source") or []),
     }
 

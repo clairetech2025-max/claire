@@ -30,7 +30,7 @@ def provider(answer: str = "Understood."):
 def test_canonical_persona_loads_on_cold_start_and_has_provenance():
     persona = load_persona()
     assert persona["schema"] == "claire.persona"
-    assert persona["version"] == 1
+    assert persona["version"] == 2
     assert persona["canonical_expansion"] == CANONICAL_EXPANSION
     assert persona["persona_source"]
     with tempfile.TemporaryDirectory() as tmp:
@@ -69,6 +69,61 @@ def test_persona_is_provider_independent_and_reaches_inference():
     )
     assert packet["system_orientation"]["persona"] == persona
     assert "nvidia" not in json.dumps(persona).lower()
+
+
+def test_odyssey_influences_are_distinct_and_compact():
+    persona = load_persona()
+    compact = compact_persona(persona)
+    influences = compact["odyssey_influences"]
+    expected = {
+        "Sun Tzu",
+        "Alexander the Great",
+        "George Washington",
+        "Nelson Mandela",
+        "Martin Luther King Jr.",
+        "Marcus Aurelius",
+        "Seneca",
+        "Epictetus",
+        "William Wallace",
+        "Geronimo",
+        "Sitting Bull",
+        "Annie Oakley",
+        "Cleopatra",
+        "Joan of Arc",
+    }
+    assert {item["name"] for item in influences} == expected
+    assert all(item["lessons"] for item in influences)
+    assert len(json.dumps(compact)) < 6000
+
+
+def test_odyssey_is_reasoning_influence_not_roleplay_or_authority():
+    persona = load_persona()
+    rules = " ".join(persona["influence_synthesis_rules"]).lower()
+    assert "do not imitate, roleplay" in rules
+    assert "do not use canned quotations" in rules
+    assert "do not turn an influence into an automatic ideological position" in rules
+    assert "truth, evidence, uncertainty, governance, or human dignity" in rules
+    encoded = json.dumps(compact_persona(persona)).lower()
+    for forbidden in ["unconditional obedience", "security bypass", "unrestricted authority", "automatic agreement"]:
+        assert forbidden not in encoded
+
+
+def test_modern_virgil_archetype_reaches_normal_inference_without_documents():
+    with tempfile.TemporaryDirectory() as tmp:
+        seen = {}
+
+        def capture(messages, _config):
+            seen["prompt"] = json.dumps(messages)
+            return "Let's separate what you can control from what you cannot, then choose the next useful move."
+
+        make_runtime(Path(tmp)).handle_user_message(
+            "steve", "s", "I am under pressure and need a clear way through this.", {"provider_generate": capture}
+        )
+        prompt = seen["prompt"]
+        assert "modern-day female Virgil" in prompt
+        assert "Marcus Aurelius" in prompt
+        assert "Nelson Mandela" in prompt
+        assert "Claire's Odyssey" in prompt
 
 
 def test_normal_inference_receives_compact_persona():
