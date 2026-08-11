@@ -106,6 +106,38 @@ def smoke_root(base_url: str) -> dict[str, object]:
 
 def smoke_claire(base_url: str) -> list[dict[str, object]]:
     checks = [dict(name="root", **smoke_root(base_url))]
+    status, body, _ = http_request("GET", join_url(base_url, "/diagnostic?target=go"), timeout=30)
+    require_status("CLAIRE Go diagnostic", status, body)
+    go_payload = parse_health_body(body)
+    if str(go_payload.get("status") or "").upper() != "ONLINE":
+        raise RuntimeError(f"CLAIRE Go bridge is not online: {body[:300]!r}")
+    checks.append({"name": "go_bridge", "status": status, "provider_status": "ONLINE"})
+
+    inference_prompt = "Live provider smoke test: reply with exactly CLAIRE_NIM_OK."
+    status, body, _ = http_request(
+        "POST",
+        join_url(base_url, "/reply"),
+        payload={"query": inference_prompt, "demo_mode": False},
+        timeout=240,
+    )
+    require_status("CLAIRE real inference", status, body)
+    inference = parse_health_body(body)
+    reply = str(inference.get("reply") or "").strip()
+    if not inference.get("trace_id") or not reply:
+        raise RuntimeError("CLAIRE real inference did not return a trace_id and reply")
+    if str(inference.get("source") or "").upper() != "GO":
+        raise RuntimeError(f"CLAIRE real inference did not report the GO runtime path: {body[:300]!r}")
+    if "GO provider unavailable" in reply or "deterministic" in reply.lower():
+        raise RuntimeError(f"CLAIRE real inference used an unavailable/fallback response: {reply[:300]!r}")
+    checks.append(
+        {
+            "name": "real_inference",
+            "status": status,
+            "source": inference.get("source"),
+            "trace_id": inference.get("trace_id"),
+        }
+    )
+
     query = urllib.parse.urlencode(
         {
             "q": "Schedule a horseback ride tomorrow at 10am",

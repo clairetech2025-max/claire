@@ -66,6 +66,14 @@ def test_smoke_claire_requires_trace_and_simulated_demo(monkeypatch) -> None:
         urls.append(url)
         if url.endswith("/"):
             return 200, "<html>CLAIRE</html>", "text/html"
+        if "diagnostic?target=go" in url:
+            return 200, json.dumps({"status": "ONLINE"}), "application/json"
+        if method == "POST" and url.endswith("/reply"):
+            return (
+                200,
+                json.dumps({"trace_id": "trace_real", "source": "GO", "reply": "CLAIRE_NIM_OK"}),
+                "application/json",
+            )
         return (
             200,
             json.dumps(
@@ -84,8 +92,10 @@ def test_smoke_claire_requires_trace_and_simulated_demo(monkeypatch) -> None:
     checks = hf_smoke_space.smoke_claire("https://space.example")
 
     assert checks[0]["name"] == "root"
-    assert checks[1]["name"] == "stableride_demo"
-    assert checks[1]["trace_id"] == "trace_1"
+    assert checks[1]["name"] == "go_bridge"
+    assert checks[2]["name"] == "real_inference"
+    assert checks[3]["name"] == "stableride_demo"
+    assert checks[3]["trace_id"] == "trace_1"
     assert any("Schedule+a+horseback+ride+tomorrow" in url for url in urls)
 
 
@@ -108,6 +118,10 @@ def test_smoke_claire_rejects_non_simulated_demo(monkeypatch) -> None:
     def fake_request(method: str, url: str, **kwargs):
         if url.endswith("/"):
             return 200, "<html>CLAIRE</html>", "text/html"
+        if "diagnostic?target=go" in url:
+            return 200, json.dumps({"status": "ONLINE"}), "application/json"
+        if method == "POST" and url.endswith("/reply"):
+            return 200, json.dumps({"trace_id": "trace_real", "source": "GO", "reply": "CLAIRE_NIM_OK"}), "application/json"
         return 200, json.dumps({"trace_id": "trace_1", "demo_mode": True, "decision": "Scheduled"}), "application/json"
 
     monkeypatch.setattr(hf_smoke_space, "http_request", fake_request)

@@ -8,6 +8,7 @@
   "expected_port": 7860,
   "root_source_path": "hf_claire_runtime_full",
   "source_paths": [
+    "main.go",
     "pyproject.toml",
     "claire_core",
     "claire_are",
@@ -19,15 +20,22 @@
     "*.py"
   ],
   "entry_point": "app.py",
-  "startup_command": "python app.py",
+  "startup_command": "/app/start.sh",
   "health_endpoint": "/health",
   "required_variable_names": [
+    "CLAIRE_PROVIDER",
+    "CLAIRE_GO_ADDR",
+    "LLM_URL",
+    "NVIDIA_NIM_BASE_URL",
+    "NVIDIA_NIM_MODEL",
+    "CLAIRE_PROVIDER_TIMEOUT_SECONDS",
     "CLAIRE_CORE_ENABLED",
     "CLAIRE_CORE_SHADOW_MODE",
     "CLAIRE_ARE_ROOT",
     "CLAIRE_USER_TIMEZONE"
   ],
   "required_secret_names": [
+    "NVIDIA_API_KEY",
     "CLAIRE_ARE_HMAC_KEY",
     "CLAIRE_TRAILLINK_HMAC_KEY"
   ],

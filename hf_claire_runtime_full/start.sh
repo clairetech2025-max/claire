@@ -15,6 +15,9 @@ export LLM_URL="${LLM_URL:-http://127.0.0.1:8080}"
 export INGEST_BASE_URL="${INGEST_BASE_URL:-http://127.0.0.1:8081}"
 export CLAIRE_ARE_INGEST_URL="${CLAIRE_ARE_INGEST_URL:-$ARE_URL/ingest}"
 export CLAIRE_GO_ADDR="${CLAIRE_GO_ADDR:-127.0.0.1:8080}"
+export CLAIRE_PROVIDER="${CLAIRE_PROVIDER:-nim}"
+export NVIDIA_NIM_BASE_URL="${NVIDIA_NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}"
+export NVIDIA_NIM_MODEL="${NVIDIA_NIM_MODEL:-nvidia/nemotron-3-ultra-550b-a55b}"
 export CLAIRE_PUBLIC_DEMO_BUILD="${CLAIRE_PUBLIC_DEMO_BUILD:-0}"
 export CLAIRE_CREATOR_MODE_ENABLED="${CLAIRE_CREATOR_MODE_ENABLED:-0}"
 export VERITAS_TRADING_MODE="${VERITAS_TRADING_MODE:-paper}"
@@ -31,5 +34,27 @@ mkdir -p \
 
 # Do not copy Azure .env, private ARE memory, DBs, logs, generated indexes, or legal files into this container.
 # Secrets must be supplied through Hugging Face Space secrets by name only.
+
+: "${NVIDIA_API_KEY:?NVIDIA_API_KEY Hugging Face Space secret is required}"
+
+/app/bin/claire-go-provider &
+go_pid=$!
+
+go_ready=0
+for _ in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:8080/health >/dev/null; then
+    go_ready=1
+    break
+  fi
+  if ! kill -0 "$go_pid" 2>/dev/null; then
+    wait "$go_pid"
+  fi
+  sleep 1
+done
+
+if [[ "$go_ready" != "1" ]]; then
+  echo "CLAIRE Go provider failed health check at http://127.0.0.1:8080/health" >&2
+  exit 1
+fi
 
 exec /app/venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port "$PORT"
