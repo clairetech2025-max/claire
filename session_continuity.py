@@ -489,6 +489,25 @@ def _facts_from_summary(summary: str, base: dict[str, Any]) -> list[ContinuityFa
     text = " ".join(str(summary or "").split())
     facts: list[ContinuityFact] = []
 
+    structured = re.findall(
+        r"continuity_fact:\s*([a-z0-9_-]+)\.([a-z0-9_-]+)\s*=\s*(.*?)(?=\s+continuity_fact:|$)",
+        text,
+        re.IGNORECASE,
+    )
+    for subject, predicate, value in structured:
+        clean_value = value.strip()
+        facts.append(
+            ContinuityFact(
+                subject=subject,
+                predicate=predicate,
+                value=re.sub(r"^correction\s+", "", clean_value, flags=re.IGNORECASE),
+                summary=("correction: " if clean_value.lower().startswith("correction ") else "") + text,
+                **{key: item for key, item in base.items() if key != "summary"},
+            )
+        )
+    if facts:
+        return facts
+
     codename_patterns = [
         re.compile(
             r"(?:project\s+)?codename\s+(?:is|=)\s+([A-Z][A-Z0-9_-]{2,})(?:[,;]?\s+(?:replacing|replaces|instead\s+of)\s+([A-Z][A-Z0-9_-]{2,}))?",

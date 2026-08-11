@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from are_memory_store import AREMemoryStore, MemoryEvent
@@ -18,6 +19,14 @@ DURABLE_MARKERS = [
     "veritas",
     "filed",
     "ein",
+    "we decided",
+    "we're going to",
+    "we re going to",
+    "we are going to",
+    "leave creator mode alone",
+    "after claire is stable",
+    "correction:",
+    "actually supersedes",
 ]
 
 
@@ -41,12 +50,13 @@ def commit_if_needed(store: AREMemoryStore, user_id: str, session_id: str, messa
     if not ok:
         return False, None
     entities = [item["name"] for item in identify_entities(message + " " + answer)]
+    continuity = continuity_summary(message)
     event = MemoryEvent(
         user_id=user_id,
         session_id=session_id,
-        lane=lane,
-        event_type="durable_exchange",
-        summary=str(message or "")[:500],
+        lane="SESSION" if continuity else lane,
+        event_type="continuity_fact" if continuity else "durable_exchange",
+        summary=(continuity or str(message or ""))[:800],
         raw_excerpt=str(message or "")[:1200],
         source="chat_runtime",
         confidence=0.75,
@@ -56,6 +66,30 @@ def commit_if_needed(store: AREMemoryStore, user_id: str, session_id: str, messa
         memory_scope=_scope_for_lane(lane),
     )
     return True, store.append_memory_event(event)
+
+
+def continuity_summary(message: str) -> str:
+    """Extract only narrow, meaningful state; never copy arbitrary chat."""
+    text = " ".join(str(message or "").split())
+    lowered = text.lower()
+    facts: list[str] = []
+    if "leave creator mode alone" in lowered or (
+        "creator mode" in lowered and any(marker in lowered for marker in ["we decided", "we're going to leave", "we are going to leave"])
+    ):
+        facts.append("continuity_fact: creator_mode.decision = intentionally left alone until CLAIRE testing is finished")
+    if "veritas" in lowered and "after claire is stable" in lowered:
+        facts.append("continuity_fact: roadmap.next_after_claire = Veritas")
+    generic = re.search(
+        r"(?:correction:\s*)?remember this:\s*([a-z][a-z0-9 _-]{2,60})\s+(?:is|=)\s+([A-Za-z0-9_.: -]{2,100})",
+        text,
+        re.IGNORECASE,
+    )
+    if generic:
+        subject = "_".join(generic.group(1).lower().split())
+        value = generic.group(2).strip().rstrip(". ")
+        prefix = "correction " if lowered.startswith("correction:") else ""
+        facts.append(f"continuity_fact: {subject}.value = {prefix}{value}")
+    return "\n".join(facts)
 
 
 def _scope_for_lane(lane: str) -> str:

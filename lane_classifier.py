@@ -124,6 +124,21 @@ def classify_lane(message: str, recent_context: list[dict[str, Any]] | None = No
             "engineer_founder",
         )
 
+    if "veritas" in text and any(
+        marker in text
+        for marker in ["after claire is stable", "next after claire", "work on veritas after claire"]
+    ):
+        return LaneResult(
+            "GENERAL_CHAT",
+            0.82,
+            "Cross-project roadmap statement; preserve it as session continuity rather than a trading request.",
+            ["GENERAL_CHAT", "SESSION"],
+            ["session_continuity"],
+            False,
+            "normal",
+            "direct",
+        )
+
     if _contains(text, TRADING_STATION_MARKERS):
         return LaneResult(
             "TRADING_STATION",

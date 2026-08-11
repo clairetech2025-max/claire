@@ -12,6 +12,7 @@ from authority_capsule import AuthorityCapsule
 from claire.runtime.gyro import GyroOrientationLayer
 from claire.runtime.loopback import LoopbackLayer
 from claire.runtime.trace import gyro_trace_object
+from claire_persona import canonical_identity_answer, compact_persona, is_expansion_question, load_persona
 from claire_core.adapters.echoshield import EchoShield
 from claire_core.adapters.sentinel import RuntimeSentinel
 from claire_core.runtime.feature_flags import current_feature_flags
@@ -32,7 +33,7 @@ from handshake_broker import HandshakeBroker
 from lane_classifier import LaneResult, classify_lane
 from claire_runtime_router import c3rp_classify, normalize_input as c3rp_normalize_input, provisional_orientation
 from language_guard import strengthen_confidence_language
-from memory_committer import commit_if_needed, should_commit_memory
+from memory_committer import commit_if_needed, continuity_summary, should_commit_memory
 from memory_eligibility import evaluate_memory_eligibility
 from nemotron_adapter import build_messages, call_nemotron, messages_to_prompt
 from nvidia_mode import apply_nvidia_mode, nvidia_constraints
@@ -72,6 +73,7 @@ class ClaireRuntime:
         self.temporal_engine = temporal_engine or TemporalEngine()
         self.echo_shield = EchoShield()
         self.runtime_sentinel = RuntimeSentinel()
+        self.persona = load_persona()
 
     def _append_runtime_event(
         self,
@@ -348,6 +350,7 @@ class ClaireRuntime:
             normalized,
             authority_capsule,
         )
+        continuity_memories = self._recall_continuity(user_id, authority_capsule)
         canonical_memories = self._canonical_memory_leads(normalized, lane, current_truth)
         recent_path = self._dedupe_memories(canonical_memories + recent_path)
         recalled_all = self.temporal_engine.rank_temporal_relevance(recent_path + long_term_memories)
@@ -516,6 +519,8 @@ class ClaireRuntime:
             constraints=constraints,
             risks=risks,
             temporal_context=temporal_model_context,
+            persona=compact_persona(self.persona),
+            continuity_memories=continuity_memories,
         )
         messages = build_messages(context_packet, normalized)
         model_auth = self.runtime_3crp.authorize_model(
@@ -572,6 +577,8 @@ class ClaireRuntime:
         answer = self._redact_sensitive(self.diode.redact(answer))
         answer = self._apply_authority_answer_boundary(answer, lane, authority_decision.denied_reasons)
         answer = self._apply_canonical_answer_boundary(answer, normalized, lane, current_truth)
+        if is_expansion_question(normalized):
+            answer = canonical_identity_answer()
         post_loop = self.loopback.post_generation_check(
             prompt=normalized,
             answer=answer,
@@ -588,6 +595,8 @@ class ClaireRuntime:
         validator_result = validate_response(answer, context_packet, lane)
         if not validator_result.get("approved") and validator_result.get("revised_answer"):
             answer = self.sanitize_user_answer(str(validator_result["revised_answer"]), debug=debug_enabled)
+        if is_expansion_question(normalized):
+            answer = canonical_identity_answer()
 
         runtime_report = None
         if self._wants_runtime_orientation(normalized):
@@ -606,6 +615,7 @@ class ClaireRuntime:
 
         safe_memory_message = self._redact_sensitive(normalized)
         safe_memory_answer = self._redact_sensitive(self.diode.redact(answer))
+        continuity_candidate = continuity_summary(safe_memory_message)
         candidate_memory_allowed, candidate_memory_reason = should_commit_memory(
             safe_memory_message,
             lane,
@@ -614,10 +624,11 @@ class ClaireRuntime:
         if secret_detected or self.diode.contains_secret(normalized) or self.diode.contains_secret(answer):
             candidate_memory_allowed = False
             candidate_memory_reason = "Sensitive content is not eligible for durable memory."
+        memory_record_class = "continuity_fact" if continuity_candidate else ("model_output" if candidate_memory_allowed else "turn_context")
         echo_classification = self.echo_shield.inspect_text(
             "\n".join([safe_memory_message, raw_model_answer_for_echoshield]),
             source_id=trace_id,
-            record_class="model_output" if candidate_memory_allowed else "turn_context",
+            record_class=memory_record_class,
             lane=lane,
             matter_id=str(metadata.get("matter_id") or ""),
             expected_matter_id=str(metadata.get("matter_id") or ""),
@@ -647,7 +658,7 @@ class ClaireRuntime:
             candidate_memory_reason = "EchoShield quarantined candidate memory context."
         sentinel_memory_decision = self.runtime_sentinel.authorize_memory_write(
             lane=lane,
-            record_class="model_output" if candidate_memory_allowed else "turn_context",
+            record_class=memory_record_class,
             echo_classification=echo_classification.to_dict(),
             matter_id=str(metadata.get("matter_id") or ""),
             target_matter_id=str(metadata.get("matter_id") or ""),
@@ -1937,6 +1948,38 @@ class ClaireRuntime:
         ordered.sort(key=lambda memory: int(memory.get("timestamp_ns") or 0))
         return ordered[-5:], ordered[:-5], rejected
 
+    def _recall_continuity(
+        self,
+        user_id: str,
+        authority_capsule: AuthorityCapsule,
+        limit: int = 80,
+    ) -> list[dict[str, Any]]:
+        """Read compact public continuity facts through the configured ARE interface."""
+        allowed_scopes = {str(scope).upper() for scope in authority_capsule.allowed_memory_scopes or ["PUBLIC"]}
+        if self.use_original_are:
+            history = read_original_are_history(limit=limit)
+            memories = [
+                {
+                    "memory_id": f"original_are_{item.get('sha') or item.get('line_number')}",
+                    "timestamp_ns": int(item.get("ts") or 0) * 1_000_000_000,
+                    "lane": "SESSION",
+                    "memory_scope": "PUBLIC",
+                    "summary": str(item.get("text") or "")[:2000],
+                    "source": "original_are",
+                    "provenance_hash": item.get("sha"),
+                }
+                for item in history.get("records", [])
+                if "continuity_fact:" in str(item.get("text") or "")
+            ]
+        else:
+            memories = (self.memory_store or AREMemoryStore()).recall_for_lanes(user_id, ["SESSION"], limit=limit)
+        return [
+            memory
+            for memory in memories
+            if str(memory.get("memory_scope") or "PUBLIC").upper() in allowed_scopes
+            and "continuity_fact:" in str(memory.get("summary") or "")
+        ][-limit:]
+
     def _dedupe_memories(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen: set[str] = set()
         deduped: list[dict[str, Any]] = []
@@ -2043,13 +2086,15 @@ class ClaireRuntime:
             ok, reason = should_commit_memory(message, lane, eligibility)
             if not ok:
                 return False, None
+            continuity = continuity_summary(message)
             text = (
                 f"lane={lane}\n"
                 f"user_id={user_id}\n"
                 f"session_id={session_id}\n"
                 f"reason={reason}\n"
                 f"message={message}\n"
-                f"answer={answer[:1200]}"
+                + (f"{continuity}\n" if continuity else "")
+                + f"answer={answer[:1200]}"
             )
             written = append_original_are_memory(text)
             return True, {

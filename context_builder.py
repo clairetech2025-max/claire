@@ -41,17 +41,22 @@ def build_context_packet(
     constraints: list[str],
     risks: list[str],
     temporal_context: dict[str, Any] | None = None,
+    persona: dict[str, Any] | None = None,
+    continuity_memories: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     lane = lane_result.lane if hasattr(lane_result, "lane") else str(lane_result)
     packet = {
         "system_orientation": {
+            "persona": persona or {},
             "current_lane": lane,
             "user_goal": user_goal,
             "known_project": infer_project(lane, current_truth),
             "relevant_entities": entities,
             "recent_path": compact_memories(recent_path),
             "long_term_memories": compact_memories(long_term_memories),
-            "cross_session_continuity": continuity_provider_lines(recent_path + long_term_memories),
+            "cross_session_continuity": continuity_provider_lines(
+                continuity_memories if continuity_memories is not None else recent_path + long_term_memories
+            ),
             "current_truth": current_truth,
             "temporal_context": temporal_context or {},
             "constraints": constraints,
@@ -98,6 +103,7 @@ def render_context_packet(packet: dict[str, Any]) -> str:
     orientation = packet.get("system_orientation", {})
     lines = ["SYSTEM ORIENTATION:"]
     labels = [
+        ("Canonical persona", orientation.get("persona")),
         ("Current lane", orientation.get("current_lane")),
         ("User goal", orientation.get("user_goal")),
         ("Known project", orientation.get("known_project")),

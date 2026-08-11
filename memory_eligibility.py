@@ -117,6 +117,19 @@ def evaluate_memory_eligibility(message: str, lane: str, importance_score: float
     text = str(message or "").lower()
     lane = str(lane or "UNKNOWN").upper()
     explicit = any(marker in text for marker in ["remember this", "save this", "note this", "log this"])
+    continuity_signal = any(
+        marker in text
+        for marker in [
+            "we decided",
+            "we're going to",
+            "we re going to",
+            "we are going to",
+            "leave creator mode alone",
+            "after claire is stable",
+            "correction:",
+            "actually supersedes",
+        ]
+    )
     sensitive = any(marker in text for marker in ["ssn", "social security", "password", "passphrase", "private key", "api key", "bank account", "battleborn_"])
     explanatory = any(
         marker in text
@@ -175,7 +188,7 @@ def evaluate_memory_eligibility(message: str, lane: str, importance_score: float
             importance_score=min(importance_score, 0.4),
         )
 
-    durable = explicit or any(marker in text for marker in durable_markers)
+    durable = explicit or continuity_signal or any(marker in text for marker in durable_markers)
 
     if lane == "LEGAL_CASE" and durable:
         category = "LEGAL_MEMORY"
@@ -183,7 +196,7 @@ def evaluate_memory_eligibility(message: str, lane: str, importance_score: float
         category = "BUSINESS_MEMORY"
     elif lane in {"CLAIRE_SYSTEM_ARCHITECTURE", "NVIDIA_PATHWAY", "TRADING_STATION", "HORSE_STEWARDSHIP"} and durable:
         category = "PROJECT_MEMORY"
-    elif explicit:
+    elif explicit or continuity_signal:
         category = "PROJECT_MEMORY"
     elif lane == "PERSONAL_SUPPORT":
         category = "PERSONAL_MEMORY"
