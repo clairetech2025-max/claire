@@ -67,6 +67,21 @@ class FakeService:
         return self.files_api
 
 
+class CandidateFiles(FakeFiles):
+    def __init__(self, pages):
+        super().__init__()
+        self.pages = list(pages)
+
+    def list(self, **kwargs):
+        self.list_calls.append(kwargs)
+        return FakeRequest(self.pages.pop(0))
+
+
+class CandidateService(FakeService):
+    def __init__(self, pages):
+        self.files_api = CandidateFiles(pages)
+
+
 def make_store(root: Path) -> AREStore:
     return AREStore(AREConfig(root=root, hmac_key=b"crb-test-key"))
 
@@ -96,6 +111,64 @@ def test_drive_download_and_google_doc_export_preserve_identity_and_path():
     assert ordinary.content_hash == hashlib.sha256(ordinary.content).hexdigest()
     assert native.filename == "Native Notes.txt"
     assert ("export", {"fileId": "drive-doc", "mimeType": "text/plain"}) in service.files_api.media_calls
+
+
+def test_candidate_discovery_is_folder_bounded_paginated_capped_and_excludes_trashed():
+    service = CandidateService([
+        {
+            "files": [
+                {"id": "trashed", "name": "Discard", "mimeType": "text/plain", "trashed": True},
+                {"id": "one", "name": "First", "mimeType": "text/plain", "trashed": False},
+            ],
+            "nextPageToken": "page-2",
+        },
+        {
+            "files": [
+                {"id": "two", "name": "Second", "mimeType": GOOGLE_DOC_MIME, "trashed": False},
+                {"id": "three", "name": "Third", "mimeType": "text/plain", "trashed": False},
+            ]
+        },
+    ])
+    connector = GoogleDriveReadOnlyConnector(service)
+    candidates = connector.discover_candidates(
+        exact_phrase="George Costa",
+        folder_id="evidence-folder",
+        max_candidates=2,
+        page_size=20,
+    )
+    assert [item["id"] for item in candidates] == ["one", "two"]
+    assert len(service.files_api.list_calls) == 2
+    first_call = service.files_api.list_calls[0]
+    assert "'evidence-folder' in parents" in first_call["q"]
+    assert "fullText contains '\"George Costa\"'" in first_call["q"]
+    assert "trashed = false" in first_call["q"]
+    assert first_call["corpora"] == "user"
+    assert service.files_api.list_calls[1]["pageSize"] == 1
+
+
+def test_corpus_wide_candidate_discovery_requires_explicit_approval():
+    connector = GoogleDriveReadOnlyConnector(CandidateService([]))
+    with pytest.raises(ValueError, match="explicit allow_corpus_wide=True"):
+        connector.discover_candidates(exact_phrase="George Costa", max_candidates=5)
+
+
+def test_corpus_wide_candidate_discovery_is_capped_when_explicitly_approved():
+    service = CandidateService([{
+        "files": [
+            {"id": "one", "mimeType": "text/plain", "trashed": False},
+            {"id": "two", "mimeType": "text/plain", "trashed": False},
+            {"id": "three", "mimeType": "text/plain", "trashed": False},
+        ],
+        "nextPageToken": "must-not-be-followed",
+    }])
+    connector = GoogleDriveReadOnlyConnector(service)
+    candidates = connector.discover_candidates(
+        exact_phrase="George Costa",
+        allow_corpus_wide=True,
+        max_candidates=2,
+    )
+    assert [item["id"] for item in candidates] == ["one", "two"]
+    assert len(service.files_api.list_calls) == 1
 
 
 def test_vertical_slice_is_idempotent_and_returns_provenance():
@@ -139,21 +212,38 @@ def test_credentials_require_exactly_one_external_file():
 
 
 @pytest.mark.skipif(
-    not os.environ.get("CLAIRE_CRB_E2E_DRIVE_DOCUMENT_ID"),
-    reason="real Drive E2E requires explicit bounded document ID and external credentials",
+    not (
+        os.environ.get("CLAIRE_CRB_E2E_DRIVE_DOCUMENT_ID")
+        or os.environ.get("CLAIRE_CRB_E2E_DRIVE_FOLDER_ID")
+        or os.environ.get("CLAIRE_CRB_E2E_ALLOW_CORPUS_WIDE", "").strip().lower() in {"1", "true", "yes"}
+    ),
+    reason="real Drive E2E requires an explicit document, folder, or approved capped corpus search",
 )
 def test_real_drive_george_costa_end_to_end():
-    """Credential-gated proof; never traverses Drive and never writes to Drive."""
+    """Credential-gated proof; candidate discovery is capped and Drive remains read-only."""
 
-    document_id = os.environ["CLAIRE_CRB_E2E_DRIVE_DOCUMENT_ID"]
     connector = GoogleDriveReadOnlyConnector.from_environment()
-    document = connector.acquire(document_id)
+    document_id = os.environ.get("CLAIRE_CRB_E2E_DRIVE_DOCUMENT_ID", "").strip()
+    if document_id:
+        candidates = [connector.get_metadata(document_id)]
+    else:
+        candidates = connector.discover_candidates(
+            exact_phrase="George Costa",
+            folder_id=os.environ.get("CLAIRE_CRB_E2E_DRIVE_FOLDER_ID", "").strip(),
+            allow_corpus_wide=os.environ.get("CLAIRE_CRB_E2E_ALLOW_CORPUS_WIDE", "").strip().lower() in {"1", "true", "yes"},
+            max_candidates=10,
+        )
+    assert candidates, "Drive candidate discovery returned no bounded George Costa candidates"
     with tempfile.TemporaryDirectory() as temporary:
         store = make_store(Path(temporary) / "are")
         try:
             pipeline = CRBPipeline(store, lane="legal")
-            pipeline.ingest_document(document)
-            results = pipeline.search("George Costa")
+            results = []
+            for candidate in candidates:
+                pipeline.ingest_document(connector.acquire(candidate))
+                results = pipeline.search("George Costa")
+                if results:
+                    break
             assert results, "The bounded real Drive document did not contain a searchable George Costa match"
             assert store.verify()["valid"] is True
             print(json.dumps(results[0], ensure_ascii=False, sort_keys=True))

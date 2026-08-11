@@ -9,9 +9,15 @@ from pathlib import PurePosixPath
 from typing import Any, Iterator
 
 from .contracts import NormalizedDocument
+from .oauth_security import (
+    DRIVE_READONLY_SCOPE,
+    CredentialSafetyError,
+    external_credential_path,
+    require_exact_credential_scopes,
+    validate_authorized_user_token_file,
+)
 
 
-DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 GOOGLE_FOLDER_MIME = "application/vnd.google-apps.folder"
 GOOGLE_EXPORTS = {
@@ -44,24 +50,36 @@ def load_readonly_credentials() -> Any:
         )
     try:
         if token_file:
+            safe_token = validate_authorized_user_token_file(token_file)
             from google.auth.transport.requests import Request
             from google.oauth2.credentials import Credentials
 
-            credentials = Credentials.from_authorized_user_file(token_file, [DRIVE_READONLY_SCOPE])
+            credentials = Credentials.from_authorized_user_file(str(safe_token), [DRIVE_READONLY_SCOPE])
+            require_exact_credential_scopes(credentials)
             if credentials.expired and credentials.refresh_token:
                 credentials.refresh(Request())
+                require_exact_credential_scopes(credentials)
             if not credentials.valid:
                 raise GoogleDriveCredentialError("The configured Google OAuth token is not valid or refreshable.")
             return credentials
 
         from google.oauth2 import service_account
 
-        return service_account.Credentials.from_service_account_file(
+        safe_service_account = external_credential_path(
             service_account_file,
+            label="Google service-account file",
+            must_exist=True,
+        )
+        credentials = service_account.Credentials.from_service_account_file(
+            str(safe_service_account),
             scopes=[DRIVE_READONLY_SCOPE],
         )
-    except GoogleDriveCredentialError:
-        raise
+        require_exact_credential_scopes(credentials)
+        return credentials
+    except (GoogleDriveCredentialError, CredentialSafetyError) as exc:
+        if isinstance(exc, GoogleDriveCredentialError):
+            raise
+        raise GoogleDriveCredentialError(str(exc)) from exc
     except ImportError as exc:
         raise GoogleDriveCredentialError(
             "Google Drive client dependencies are not installed; install the project 'crb' optional dependencies."
@@ -130,6 +148,56 @@ class GoogleDriveReadOnlyConnector:
             token = response.get("nextPageToken")
             if not token:
                 return
+
+    def discover_candidates(
+        self,
+        *,
+        exact_phrase: str,
+        folder_id: str = "",
+        allow_corpus_wide: bool = False,
+        max_candidates: int = 10,
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        phrase = str(exact_phrase or "").strip()
+        if not phrase:
+            raise ValueError("exact_phrase is required")
+        folder = str(folder_id or "").strip()
+        if not folder and not allow_corpus_wide:
+            raise ValueError("Corpus-wide candidate discovery requires explicit allow_corpus_wide=True")
+        cap = int(max_candidates)
+        if cap < 1 or cap > 100:
+            raise ValueError("max_candidates must be between 1 and 100")
+        escaped_phrase = self._escape_query_value(f'"{phrase}"')
+        clauses = [f"fullText contains '{escaped_phrase}'", "trashed = false"]
+        if folder:
+            clauses.insert(0, f"'{self._escape_query_value(folder)}' in parents")
+        query = " and ".join(clauses)
+        candidates: list[dict[str, Any]] = []
+        token = None
+        while len(candidates) < cap:
+            response = self.service.files().list(
+                q=query,
+                spaces="drive",
+                corpora="user",
+                fields=f"nextPageToken,incompleteSearch,files({self.FILE_FIELDS})",
+                pageSize=max(1, min(int(page_size), cap - len(candidates), 1000)),
+                pageToken=token,
+                orderBy="modifiedTime desc",
+            ).execute()
+            for item in response.get("files", []):
+                if item.get("trashed") is True or item.get("mimeType") == GOOGLE_FOLDER_MIME:
+                    continue
+                candidates.append(dict(item))
+                if len(candidates) >= cap:
+                    break
+            token = response.get("nextPageToken")
+            if not token:
+                break
+        return candidates
+
+    @staticmethod
+    def _escape_query_value(value: str) -> str:
+        return str(value).replace("\\", "\\\\").replace("'", "\\'")
 
     def get_metadata(self, document_id: str) -> dict[str, Any]:
         if document_id not in self._metadata_cache:
