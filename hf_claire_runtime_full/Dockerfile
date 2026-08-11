@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CLAIRE_CREATOR_MODE_ENABLED=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl golang-go tesseract-ocr \
+    ca-certificates curl golang-go iproute2 tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
