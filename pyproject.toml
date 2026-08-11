@@ -18,6 +18,11 @@ dependencies = [
 
 [project.optional-dependencies]
 demo = ["gradio"]
+crb = [
+  "google-api-python-client>=2,<3",
+  "google-auth>=2,<3",
+  "google-auth-oauthlib>=1,<2",
+]
 
 [tool.setuptools.packages.find]
 include = ["claire_are*", "claire_core*", "claire_vde*"]
