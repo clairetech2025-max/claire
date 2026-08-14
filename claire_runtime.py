@@ -28,7 +28,7 @@ from context_builder import build_context_packet
 from current_truth_loader import load_current_truth, truth_for_lane
 from diode_protocol import DiodeProtocol
 from entity_registry import identify_entities
-from faiss_are_index import original_are_records, query_records
+from faiss_are_index import original_are_record_lane, original_are_records, query_records
 from handshake_broker import HandshakeBroker
 from lane_classifier import LaneResult, classify_lane
 from claire_runtime_router import c3rp_classify, normalize_input as c3rp_normalize_input, provisional_orientation
@@ -350,10 +350,28 @@ class ClaireRuntime:
             normalized,
             authority_capsule,
         )
-        continuity_memories = self._recall_continuity(user_id, authority_capsule)
+        continuity_memories, continuity_rejected = self._recall_continuity(
+            user_id,
+            authority_capsule,
+            lane_result=lane_result,
+            query=normalized,
+            entity_names=entity_names,
+        )
+        rejected_memories.extend(continuity_rejected)
         canonical_memories = self._canonical_memory_leads(normalized, lane, current_truth)
-        recent_path = self._dedupe_memories(canonical_memories + recent_path)
-        recalled_all = self.temporal_engine.rank_temporal_relevance(recent_path + long_term_memories)
+        continuity_ids = {
+            str(memory.get("memory_id") or memory.get("provenance_hash") or "")
+            for memory in continuity_memories
+        }
+        recall_candidates = self._dedupe_memories(
+            canonical_memories + recent_path + long_term_memories + continuity_memories
+        )
+        recalled_all = self.temporal_engine.rank_temporal_relevance(recall_candidates)
+        continuity_memories = [
+            memory
+            for memory in recalled_all
+            if str(memory.get("memory_id") or memory.get("provenance_hash") or "") in continuity_ids
+        ]
         recent_path = recalled_all[-5:] if recalled_all else []
         long_term_memories = recalled_all[:-5] if recalled_all else []
         stale_refs = [
@@ -428,6 +446,7 @@ class ClaireRuntime:
             decision={"finished": q_packet["finished"], "clarification_required": q_packet["clarification_required"]},
             result_summary={"confidence": q_packet["confidence"], "candidate_lane": q_packet["candidate_lane"]},
             payload={"q_insight": q_packet},
+            evidence_refs=q_packet.get("are_record_refs") or [],
             parent_event_ids=[recognition_event["event_id"]],
         )
         clarification_blocks = bool(
@@ -1907,7 +1926,7 @@ class ClaireRuntime:
                 {
                     "memory_id": f"original_are_{item.get('sha') or item.get('line_number')}",
                     "timestamp_ns": int(item.get("ts") or 0) * 1_000_000_000,
-                    "lane": "ORIGINAL_ARE",
+                    "lane": original_are_record_lane(str(item.get("text") or "")),
                     "memory_scope": "PUBLIC",
                     "summary": str(item.get("text") or "")[:500],
                     "raw_excerpt": str(item.get("text") or "")[:2000],
@@ -1955,9 +1974,13 @@ class ClaireRuntime:
         self,
         user_id: str,
         authority_capsule: AuthorityCapsule,
+        *,
+        lane_result: LaneResult,
+        query: str,
+        entity_names: list[str],
         limit: int = 80,
-    ) -> list[dict[str, Any]]:
-        """Read compact public continuity facts through the configured ARE interface."""
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Read continuity facts through the same scope and lane gates as normal ARE recall."""
         allowed_scopes = {str(scope).upper() for scope in authority_capsule.allowed_memory_scopes or ["PUBLIC"]}
         if self.use_original_are:
             history = read_original_are_history(limit=limit)
@@ -1965,7 +1988,7 @@ class ClaireRuntime:
                 {
                     "memory_id": f"original_are_{item.get('sha') or item.get('line_number')}",
                     "timestamp_ns": int(item.get("ts") or 0) * 1_000_000_000,
-                    "lane": "SESSION",
+                    "lane": original_are_record_lane(str(item.get("text") or "")),
                     "memory_scope": "PUBLIC",
                     "summary": str(item.get("text") or "")[:2000],
                     "source": "original_are",
@@ -1976,12 +1999,21 @@ class ClaireRuntime:
             ]
         else:
             memories = (self.memory_store or AREMemoryStore()).recall_for_lanes(user_id, ["SESSION"], limit=limit)
-        return [
-            memory
-            for memory in memories
-            if str(memory.get("memory_scope") or "PUBLIC").upper() in allowed_scopes
-            and "continuity_fact:" in str(memory.get("summary") or "")
-        ][-limit:]
+        admitted: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+        for memory in memories:
+            memory_id = memory.get("memory_id")
+            if str(memory.get("memory_scope") or "PUBLIC").upper() not in allowed_scopes:
+                rejected.append({"memory_id": memory_id, "lane": memory.get("lane"), "reason": "memory_scope_not_allowed"})
+                continue
+            if "continuity_fact:" not in str(memory.get("summary") or ""):
+                continue
+            allowed, reason = self._memory_supports_active_query(query, lane_result, memory, entity_names)
+            if not allowed:
+                rejected.append({"memory_id": memory_id, "lane": memory.get("lane"), "reason": reason})
+                continue
+            admitted.append(memory)
+        return admitted[-limit:], rejected
 
     def _dedupe_memories(self, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen: set[str] = set()
@@ -2013,7 +2045,7 @@ class ClaireRuntime:
         memory_lane = str(memory.get("lane") or "")
         lane = str(lane_result.lane or "")
         allowed = set(lane_result.allowed_memory_lanes or [lane])
-        if memory_lane not in allowed and memory_lane not in {"GENERAL_CHAT", "SESSION", "ORIGINAL_ARE"}:
+        if memory_lane not in allowed and memory_lane not in {"GENERAL_CHAT", "SESSION"}:
             return False, "lane_not_allowed"
 
         text = " ".join(str(memory.get(key) or "") for key in ("summary", "raw_excerpt", "source", "lane")).lower()

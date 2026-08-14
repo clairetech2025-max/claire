@@ -372,9 +372,15 @@ def recognition_packet_from_are(
     word_count = len(str(query or "").split())
     unresolved = []
     if word_count <= 12 or re.match(r"^\s*(that|this|it|those|them)\b", lowered):
-        unresolved = [word for word in ["that", "this", "it", "those", "them"] if f" {word} " in f" {lowered} "]
-    if re.search(r"\bthis\s+is\s+[a-z0-9]", lowered):
+        query_tokens = set(re.findall(r"[a-z0-9']+", lowered))
+        unresolved = [word for word in ["that", "this", "it", "those", "them"] if word in query_tokens]
+    supplied_demonstrative = bool(
+        re.search(r"\b(?:remember|record|save|note)\s+(?:this|that)\s*:", lowered)
+        or re.search(r"\b(?:this|that)\s+is\s+[a-z0-9]", lowered)
+    )
+    if supplied_demonstrative:
         unresolved = [word for word in unresolved if word != "this"]
+        unresolved = [word for word in unresolved if word != "that"]
     temporal_resolved = (temporal_resolution or {}).get("status") == "resolved"
     if temporal_resolved and any(marker in lowered for marker in ["moved it", "changed it", "rescheduled it", "they moved it"]):
         unresolved = [word for word in unresolved if word != "it"]
@@ -423,6 +429,7 @@ def q_insight_packet(
     return {
         "finished": not fragment,
         "fragment": fragment,
+        "are_record_refs": list(recognition.get("are_record_refs") or []),
         "intent": "question" if "?" in str(query or "") or any(x in lowered for x in ["what", "why", "how", "who"]) else "instruction",
         "ambiguity": "temporal" if temporal_ambiguous else "unresolved_reference" if recognition.get("unresolved_references") else "none",
         "requested_action": "answer",

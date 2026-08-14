@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -91,22 +92,20 @@ TRADING_STATION_MARKERS = [
 
 
 def _contains(text: str, markers: list[str]) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
     for marker in markers:
         marker = str(marker or "").lower().strip()
         if not marker:
             continue
-        if " " not in marker and len(marker) <= 4:
-            import re
-
-            if re.search(rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])", text):
-                return True
-        elif marker in text:
+        pattern = re.escape(marker).replace(r"\ ", r"\s+")
+        if re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", normalized):
             return True
     return False
 
 
 def classify_lane(message: str, recent_context: list[dict[str, Any]] | None = None) -> LaneResult:
-    text = " ".join(str(message or "").lower().split())
+    raw_text = " ".join(str(message or "").split())
+    text = raw_text.lower()
     recent_context = recent_context or []
 
     if not text:
@@ -187,7 +186,12 @@ def classify_lane(message: str, recent_context: list[dict[str, Any]] | None = No
             "legal_precision",
         )
 
-    if _contains(text, ["architecture", "runtime", "are", "analog recall", "gyro", "q insight", "sentinel", "diode", "writebarrier", "trace", "pipeline", "repository"]):
+    explicit_are_term = bool(
+        re.search(r"(?<![A-Za-z0-9])ARE(?![A-Za-z0-9])", raw_text)
+        or re.search(r"\bare\s+(?:architecture|continuity|engine|memory|module|recall|record|runtime|system)\b", text)
+        or re.search(r"\b(?:define|explain|what\s+is)\s+are\b", text)
+    )
+    if explicit_are_term or _contains(text, ["architecture", "runtime", "analog recall", "gyro", "q insight", "sentinel", "diode", "writebarrier", "trace", "pipeline", "repository"]):
         return LaneResult(
             "CLAIRE_SYSTEM_ARCHITECTURE",
             0.78,

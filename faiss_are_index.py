@@ -115,6 +115,12 @@ def default_record_text(record: dict[str, Any]) -> str:
     return " ".join(str(record.get(key) or "") for key in ("summary", "raw_excerpt", "text", "source", "lane"))
 
 
+def original_are_record_lane(text: str) -> str:
+    """Recover the governed lane persisted in an Original ARE record."""
+    match = re.search(r"(?im)^lane=([A-Z][A-Z0-9_]*)\s*$", str(text or ""))
+    return match.group(1).upper() if match else "UNKNOWN"
+
+
 def original_are_records(memory_path: str | Path, *, limit: int | None = None) -> list[dict[str, Any]]:
     path = Path(memory_path)
     if not path.exists():
@@ -141,7 +147,7 @@ def original_are_records(memory_path: str | Path, *, limit: int | None = None) -
             {
                 "memory_id": f"original_are_{payload.get('sha') or first_line_number + offset}",
                 "timestamp_ns": int(payload.get("ts") or 0) * 1_000_000_000,
-                "lane": "ORIGINAL_ARE",
+                "lane": original_are_record_lane(text),
                 "memory_scope": "PUBLIC",
                 "summary": text[:500],
                 "raw_excerpt": text[:2000],
