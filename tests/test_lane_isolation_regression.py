@@ -206,7 +206,7 @@ def test_recognition_normalizes_punctuation_for_unresolved_references():
 
     supplied = recognition_packet_from_are(
         current_input_ref="hash",
-        query="Remember this: the checkpoint is complete.",
+        query="Remember this new general-chat marker: the checkpoint is complete.",
         memories=[],
         rejected=[],
     )

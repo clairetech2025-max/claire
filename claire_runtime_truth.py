@@ -375,7 +375,7 @@ def recognition_packet_from_are(
         query_tokens = set(re.findall(r"[a-z0-9']+", lowered))
         unresolved = [word for word in ["that", "this", "it", "those", "them"] if word in query_tokens]
     supplied_demonstrative = bool(
-        re.search(r"\b(?:remember|record|save|note)\s+(?:this|that)\s*:", lowered)
+        re.search(r"\b(?:remember|record|save|note)\s+(?:this|that)\b[^?\n]{0,120}:", lowered)
         or re.search(r"\b(?:this|that)\s+is\s+[a-z0-9]", lowered)
     )
     if supplied_demonstrative:
