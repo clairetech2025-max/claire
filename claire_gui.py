@@ -1446,25 +1446,61 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 }
 
 .hero {
-    min-height: 92px;
+    min-height: 250px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
+    justify-content: center;
+    padding: 28px clamp(18px, 6vw, 72px);
+    overflow: hidden;
 }
 
-.hero h1 {
-    margin: 0;
-    font-size: 31px;
-    letter-spacing: 1.2px;
+.claire-identity {
+    width: min(100%, 760px);
+    display: grid;
+    gap: 4px;
+    font-family: "Segoe UI", Tahoma, sans-serif;
+    animation: claireIdentityEnter .7s ease-out both;
 }
 
-.hero p {
-    margin: 6px 0 0 0;
-    color: var(--muted);
-    font-size: 14px;
-    max-width: 760px;
-    line-height: 1.45;
+.claire-acronym-row {
+    display: grid;
+    grid-template-columns: clamp(42px, 7vw, 72px) minmax(0, 1fr);
+    align-items: baseline;
+    line-height: .94;
+}
+
+.claire-acronym-letter {
+    color: #f2fcff;
+    font-size: clamp(36px, 6vw, 64px);
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-shadow: 0 0 10px rgba(19,216,255,.48), 0 0 26px rgba(19,216,255,.16);
+}
+
+.claire-acronym-word {
+    color: #9edbe8;
+    font-size: clamp(17px, 2.5vw, 28px);
+    font-weight: 500;
+    letter-spacing: clamp(.18em, .8vw, .34em);
+    text-transform: uppercase;
+}
+
+.claire-greeting {
+    margin: 20px 0 0 clamp(42px, 7vw, 72px);
+    padding-top: 15px;
+    border-top: 1px solid rgba(19,216,255,.22);
+    color: var(--text);
+    font-size: clamp(15px, 1.8vw, 19px);
+    letter-spacing: .035em;
+}
+
+@keyframes claireIdentityEnter {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .claire-identity { animation: none; }
 }
 
 .logo-wrap img {
@@ -3263,12 +3299,14 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
 <div class="shell">
     <div class="column main-column">
         <div class="panel hero">
-            <div>
-                <h1>CLAIRE</h1>
-                <p>Hi, I’m Claire. I’m here, oriented, and ready to talk.</p>
-            </div>
-            <div class="logo-wrap">
-                <img src="/static/logo.png" alt="Claire Logo" onerror="this.style.display='none';">
+            <div class="claire-identity" aria-label="CLAIRE: Cognizant Lucid Autonomous Iterative Recall Environment">
+                <div class="claire-acronym-row"><span class="claire-acronym-letter">C</span><span class="claire-acronym-word">OGNIZANT</span></div>
+                <div class="claire-acronym-row"><span class="claire-acronym-letter">L</span><span class="claire-acronym-word">UCID</span></div>
+                <div class="claire-acronym-row"><span class="claire-acronym-letter">A</span><span class="claire-acronym-word">UTONOMOUS</span></div>
+                <div class="claire-acronym-row"><span class="claire-acronym-letter">I</span><span class="claire-acronym-word">TERATIVE</span></div>
+                <div class="claire-acronym-row"><span class="claire-acronym-letter">R</span><span class="claire-acronym-word">ECALL</span></div>
+                <div class="claire-acronym-row"><span class="claire-acronym-letter">E</span><span class="claire-acronym-word">NVIRONMENT</span></div>
+                <div class="claire-greeting">Hi, I'm Claire. What's your name?</div>
             </div>
         </div>
 
@@ -3294,7 +3332,6 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
                     <div class="turn-hint" id="turnHint">Enter adds a line. Ctrl+Enter, Send, Done, or saying "over" commits the full turn.</div>
                     <div class="turn-options">
                         <label><input id="silenceAutoCommitToggle" type="checkbox" /> Auto-commit after long silence</label>
-                        <button class="turn-mini-btn" id="playIntroButton" type="button" onclick="playClaireIntroduction()">Play Introduction</button>
                     </div>
                     <div class="turn-metrics" id="turnMetrics">3CRP: 0 fragments merged | 0 premature calls prevented | auto-send off</div>
                 </div>
@@ -3408,7 +3445,6 @@ button.action-btn:hover, .send-btn:hover, .mic-btn:hover {
             <div class="advanced-content">
                 <div class="panel-title">Controls</div>
                 <div class="control-grid">
-                    <button class="action-btn glasses-btn" id="beginHereBtn" type="button">Start Here</button>
                     <button class="action-btn" onclick="checkStatus()">Refresh Status</button>
                     <button class="action-btn" id="clearWorkspaceBtn" type="button">Clear Workspace</button>
                     <button class="action-btn glasses-btn" id="glassesDemoBtn" type="button">ARE Spectacle</button>
@@ -3632,18 +3668,7 @@ Suggested prompts:
 
 Claire now treats the conversation and uploaded documents as one working session.
 She will use session memory, document evidence, and governed recall to answer directly.`;
-const CLAIRE_LANDING_GREETING = `Hi, I’m Claire.
-Cognizant Lucid Autonomous Iterative Recall Environment.
-
-I’m a governed memory-centric intelligence architecture designed around persistent orientation, deterministic recall, and externalized cognition.
-
-Unlike conventional AI systems, I do not rely solely on transient context windows or probabilistic memory approximation.
-
-I operate through the Analog Recall Engine — a structured memory architecture created by Lucius Prime — allowing long-form continuity, governed recall, traceable reasoning, and stable operational identity over time.
-
-You can speak naturally with me, upload documents, explore memory systems, or inspect the architecture directly.
-
-How can I help you today?`;
+const CLAIRE_LANDING_GREETING = `Hi, I'm Claire. What's your name?`;
 const Q_INSIGHT_PAYLOAD = {
     gyro: {
         intent: "architecture_explanation",
