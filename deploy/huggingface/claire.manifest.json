@@ -38,7 +38,8 @@
   "required_secret_names": [
     "NVIDIA_API_KEY",
     "CLAIRE_ARE_HMAC_KEY",
-    "CLAIRE_TRAILLINK_HMAC_KEY"
+    "CLAIRE_TRAILLINK_HMAC_KEY",
+    "CLAIRE_INTERNAL_OPERATOR_TOKEN"
   ],
   "persistent_state": {
     "ARE records": "persistent Space storage when mounted, otherwise demo-only ephemeral",

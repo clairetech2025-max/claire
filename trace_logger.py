@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -23,9 +24,9 @@ def sha_text(text: str) -> str:
 
 
 class TraceLogger:
-    def __init__(self, path: str | Path = TRACE_PATH, db_path: str | Path = TRACE_DB_PATH):
-        self.path = Path(path)
-        self.db_path = Path(db_path)
+    def __init__(self, path: str | Path | None = None, db_path: str | Path | None = None):
+        self.path = Path(path or os.environ.get("CLAIRE_TRACE_PATH") or TRACE_PATH)
+        self.db_path = Path(db_path or os.environ.get("CLAIRE_TRACE_DB_PATH") or TRACE_DB_PATH)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()

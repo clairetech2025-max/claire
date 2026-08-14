@@ -208,12 +208,12 @@ class TrustedClock:
 class TemporalEngine:
     def __init__(
         self,
-        path: str | Path = "data/temporal_events.jsonl",
+        path: str | Path | None = None,
         *,
         clock: TrustedClock | None = None,
         default_timezone: str | None = None,
     ) -> None:
-        self.path = Path(path)
+        self.path = Path(path or os.environ.get("CLAIRE_TEMPORAL_STATE_PATH") or "data/temporal_events.jsonl")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.clock = clock or TrustedClock()
         self.default_timezone = default_timezone or os.environ.get("CLAIRE_USER_TIMEZONE") or "America/Los_Angeles"

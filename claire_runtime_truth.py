@@ -107,7 +107,10 @@ class RuntimeTruthSpine:
 
     @classmethod
     def from_env(cls) -> "RuntimeTruthSpine":
-        return cls(os.environ.get("CLAIRE_RUNTIME_TRUTH_SPINE", "data/runtime_truth_spine.jsonl"))
+        return cls(
+            os.environ.get("CLAIRE_RUNTIME_TRUTH_SPINE", "data/runtime_truth_spine.jsonl"),
+            os.environ.get("CLAIRE_RUNTIME_TRUTH_SPINE_DEGRADED", "data/runtime_truth_spine_degraded.jsonl"),
+        )
 
     def append(self, event: RuntimeTruthEvent, *, fail_closed: bool = False) -> dict[str, Any]:
         event = RuntimeTruthEvent(**asdict(event))
