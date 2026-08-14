@@ -148,7 +148,7 @@ def test_decision_and_unresolved_thread_survive_new_runtime_instance():
             "steve",
             "one",
             "We're going to leave Creator Mode alone right now and finish testing CLAIRE.",
-            {"provider_generate": provider()},
+            {"trusted_device": True, "provider_generate": provider()},
         )
         assert first["memory_written"] is True
 
@@ -172,7 +172,7 @@ def test_roadmap_fact_survives_restart_and_new_session():
             "steve",
             "one",
             "We're going to work on Veritas after CLAIRE is stable.",
-            {"provider_generate": provider()},
+            {"trusted_device": True, "provider_generate": provider()},
         )
         seen = {}
 

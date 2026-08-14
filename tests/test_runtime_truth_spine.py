@@ -189,7 +189,10 @@ def test_memory_write_authorization_precedes_durable_commit(monkeypatch):
             "steve",
             "s",
             "Remember this: the architecture checkpoint is memory gate first.",
-            {"provider_generate": lambda messages, config: "Recorded with authorization first."},
+            {
+                "trusted_device": True,
+                "provider_generate": lambda messages, config: "Recorded with authorization first.",
+            },
         )
 
         event_types = [

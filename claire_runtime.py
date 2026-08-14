@@ -621,6 +621,9 @@ class ClaireRuntime:
             lane,
             eligibility,
         )
+        if not authority_decision.trusted:
+            candidate_memory_allowed = False
+            candidate_memory_reason = "Durable memory writes require trusted authority."
         if secret_detected or self.diode.contains_secret(normalized) or self.diode.contains_secret(answer):
             candidate_memory_allowed = False
             candidate_memory_reason = "Sensitive content is not eligible for durable memory."

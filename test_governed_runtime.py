@@ -76,6 +76,37 @@ def test_trusted_device_can_receive_authority_capsule():
     assert "OWNER_ONLY" in verified.allowed_memory_scopes
 
 
+def test_guest_cannot_create_durable_memory():
+    with tempfile.TemporaryDirectory() as tmp:
+        rt = make_runtime(tmp)
+        result = rt.handle_user_message(
+            "guest",
+            "s",
+            "Remember this: phase1_guest_marker is blocked.",
+            {"provider_generate": lambda messages, config: "Acknowledged."},
+        )
+        assert result["authority_role"] == "guest"
+        assert result["memory_written"] is False
+        assert rt.memory_store.recall_project_context("phase1_guest_marker") == []
+
+
+def test_trusted_device_can_create_durable_memory():
+    with tempfile.TemporaryDirectory() as tmp:
+        rt = make_runtime(tmp)
+        result = rt.handle_user_message(
+            "steve",
+            "s",
+            "Remember this: phase1_trusted_marker is durable.",
+            {
+                "trusted_device": True,
+                "provider_generate": lambda messages, config: "Acknowledged.",
+            },
+        )
+        assert result["authority_role"] == "owner"
+        assert result["memory_written"] is True
+        assert len(rt.memory_store.recall_project_context("phase1_trusted_marker")) == 1
+
+
 def test_authority_capsule_expires():
     signer = AuthorityCapsuleSigner("unit-secret")
     capsule = AuthorityCapsule(
