@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "claire-staging",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-09-29",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "containers": [
+    {
+      "class_name": "ClaireContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CLAIRE_CONTAINER",
+        "class_name": "ClaireContainer"
+      }
+    ]
+  },
+  "exports": {
+    "ClaireContainer": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  }
+}
