@@ -25,7 +25,7 @@ permissions:
 
 concurrency:
   group: deploy-claire-cloudflare-staging
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -67,25 +67,16 @@ jobs:
           fi
           npx wrangler deploy --config wrangler.jsonc --containers-rollout=immediate
 
-      - name: Smoke staging URL
+      - name: Smoke staging URLs
         run: |
-          python - <<'PY'
-          import sys
-          import time
-          import urllib.request
-
-          url = "https://claire-staging.clairetech2025.workers.dev/health"
-          last = None
-          for _ in range(30):
-              try:
-                  with urllib.request.urlopen(url, timeout=20) as response:
-                      body = response.read(500).decode("utf-8", "replace")
-                      print(response.status, body)
-                      if 200 <= response.status < 500 and "Failed to start container" not in body:
-                          sys.exit(0)
-              except Exception as exc:
-                  last = exc
-                  print(f"waiting for staging health: {exc}")
-              time.sleep(10)
-          raise SystemExit(f"staging health did not recover: {last}")
-          PY
+          for url in \
+            "https://claire-staging.clairetech2025.workers.dev/health" \
+            "https://clairesystems.ai/runtime/health"; do
+            echo "Checking ${url}"
+            body="$(curl --fail --show-error --silent --location --max-time 30 "$url")"
+            echo "$body"
+            if echo "$body" | grep -q "Failed to start container"; then
+              echo "Container startup error still present at ${url}" >&2
+              exit 1
+            fi
+          done
