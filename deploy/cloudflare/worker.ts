@@ -73,6 +73,9 @@ interface StateHead {
 interface BootSession {
   token: string;
   restored: boolean;
+  // Fingerprint of the vars/secrets the container booted with; a secret
+  // change (e.g. a new CLAIRELLAMA) restarts the container on the next request.
+  envHash?: string;
 }
 
 const HEAD_KEY = "state:head";
@@ -119,6 +122,12 @@ export class ClaireContainer extends Container<Env> {
     return vars;
   }
 
+  private async envFingerprint(): Promise<string> {
+    const env = this.runtimeEnv();
+    const canonical = JSON.stringify(Object.keys(env).sort().map((key) => [key, env[key]]));
+    return sha256Hex(new TextEncoder().encode(canonical));
+  }
+
   override async fetch(request: Request): Promise<Response> {
     await this.ensureRestored();
     if (READ_METHODS.has(request.method) || request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
@@ -139,18 +148,30 @@ export class ClaireContainer extends Container<Env> {
   // ---- restore -----------------------------------------------------------
 
   private async ensureRestored(): Promise<void> {
-    const [state, session, epoch] = await Promise.all([
+    const [state, session, epoch, envHash] = await Promise.all([
       this.getState(),
       this.ctx.storage.get<BootSession>(SESSION_KEY),
       this.ctx.storage.get<number>(EPOCH_KEY),
+      this.envFingerprint(),
     ]);
     const live = state.status === "running" || state.status === "healthy";
     const current = epoch === STATE_EPOCH;
-    if (current && live && session?.restored) return;
-    this.booting ??= (current ? this.bootAndRestore(live) : this.resetAndBoot(live)).finally(() => {
+    const serving = current && live && session?.restored;
+    if (serving && session?.envHash === envHash) return;
+    this.booting ??= (
+      !current ? this.resetAndBoot(live) : serving ? this.restartForNewConfig() : this.bootAndRestore(live)
+    ).finally(() => {
       this.booting = null;
     });
     return this.booting;
+  }
+
+  private async restartForNewConfig(): Promise<void> {
+    // Secrets/vars changed since boot: commit the latest state while the
+    // running container can still export it, then reboot with the new env.
+    await this.commitSnapshot();
+    console.log("runtime configuration changed; restarting container with the new vars/secrets");
+    await this.bootAndRestore(true);
   }
 
   private async resetAndBoot(live: boolean): Promise<void> {
@@ -171,7 +192,8 @@ export class ClaireContainer extends Container<Env> {
       await this.destroy();
     }
     const token = randomToken();
-    await this.ctx.storage.put<BootSession>(SESSION_KEY, { token, restored: false });
+    const envHash = await this.envFingerprint();
+    await this.ctx.storage.put<BootSession>(SESSION_KEY, { token, restored: false, envHash });
     await this.startAndWaitForPorts({
       ports: PORT,
       startOptions: { envVars: this.runtimeEnv(token) },
@@ -194,7 +216,7 @@ export class ClaireContainer extends Container<Env> {
     }
 
     await this.waitForRuntime();
-    await this.ctx.storage.put<BootSession>(SESSION_KEY, { token, restored: true });
+    await this.ctx.storage.put<BootSession>(SESSION_KEY, { token, restored: true, envHash });
     // Capture what boot wrote (ARE acceptance record) as the first commit.
     await this.commitSnapshot();
   }
