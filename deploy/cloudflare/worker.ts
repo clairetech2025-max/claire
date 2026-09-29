@@ -23,8 +23,18 @@ export class ClaireContainer extends Container {
   };
 }
 
+function stripRuntimePrefix(request: Request): Request {
+  const url = new URL(request.url);
+  if (url.pathname === "/runtime") {
+    url.pathname = "/";
+  } else if (url.pathname.startsWith("/runtime/")) {
+    url.pathname = url.pathname.slice("/runtime".length) || "/";
+  }
+  return new Request(url.toString(), request);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    return getContainer(env.CLAIRE_CONTAINER, "claire-staging").fetch(request);
+    return getContainer(env.CLAIRE_CONTAINER, "claire-staging").fetch(stripRuntimePrefix(request));
   },
 };
