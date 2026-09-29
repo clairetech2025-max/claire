@@ -62,6 +62,11 @@ interface BootSession {
 
 const HEAD_KEY = "state:head";
 const SESSION_KEY = "state:session";
+const EPOCH_KEY = "state:epoch";
+// Bump to discard all durable edge state once, e.g. after rotating
+// CLAIRE_TRAILLINK_HMAC_KEY (older Truth Spine records would no longer verify).
+// 2: CLAIRE_TRAILLINK_HMAC_KEY set for the first time (2026-09-29).
+const STATE_EPOCH = 2;
 const chunkKey = (gen: number, index: number) => `state:${gen}:${index}`;
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -119,16 +124,29 @@ export class ClaireContainer extends Container<Env> {
   // ---- restore -----------------------------------------------------------
 
   private async ensureRestored(): Promise<void> {
-    const [state, session] = await Promise.all([
+    const [state, session, epoch] = await Promise.all([
       this.getState(),
       this.ctx.storage.get<BootSession>(SESSION_KEY),
+      this.ctx.storage.get<number>(EPOCH_KEY),
     ]);
     const live = state.status === "running" || state.status === "healthy";
-    if (live && session?.restored) return;
-    this.booting ??= this.bootAndRestore(live).finally(() => {
+    const current = epoch === STATE_EPOCH;
+    if (current && live && session?.restored) return;
+    this.booting ??= (current ? this.bootAndRestore(live) : this.resetAndBoot(live)).finally(() => {
       this.booting = null;
     });
     return this.booting;
+  }
+
+  private async resetAndBoot(live: boolean): Promise<void> {
+    if (live) await this.destroy(); // drop the old container before it can commit again
+    const keys = [...(await this.ctx.storage.list({ prefix: "state:" })).keys()];
+    for (let i = 0; i < keys.length; i += PUT_BATCH) {
+      await this.ctx.storage.delete(keys.slice(i, i + PUT_BATCH));
+    }
+    await this.ctx.storage.put(EPOCH_KEY, STATE_EPOCH);
+    console.log(`edge state reset to epoch ${STATE_EPOCH}; ${keys.length} keys discarded`);
+    await this.bootAndRestore(false);
   }
 
   private async bootAndRestore(live: boolean): Promise<void> {
