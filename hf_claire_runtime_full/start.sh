@@ -37,9 +37,11 @@ mkdir -p \
   "$CLAIRE_RUNTIME_DATA_DIR/silo_data"
 
 # Do not copy Azure .env, private ARE memory, DBs, logs, generated indexes, or legal files into this container.
-# Secrets must be supplied through Hugging Face Space secrets by name only.
+# Secrets must be supplied through deployment secrets by name only.
 
-: "${NVIDIA_API_KEY:?NVIDIA_API_KEY Hugging Face Space secret is required}"
+if [[ "$CLAIRE_PROVIDER" == "nim" && -z "${NVIDIA_API_KEY:-}" && -z "${CLAIRE_GO_UPSTREAM_URL:-}" ]]; then
+  echo "CLAIRE provider credentials are not configured; starting in degraded public-demo mode." >&2
+fi
 
 /app/bin/claire-go-provider &
 go_pid=$!
