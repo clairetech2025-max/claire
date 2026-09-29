@@ -1,0 +1,91 @@
+name: Deploy CLAIRE Cloudflare Staging
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "hf_claire_runtime_full/**"
+      - "claire/**"
+      - "claire_are/**"
+      - "claire_continuity/**"
+      - "claire_core/**"
+      - "configs/**"
+      - "veritas_legal/**"
+      - "*.py"
+      - "main.go"
+      - "pyproject.toml"
+      - "deploy/huggingface/claire.manifest.json"
+      - "deploy/cloudflare/**"
+      - ".github/workflows/deploy-cloudflare-staging.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-claire-cloudflare-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out CLAIRE
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Build Cloudflare deployment tree
+        run: |
+          python scripts/deploy/build_hf_tree.py deploy/huggingface/claire.manifest.json /tmp/claire-cloudflare-build
+          cp deploy/cloudflare/worker.ts /tmp/claire-cloudflare-build/worker.ts
+          cp deploy/cloudflare/wrangler.jsonc /tmp/claire-cloudflare-build/wrangler.jsonc
+
+      - name: Install Cloudflare deployment dependencies
+        working-directory: /tmp/claire-cloudflare-build
+        run: |
+          npm init -y
+          npm install --save-dev wrangler @cloudflare/containers
+
+      - name: Deploy staging Worker and container
+        working-directory: /tmp/claire-cloudflare-build
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "CLOUDFLARE_API_TOKEN GitHub secret is required" >&2
+            exit 2
+          fi
+          npx wrangler deploy --config wrangler.jsonc --containers-rollout=immediate
+
+      - name: Smoke staging URL
+        run: |
+          python - <<'PY'
+          import sys
+          import time
+          import urllib.request
+
+          url = "https://claire-staging.clairetech2025.workers.dev/health"
+          last = None
+          for _ in range(30):
+              try:
+                  with urllib.request.urlopen(url, timeout=20) as response:
+                      body = response.read(500).decode("utf-8", "replace")
+                      print(response.status, body)
+                      if 200 <= response.status < 500 and "Failed to start container" not in body:
+                          sys.exit(0)
+              except Exception as exc:
+                  last = exc
+                  print(f"waiting for staging health: {exc}")
+              time.sleep(10)
+          raise SystemExit(f"staging health did not recover: {last}")
+          PY
