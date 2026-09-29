@@ -13,10 +13,26 @@
   "observability": {
     "enabled": true
   },
+  // Must match the Hugging Face Space variables so both twins resolve the same
+  // configuration. Anything left unset falls through to start.sh defaults,
+  // exactly as on HF. Secrets are set with `wrangler secret put` (see DEPLOY.md).
+  "vars": {
+    "CLAIRE_PROVIDER": "llama",
+    "CLAIRE_LOCAL_MODEL_ID": "meta-llama/Llama-3.1-8B-Instruct",
+    "CLAIRE_LLAMA_URL": "https://router.huggingface.co/v1/chat/completions",
+    "CLAIRE_PROVIDER_MAX_TOKENS": "560",
+    "CLAIRE_PROVIDER_TIMEOUT_SECONDS": "35",
+    "CLAIRE_CORE_ENABLED": "false",
+    "CLAIRE_CORE_SHADOW_MODE": "true",
+    "CLAIRE_USER_TIMEZONE": "America/Los_Angeles"
+  },
+  // ./Dockerfile is the Space's Dockerfile: build_cloudflare_tree.sh stages the
+  // Space tree and these files into one directory before `wrangler deploy`.
   "containers": [
     {
       "class_name": "ClaireContainer",
       "image": "./Dockerfile",
+      "instance_type": "standard-1",
       "max_instances": 1
     }
   ],

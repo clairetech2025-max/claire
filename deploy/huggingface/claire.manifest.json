@@ -33,9 +33,13 @@
     "CLAIRE_CORE_ENABLED",
     "CLAIRE_CORE_SHADOW_MODE",
     "CLAIRE_ARE_ROOT",
-    "CLAIRE_USER_TIMEZONE"
+    "CLAIRE_USER_TIMEZONE",
+    "CLAIRE_LOCAL_MODEL_ID",
+    "CLAIRE_LLAMA_URL",
+    "CLAIRE_PROVIDER_MAX_TOKENS"
   ],
   "required_secret_names": [
+    "CLAIRELLAMA",
     "NVIDIA_API_KEY",
     "CLAIRE_ARE_HMAC_KEY",
     "CLAIRE_TRAILLINK_HMAC_KEY",
@@ -45,7 +49,8 @@
     "ARE records": "persistent Space storage when mounted, otherwise demo-only ephemeral",
     "Truth Spine records": "persistent Space storage when mounted, otherwise demo-only ephemeral",
     "Ember handoffs": "persistent Space storage when mounted, otherwise demo-only ephemeral",
-    "uploaded evidence": "prohibited in public demo Space by default"
+    "uploaded evidence": "prohibited in public demo Space by default",
+    "Cloudflare edge twin": "CLAIRE_RUNTIME_DATA_DIR snapshot committed to the ClaireContainer Durable Object (SQLite) after every turn and restored before boot (state_sync.py)"
   },
   "exclude": [
     ".env",
