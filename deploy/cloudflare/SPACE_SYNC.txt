@@ -1,3 +1,3 @@
-Hugging Face Space commit the edge twin was last redeployed for: 81349ae
-(Stop CLAIRE saying a video is on her TV when none played; also brings over c11d63b, 2542e25, a78a17f TV video search and honesty fixes, 27435ad, e6ec4ee and 4bd287c CLAIRE TV boards and Creator Mode TV terminal.)
+Hugging Face Space commit the edge twin was last redeployed for: 9cea79a
+(Keep a playing video on CLAIRE's TV and tidy what she says about it; also brings over 2babc79, which lets her find and play a video when asked about a topic.)
 The workflow builds from the live Space, not from this file; changing it just triggers a redeploy.
