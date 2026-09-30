@@ -1,3 +1,3 @@
-Hugging Face Space commit the edge twin was last redeployed for: 0547f69
-(Keep CLAIRE's TV clean and let her clear it in plain words; builds on 9cea79a, which keeps a playing video on her TV.)
+Hugging Face Space commit the edge twin was last redeployed for: d4df773
+(Let CLAIRE read documents uploaded in the same conversation; builds on 0547f69, which keeps her TV clean.)
 The workflow builds from the live Space, not from this file; changing it just triggers a redeploy.
