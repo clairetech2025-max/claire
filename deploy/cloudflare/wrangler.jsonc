@@ -13,15 +13,16 @@
   "observability": {
     "enabled": true
   },
-  // Must match the Hugging Face Space variables so both twins resolve the same
-  // configuration. Anything left unset falls through to start.sh defaults,
+  // The edge twin runs Llama 3.3 70B on Cloudflare Workers AI (key: CLOUDFLARE_AI_TOKEN);
+  // the Hugging Face Space keeps its own model. Otherwise these match the Space
+  // variables so both twins resolve the same configuration. Anything left unset falls through to start.sh defaults,
   // exactly as on HF. Secrets are set with `wrangler secret put` (see DEPLOY.md).
   "vars": {
     "CLAIRE_PROVIDER": "llama",
-    "CLAIRE_LOCAL_MODEL_ID": "meta-llama/Llama-3.1-8B-Instruct",
-    "CLAIRE_LLAMA_URL": "https://router.huggingface.co/v1/chat/completions",
+    "CLAIRE_LOCAL_MODEL_ID": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    "CLAIRE_LLAMA_URL": "https://api.cloudflare.com/client/v4/accounts/7b88f8000cd530c22372429f814aff67/ai/v1/chat/completions",
     "CLAIRE_PROVIDER_MAX_TOKENS": "560",
-    "CLAIRE_PROVIDER_TIMEOUT_SECONDS": "35",
+    "CLAIRE_PROVIDER_TIMEOUT_SECONDS": "60",
     "CLAIRE_CORE_ENABLED": "false",
     "CLAIRE_CORE_SHADOW_MODE": "true",
     "CLAIRE_USER_TIMEZONE": "America/Los_Angeles"

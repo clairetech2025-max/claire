@@ -38,6 +38,7 @@ const FORWARDED_SECRETS = [
   "CLAIRE_GOOGLE_OAUTH_TOKEN_JSON",
   "CLAIRE_GOOGLE_SERVICE_ACCOUNT_JSON",
   "YOUTUBE_API_KEY", // lets CLAIRE search YouTube for videos to play on her TV
+  "CLOUDFLARE_AI_TOKEN", // Workers AI key for the edge twin's model (see CLAIRE_LLAMA_URL)
 ] as const;
 const FORWARDED_VARS = [
   "CLAIRE_PROVIDER",
