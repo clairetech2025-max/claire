@@ -1,3 +1,3 @@
-Hugging Face Space commit the edge twin was last redeployed for: 12f22be
-(Runs Llama 3.3 70B on Cloudflare Workers AI; includes bd914b9, which keeps Claire's component design private.)
+Hugging Face Space commit the edge twin was last redeployed for: b0a1d4d
+(Adds the creator's YouTube demo library to Claire's TV, her new introduction, and the ?guest=cloudflare welcome.)
 The workflow builds from the live Space, not from this file; changing it just triggers a redeploy.
