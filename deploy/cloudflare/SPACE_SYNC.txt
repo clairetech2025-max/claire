@@ -1,3 +1,3 @@
-Hugging Face Space commit the edge twin was last redeployed for: 73e32b1
-(Music intro, spoken greeting, Cloudflare results, works inside the clairesystems.ai/cloudflare portal.)
+Hugging Face Space commit the edge twin was last redeployed for: 1fbfbf3
+(Claire inside the clairesystems.ai/cloudflare portal: answers after the intro, voice via the portal.)
 The workflow builds from the live Space, not from this file; changing it just triggers a redeploy.
