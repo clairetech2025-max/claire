@@ -1,1 +1,2 @@
 Sync from Hugging Face Space Blackstormhorse/CLAIRE_Control_Interface at a0c1420 (2026-10-03): Claire gives Steve's contact for licensing/evaluation questions.
+Sync from HF Space at 74eccd6 (2026-10-04): CLAIRE TV default video fixed (correct NVIDIA eval deck video, start 2:27) and embed honors start time.
